@@ -20,6 +20,9 @@ Thumbs.db
 # Data (large CSVs – download on demand instead)
 data/*.csv
 
+# Runtime logs / status files
+logs/
+
 # Secrets / local config
 .env
 *.env

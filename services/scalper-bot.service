@@ -1,14 +1,17 @@
 [Unit]
 Description=Gold Scalper Live Trading Bot
-After=network.target docker.service
-Wants=docker.service
+After=network-online.target docker.service
+Wants=network-online.target docker.service
 
 [Service]
 Type=simple
 User=root
 WorkingDirectory=/root/scalper
 Environment=PATH=/root/scalper/mt5env/bin:/usr/local/bin:/usr/bin:/bin
-ExecStart=/root/scalper/mt5env/bin/python /root/scalper/run.py
+# Wait for the MT5 Docker container / RPyC bridge before starting the engine.
+# The engine itself also retries with backoff if the bridge drops later.
+ExecStartPre=/root/scalper/mt5env/bin/python /root/scalper/wait_for_mt5.py --timeout 180
+ExecStart=/root/scalper/mt5env/bin/python -u /root/scalper/run.py
 Restart=always
 RestartSec=10
 StandardOutput=journal

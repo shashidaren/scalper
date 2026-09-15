@@ -2,7 +2,10 @@ import json
 from datetime import datetime, date
 from pathlib import Path
 
-LOG_DIR = Path("logs")
+# Anchor logs to the repository directory (not the process CWD) so logs are
+# always in <repo>/logs no matter where the bot is started from.
+BASE_DIR = Path(__file__).resolve().parent
+LOG_DIR = BASE_DIR / "logs"
 LOG_DIR.mkdir(exist_ok=True)
 
 TRADES_FILE = LOG_DIR / "trades.jsonl"
@@ -26,7 +29,7 @@ def log_system(level: str, message: str):
         "level": level.upper(),
         "message": message
     }
-    print(f"[{entry['time']}] [{entry['level']}] {message}")
+    print(f"[{entry['time']}] [{entry['level']}] {message}", flush=True)
     with open(SYSTEM_FILE, "a") as f:
         f.write(json.dumps(entry) + "\n")
 
@@ -37,7 +40,7 @@ def log_trade(event: str, data: dict):
         "event": event,
         **data
     }
-    print(f"[{entry['time']}] TRADE {event.upper()}: {data}")
+    print(f"[{entry['time']}] TRADE {event.upper()}: {data}", flush=True)
     with open(TRADES_FILE, "a") as f:
         f.write(json.dumps(entry) + "\n")
 
@@ -126,7 +129,8 @@ def update_live_status(
     spread: int = 0,
     positions: list = None,
     connected: bool = True,
-    error: str = None
+    error: str = None,
+    mode: str = None
 ):
     """Write full live market + account snapshot for the dashboard."""
     status = {
@@ -139,6 +143,7 @@ def update_live_status(
         "ask": ask,
         "spread": spread,
         "positions": positions or [],
+        "mode": mode,
         "updated_at": _now()
     }
     with open(LIVE_STATUS_FILE, "w") as f:
@@ -157,6 +162,7 @@ def get_live_status() -> dict:
         "ask": 0.0,
         "spread": 0,
         "positions": [],
+        "mode": None,
         "updated_at": None
     }
     if not LIVE_STATUS_FILE.exists():

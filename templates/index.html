@@ -123,7 +123,7 @@
     </div>
 
     <div class="card">
-      <h2>Balance / Equity</h2>
+      <h2>Balance / Equity{% if live.mode == "FORWARD_TEST" %} <span style="color:#f59e0b">(PAPER)</span>{% endif %}</h2>
       <div class="value">${{ "%.2f"|format(live.balance or 0) }}</div>
       <div style="color:var(--muted)">Equity: ${{ "%.2f"|format(live.equity or 0) }}</div>
     </div>
