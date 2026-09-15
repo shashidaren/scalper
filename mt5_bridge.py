@@ -63,7 +63,9 @@ class MT5Bridge:
         # 2) RPyC connect with a bounded per-request timeout so a dead or hung
         #    server can never wedge the engine forever. MasterService is the
         #    client-side peer for the classic (SlaveService) server and gives
-        #    us the conn.modules namespace.
+        #    us the conn.modules namespace. The config mirrors what
+        #    rpyc.classic.connect's ClassicService enables (numpy arrays and
+        #    friends cross the wire pickled, e.g. copy_rates_from_pos).
         try:
             self.conn = rpyc_connect(
                 config.HOST,
@@ -71,6 +73,14 @@ class MT5Bridge:
                 service=MasterService,
                 config={
                     "sync_request_timeout": getattr(config, "RPC_TIMEOUT_SECONDS", 30),
+                    "allow_all_attrs": True,
+                    "allow_pickle": True,
+                    "allow_getattr": True,
+                    "allow_setattr": True,
+                    "allow_delattr": True,
+                    "import_custom_exceptions": True,
+                    "instantiate_custom_exceptions": True,
+                    "instantiate_oldstyle_exceptions": True,
                 },
                 keepalive=True,
             )
@@ -123,7 +133,10 @@ class MT5Bridge:
             "H1": self.mt5.TIMEFRAME_H1
         }
         tf = tf_map.get(config.TIMEFRAME, self.mt5.TIMEFRAME_M5)
-        return self.mt5.copy_rates_from_pos(config.SYMBOL, tf, 0, count)
+        raw_rates = self.mt5.copy_rates_from_pos(config.SYMBOL, tf, 0, count)
+        # Pull the numpy array across as a local object (same pattern as
+        # fetch_data.py); a raw netref would force per-element remote calls.
+        return rpyc.classic.obtain(raw_rates)
 
     def has_open_position(self):
         positions = self.mt5.positions_get(symbol=config.SYMBOL)

@@ -72,6 +72,9 @@ class PaperAccount:
         if self.position:
             return None
         volume = float(volume if volume is not None else config.LOT_SIZE)
+        price = float(price)
+        sl_dist = float(sl_dist)
+        tp_dist = float(tp_dist)
         if side == "BUY":
             sl, tp = round(price - sl_dist, 2), round(price + tp_dist, 2)
         else:
