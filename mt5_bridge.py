@@ -27,18 +27,17 @@ class MT5Bridge:
     def get_symbol_info(self):
         return self.mt5.symbol_info(config.SYMBOL)
 
-    def get_rates(self, count=100):
+    def get_rates(self, count=250):
         tf_map = {
             "M1": self.mt5.TIMEFRAME_M1,
             "M5": self.mt5.TIMEFRAME_M5,
             "M15": self.mt5.TIMEFRAME_M15,
             "H1": self.mt5.TIMEFRAME_H1
         }
-        tf = tf_map.get(config.TIMEFRAME, self.mt5.TIMEFRAME_M1)
+        tf = tf_map.get(config.TIMEFRAME, self.mt5.TIMEFRAME_M5)
         return self.mt5.copy_rates_from_pos(config.SYMBOL, tf, 0, count)
 
     def has_open_position(self):
-        """Returns True if this bot already has an active trade open."""
         positions = self.mt5.positions_get(symbol=config.SYMBOL)
         if positions:
             for pos in positions:
@@ -46,8 +45,8 @@ class MT5Bridge:
                     return True
         return False
 
-    def open_trade(self, signal):
-        """Executes market trade with proper SL and TP."""
+    def open_trade(self, signal, sl_dist, tp_dist):
+        """Executes market trade using dynamic ATR-based SL/TP distances."""
         tick = self.get_live_tick()
         sym_info = self.get_symbol_info()
 
@@ -55,19 +54,18 @@ class MT5Bridge:
             print("[ERROR] Market data unavailable for trade execution.")
             return None
 
-        point = sym_info.point
         digits = sym_info.digits
 
         if signal == "BUY":
             price = tick.ask
             order_type = self.mt5.ORDER_TYPE_BUY
-            sl = round(price - (config.SL_POINTS * point), digits)
-            tp = round(price + (config.TP_POINTS * point), digits)
+            sl = round(price - sl_dist, digits)
+            tp = round(price + tp_dist, digits)
         elif signal == "SELL":
             price = tick.bid
             order_type = self.mt5.ORDER_TYPE_SELL
-            sl = round(price + (config.SL_POINTS * point), digits)
-            tp = round(price - (config.TP_POINTS * point), digits)
+            sl = round(price + sl_dist, digits)
+            tp = round(price - tp_dist, digits)
         else:
             return None
 
@@ -81,7 +79,7 @@ class MT5Bridge:
             "tp": float(tp),
             "deviation": 20,
             "magic": config.MAGIC_NUMBER,
-            "comment": "Gold Scalper",
+            "comment": "Gold Scalper v5",
             "type_time": self.mt5.ORDER_TIME_GTC,
             "type_filling": self.mt5.ORDER_FILLING_IOC,
         }

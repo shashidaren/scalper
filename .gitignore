@@ -1,0 +1,26 @@
+# Byte-compiled / cache
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+
+# Virtual environments
+.venv/
+venv/
+env/
+mt5env/
+
+# IDE / OS
+.idea/
+.vscode/
+*.swp
+.DS_Store
+Thumbs.db
+
+# Data (large CSVs – download on demand instead)
+data/*.csv
+
+# Secrets / local config
+.env
+*.env
+credentials*
