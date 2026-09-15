@@ -5,7 +5,7 @@ from mt5_bridge import MT5Bridge
 from strategy import ScalpStrategy
 from logger import (
     log_system, log_trade, get_today_stats,
-    update_connection_status
+    update_connection_status, update_live_status
 )
 
 def main():
@@ -60,15 +60,15 @@ def main():
                 if not tick or not sym or not acc:
                     missing_data_count += 1
                     log_system("WARNING", f"Market data temporarily unavailable (count={missing_data_count})")
+                    update_live_status(connected=False, error="Market data temporarily unavailable")
 
-                    # Only treat as hard error after several consecutive misses
                     if missing_data_count >= 5:
                         raise ConnectionError("Market data unavailable for too long")
 
                     time.sleep(config.RETRY_SLEEP_SECONDS)
                     continue
 
-                # Data is good → reset missing counter
+                # Data is good
                 missing_data_count = 0
                 last_tick_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
@@ -80,6 +80,41 @@ def main():
                     except Exception:
                         uptime = 0
 
+                # Collect open positions
+                positions = []
+                try:
+                    raw_positions = bridge.mt5.positions_get(symbol=config.SYMBOL)
+                    if raw_positions:
+                        for p in raw_positions:
+                            if p.magic == config.MAGIC_NUMBER:
+                                positions.append({
+                                    "ticket": p.ticket,
+                                    "type": "BUY" if p.type == 0 else "SELL",
+                                    "volume": float(p.volume),
+                                    "price_open": float(p.price_open),
+                                    "sl": float(p.sl),
+                                    "tp": float(p.tp),
+                                    "profit": float(p.profit),
+                                    "time": datetime.fromtimestamp(p.time).strftime("%Y-%m-%d %H:%M:%S")
+                                })
+                except Exception:
+                    positions = []
+
+                spread_points = round((tick.ask - tick.bid) / sym.point)
+
+                # Write full live status for dashboard (no concurrent MT5 needed)
+                update_live_status(
+                    balance=float(acc.balance),
+                    equity=float(acc.equity),
+                    margin_free=float(getattr(acc, "margin_free", 0) or 0),
+                    bid=float(tick.bid),
+                    ask=float(tick.ask),
+                    spread=spread_points,
+                    positions=positions,
+                    connected=True,
+                    error=None
+                )
+
                 update_connection_status(
                     connected=True,
                     reconnect_count=reconnect_count,
@@ -88,8 +123,6 @@ def main():
                     last_error=None,
                     uptime_seconds=uptime
                 )
-
-                spread_points = round((tick.ask - tick.bid) / sym.point)
 
                 log_system("INFO",
                     f"Balance: ${acc.balance:.2f} | Equity: ${acc.equity:.2f} | "
@@ -151,8 +184,8 @@ def main():
                     last_error=str(e),
                     uptime_seconds=0
                 )
+                update_live_status(connected=False, error=str(e))
 
-                # Force reconnect after repeated hard failures
                 if consecutive_errors >= 3:
                     log_system("WARNING", "Multiple hard errors – forcing reconnect")
                     try:
@@ -182,6 +215,7 @@ def main():
             last_error="Engine stopped",
             uptime_seconds=0
         )
+        update_live_status(connected=False, error="Engine stopped")
         log_system("INFO", "Engine stopped")
 
 if __name__ == "__main__":

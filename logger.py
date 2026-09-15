@@ -1,4 +1,3 @@
-import os
 import json
 from datetime import datetime, date
 from pathlib import Path
@@ -10,6 +9,7 @@ TRADES_FILE = LOG_DIR / "trades.jsonl"
 SYSTEM_FILE = LOG_DIR / "system.jsonl"
 DAILY_STATS_FILE = LOG_DIR / "daily_stats.json"
 CONNECTION_STATUS_FILE = LOG_DIR / "connection_status.json"
+LIVE_STATUS_FILE = LOG_DIR / "live_status.json"
 
 
 def _now():
@@ -21,7 +21,6 @@ def _today():
 
 
 def log_system(level: str, message: str):
-    """Log system events (info, warning, error)."""
     entry = {
         "time": _now(),
         "level": level.upper(),
@@ -33,7 +32,6 @@ def log_system(level: str, message: str):
 
 
 def log_trade(event: str, data: dict):
-    """Log trade-related events (signal, entry, exit, skip, etc.)."""
     entry = {
         "time": _now(),
         "event": event,
@@ -45,7 +43,6 @@ def log_trade(event: str, data: dict):
 
 
 def get_today_stats():
-    """Return today's realized PnL and trade count."""
     if not DAILY_STATS_FILE.exists():
         return {"date": _today(), "pnl": 0.0, "trades": 0, "wins": 0, "losses": 0}
 
@@ -65,7 +62,6 @@ def save_daily_stats(stats: dict):
 
 
 def update_daily_pnl(pnl: float, is_win: bool):
-    """Update daily stats after a trade closes."""
     stats = get_today_stats()
     stats["pnl"] += pnl
     stats["trades"] += 1
@@ -85,7 +81,6 @@ def update_connection_status(
     last_error: str = None,
     uptime_seconds: int = 0
 ):
-    """Write current MT5 connection health to a status file."""
     status = {
         "connected": connected,
         "reconnect_count": reconnect_count,
@@ -101,17 +96,76 @@ def update_connection_status(
 
 
 def get_connection_status() -> dict:
+    default = {
+        "connected": False,
+        "reconnect_count": 0,
+        "connected_since": None,
+        "last_tick_time": None,
+        "last_error": None,
+        "uptime_seconds": 0,
+        "updated_at": None
+    }
     if not CONNECTION_STATUS_FILE.exists():
-        return {
-            "connected": False,
-            "reconnect_count": 0,
-            "connected_since": None,
-            "last_tick_time": None,
-            "last_error": None,
-            "uptime_seconds": 0,
-            "updated_at": None
-        }
+        return default
     try:
-        return json.loads(CONNECTION_STATUS_FILE.read_text())
+        data = json.loads(CONNECTION_STATUS_FILE.read_text())
+        for k, v in default.items():
+            if k not in data:
+                data[k] = v
+        return data
     except Exception:
-        return {"connected": False, "reconnect_count": 0}
+        return default
+
+
+def update_live_status(
+    balance: float = 0.0,
+    equity: float = 0.0,
+    margin_free: float = 0.0,
+    bid: float = 0.0,
+    ask: float = 0.0,
+    spread: int = 0,
+    positions: list = None,
+    connected: bool = True,
+    error: str = None
+):
+    """Write full live market + account snapshot for the dashboard."""
+    status = {
+        "connected": connected,
+        "error": error,
+        "balance": balance,
+        "equity": equity,
+        "margin_free": margin_free,
+        "bid": bid,
+        "ask": ask,
+        "spread": spread,
+        "positions": positions or [],
+        "updated_at": _now()
+    }
+    with open(LIVE_STATUS_FILE, "w") as f:
+        json.dump(status, f, indent=2)
+    return status
+
+
+def get_live_status() -> dict:
+    default = {
+        "connected": False,
+        "error": "No data yet",
+        "balance": 0.0,
+        "equity": 0.0,
+        "margin_free": 0.0,
+        "bid": 0.0,
+        "ask": 0.0,
+        "spread": 0,
+        "positions": [],
+        "updated_at": None
+    }
+    if not LIVE_STATUS_FILE.exists():
+        return default
+    try:
+        data = json.loads(LIVE_STATUS_FILE.read_text())
+        for k, v in default.items():
+            if k not in data:
+                data[k] = v
+        return data
+    except Exception:
+        return default
