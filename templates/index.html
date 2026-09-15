@@ -1,0 +1,267 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Gold Scalper Dashboard</title>
+  <meta http-equiv="refresh" content="15" />
+  <style>
+    :root {
+      --bg: #0f172a;
+      --card: #1e293b;
+      --border: #334155;
+      --text: #e2e8f0;
+      --muted: #94a3b8;
+      --green: #22c55e;
+      --red: #ef4444;
+      --blue: #3b82f6;
+      --yellow: #eab308;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: system-ui, -apple-system, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      line-height: 1.5;
+      padding: 1.5rem;
+    }
+    h1 { font-size: 1.5rem; margin-bottom: 0.25rem; }
+    .subtitle { color: var(--muted); font-size: 0.875rem; margin-bottom: 1.5rem; }
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+      gap: 1rem;
+      margin-bottom: 1.5rem;
+    }
+    .card {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 0.75rem;
+      padding: 1.25rem;
+    }
+    .card h2 {
+      font-size: 0.8rem;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      color: var(--muted);
+      margin-bottom: 0.75rem;
+    }
+    .value { font-size: 1.75rem; font-weight: 700; }
+    .value.small { font-size: 1.25rem; }
+    .positive { color: var(--green); }
+    .negative { color: var(--red); }
+    .status-dot {
+      display: inline-block;
+      width: 10px; height: 10px;
+      border-radius: 50%;
+      margin-right: 6px;
+    }
+    .status-dot.on { background: var(--green); }
+    .status-dot.off { background: var(--red); }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 0.875rem;
+    }
+    th, td {
+      padding: 0.5rem 0.75rem;
+      text-align: left;
+      border-bottom: 1px solid var(--border);
+    }
+    th { color: var(--muted); font-weight: 500; }
+    .badge {
+      display: inline-block;
+      padding: 0.15rem 0.5rem;
+      border-radius: 9999px;
+      font-size: 0.75rem;
+      font-weight: 600;
+    }
+    .badge.buy { background: rgba(34,197,94,0.2); color: var(--green); }
+    .badge.sell { background: rgba(239,68,68,0.2); color: var(--red); }
+    .badge.skip { background: rgba(234,179,8,0.2); color: var(--yellow); }
+    .badge.signal { background: rgba(59,130,246,0.2); color: var(--blue); }
+    .log-row { font-family: ui-monospace, monospace; font-size: 0.8rem; }
+    .section-title {
+      font-size: 1.1rem;
+      margin: 1.5rem 0 0.75rem;
+    }
+    .two-col {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 1rem;
+    }
+    @media (max-width: 800px) {
+      .two-col { grid-template-columns: 1fr; }
+    }
+    footer {
+      margin-top: 2rem;
+      color: var(--muted);
+      font-size: 0.8rem;
+      text-align: center;
+    }
+  </style>
+</head>
+<body>
+  <h1>Gold Scalper Dashboard</h1>
+  <p class="subtitle">Last refresh: {{ now }} &nbsp;•&nbsp; Auto-refresh every 15s</p>
+
+  <!-- Top metrics -->
+  <div class="grid">
+    <div class="card">
+      <h2>Connection</h2>
+      {% if live.connected %}
+        <div class="value small"><span class="status-dot on"></span>Connected</div>
+      {% else %}
+        <div class="value small"><span class="status-dot off"></span>Disconnected</div>
+        <div style="color:var(--muted);font-size:0.8rem;margin-top:0.5rem">{{ live.error or "" }}</div>
+      {% endif %}
+    </div>
+
+    <div class="card">
+      <h2>Balance / Equity</h2>
+      <div class="value">${{ "%.2f"|format(live.balance or 0) }}</div>
+      <div style="color:var(--muted)">Equity: ${{ "%.2f"|format(live.equity or 0) }}</div>
+    </div>
+
+    <div class="card">
+      <h2>GOLD Price</h2>
+      <div class="value small">{{ "%.2f"|format(live.bid or 0) }} / {{ "%.2f"|format(live.ask or 0) }}</div>
+      <div style="color:var(--muted)">Spread: {{ live.spread or 0 }} points</div>
+    </div>
+
+    <div class="card">
+      <h2>Today PnL</h2>
+      {% set pnl = stats.pnl or 0 %}
+      <div class="value {% if pnl >= 0 %}positive{% else %}negative{% endif %}">
+        ${{ "%.2f"|format(pnl) }}
+      </div>
+      <div style="color:var(--muted)">
+        {{ stats.trades or 0 }} trades &nbsp;•&nbsp;
+        {{ stats.wins or 0 }}W / {{ stats.losses or 0 }}L
+      </div>
+    </div>
+  </div>
+
+  <!-- Open Positions -->
+  <h2 class="section-title">Open Positions</h2>
+  <div class="card" style="margin-bottom:1.5rem">
+    {% if live.positions %}
+      <table>
+        <thead>
+          <tr>
+            <th>Ticket</th>
+            <th>Side</th>
+            <th>Volume</th>
+            <th>Open</th>
+            <th>SL</th>
+            <th>TP</th>
+            <th>Profit</th>
+            <th>Time</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for p in live.positions %}
+          <tr>
+            <td>{{ p.ticket }}</td>
+            <td><span class="badge {{ p.type|lower }}">{{ p.type }}</span></td>
+            <td>{{ p.volume }}</td>
+            <td>{{ "%.2f"|format(p.price_open) }}</td>
+            <td>{{ "%.2f"|format(p.sl) }}</td>
+            <td>{{ "%.2f"|format(p.tp) }}</td>
+            <td class="{% if p.profit >= 0 %}positive{% else %}negative{% endif %}">
+              ${{ "%.2f"|format(p.profit) }}
+            </td>
+            <td>{{ p.time }}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    {% else %}
+      <div style="color:var(--muted)">No open positions</div>
+    {% endif %}
+  </div>
+
+  <!-- Config snapshot -->
+  <div class="grid" style="margin-bottom:1.5rem">
+    <div class="card">
+      <h2>Config Snapshot</h2>
+      <div style="font-size:0.9rem;color:var(--muted)">
+        Symbol: <strong style="color:var(--text)">{{ config.symbol }}</strong><br/>
+        Lot size: <strong style="color:var(--text)">{{ config.lot_size }}</strong><br/>
+        Max spread: <strong style="color:var(--text)">{{ config.max_spread }}</strong><br/>
+        Daily loss limit: <strong style="color:var(--text)">${{ config.max_daily_loss }}</strong><br/>
+        Max trades/day: <strong style="color:var(--text)">{{ config.max_trades }}</strong>
+      </div>
+    </div>
+  </div>
+
+  <!-- Recent activity -->
+  <div class="two-col">
+    <div>
+      <h2 class="section-title">Recent Trade Events</h2>
+      <div class="card">
+        <table>
+          <thead>
+            <tr><th>Time</th><th>Event</th><th>Details</th></tr>
+          </thead>
+          <tbody>
+            {% for t in trades %}
+            <tr class="log-row">
+              <td>{{ t.time[11:19] if t.time else "" }}</td>
+              <td>
+                {% if t.event == "ENTRY" %}
+                  <span class="badge buy">ENTRY</span>
+                {% elif t.event == "SIGNAL" %}
+                  <span class="badge signal">SIGNAL</span>
+                {% elif t.event == "SKIP" %}
+                  <span class="badge skip">SKIP</span>
+                {% else %}
+                  <span class="badge">{{ t.event }}</span>
+                {% endif %}
+              </td>
+              <td style="color:var(--muted)">
+                {% if t.signal %}{{ t.signal }}{% endif %}
+                {% if t.reason %}{{ t.reason }}{% endif %}
+                {% if t.side %}{{ t.side }}{% endif %}
+                {% if t.spread %}spread={{ t.spread }}{% endif %}
+                {% if t.ticket %}#{{ t.ticket }}{% endif %}
+              </td>
+            </tr>
+            {% else %}
+            <tr><td colspan="3" style="color:var(--muted)">No trade events yet</td></tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <div>
+      <h2 class="section-title">System Log</h2>
+      <div class="card">
+        <table>
+          <thead>
+            <tr><th>Time</th><th>Level</th><th>Message</th></tr>
+          </thead>
+          <tbody>
+            {% for s in system_logs %}
+            <tr class="log-row">
+              <td>{{ s.time[11:19] if s.time else "" }}</td>
+              <td style="color:{% if s.level == 'ERROR' %}var(--red){% elif s.level == 'WARNING' %}var(--yellow){% else %}var(--muted){% endif %}">
+                {{ s.level }}
+              </td>
+              <td style="color:var(--muted)">{{ s.message[:80] }}{% if s.message|length > 80 %}…{% endif %}</td>
+            </tr>
+            {% else %}
+            <tr><td colspan="3" style="color:var(--muted)">No system logs yet</td></tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  <footer>
+    Gold Scalper Dashboard &nbsp;•&nbsp; Auto-refresh 15s &nbsp;•&nbsp; <a href="/api/status" style="color:var(--blue)">JSON API</a>
+  </footer>
+</body>
+</html>
