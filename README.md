@@ -8,7 +8,13 @@ Trading logic, risk controls, and failure handling have been thoroughly tested a
 
 ## Changelog
 
-### 2026-09-15 (later) – Critical Safety Layer
+### 2026-09-15 – Expanded Dependencies + Safety Layer Live
+
+- Expanded `requirements.txt` with libraries needed for the upcoming web dashboard (FastAPI, Uvicorn, Jinja2, etc.) and general analysis (numpy, requests, python-dotenv).
+- Confirmed live engine is operational: connects to MT5, applies spread filter, and logs correctly.
+- Safety features active: daily loss limit, max trades/day, structured logging, auto-reconnect.
+
+### 2026-09-15 – Critical Safety Layer
 
 - Added `logger.py` – structured trade + system logging (JSONL files in `/logs`)
 - Added daily loss limit (`MAX_DAILY_LOSS`) and max trades per day
@@ -21,15 +27,29 @@ Trading logic, risk controls, and failure handling have been thoroughly tested a
 
 **Critical bug fixes (live trading was previously non-functional):**
 
-- Fixed signal handling in `run.py`: `check_signal()` returns a tuple `(signal, sl_dist, tp_dist)`. The previous code treated it as a string, so no trades could ever be placed.
+- Fixed signal handling in `run.py`: `check_signal()` returns a tuple `(signal, sl_dist, tp_dist)`. Previous code treated it as a string → no trades could ever be placed.
 - Increased bar request from 50 → 250 so the 200-EMA has enough data.
-- Made `mt5_bridge.open_trade()` accept and use **dynamic ATR-based** SL/TP distances instead of the old fixed `SL_POINTS` / `TP_POINTS`.
+- Made `mt5_bridge.open_trade()` accept and use **dynamic ATR-based** SL/TP distances instead of fixed points.
 - Converted `run.py` into a continuous loop with proper error handling, spread checks, and position guards.
 
 **Project hygiene:**
 
-- Added `.gitignore` (blocks `__pycache__`, virtualenvs, large CSVs, secrets).
+- Added `.gitignore`
 - Live and backtest engines now share the same dynamic risk rules (1 : 2.5 R:R based on ATR).
+
+---
+
+## Current Status
+
+| Component              | Status          | Notes                                      |
+|------------------------|-----------------|--------------------------------------------|
+| Live Engine (`run.py`) | Working         | Spread filter, risk limits, logging active |
+| Strategy v5            | Working         | 200 EMA + RSI pullback + ATR filter        |
+| Backtester             | Working         |                                            |
+| Structured Logging     | Working         | `logs/` folder                             |
+| Web Dashboard          | Planned (next)  | FastAPI-based monitoring UI                |
+| Trailing / Partial TP  | Planned        |                                            |
+| Session Filters        | Planned        |                                            |
 
 ---
 
@@ -80,20 +100,24 @@ Docker MT5 (Wine) + XM Global
 
 ---
 
-## Quick Start
+## Setup & Run
 
 ```bash
+# Create / activate virtual environment
+python3 -m venv mt5env
+source mt5env/bin/activate
+
 # Install dependencies
 pip install -r requirements.txt
 
-# Download data
-python3 fetch_data.py
+# Download historical data
+python fetch_data.py
 
 # Backtest
-python3 backtest.py
+python backtest.py
 
 # Live engine
-python3 run.py
+python run.py
 ```
 
 Logs are written to the `logs/` folder (`trades.jsonl`, `system.jsonl`, `daily_stats.json`).
@@ -102,8 +126,9 @@ Logs are written to the `logs/` folder (`trades.jsonl`, `system.jsonl`, `daily_s
 
 ## Next Planned Improvements
 
-1. Web dashboard for easy monitoring
+1. **Web dashboard** for easy monitoring (FastAPI)
 2. Trailing stop / partial close logic
 3. Session / news filters
-4. Better position sizing (% risk)
-5. Telegram alerts
+4. Better position sizing (% risk of equity)
+5. Telegram / Discord alerts
+6. Auto-update via cron (optional)
