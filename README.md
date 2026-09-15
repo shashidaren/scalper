@@ -6,6 +6,11 @@ An experimental algorithmic trading and backtesting framework for **GOLD / XAUUS
 
 ## Changelog
 
+### 2026-09-15 – MT5 Container via docker-compose + .env Secrets
+
+- `docker-compose.yml` runs the MT5 container (RPyC bridge) with ports 18812/5901/8080
+- Credentials live in `.env` (gitignored) — see `.env.example`; never committed
+
 ### 2026-09-15 – MT5 Engine Hardening
 
 - Actionable connection errors: refused vs timeout vs MT5 init vs symbol failures
@@ -75,6 +80,32 @@ journalctl -u scalper-dashboard -f
 ```
 
 Both services will now start automatically after reboot.
+
+---
+
+## MT5 Container & Secrets (.env)
+
+The MT5 terminal runs in Docker (`lprett/mt5linux` image) and exposes the RPyC
+bridge the bot connects to on port 18812. Its credentials live in `.env`,
+which is **gitignored — never commit it**.
+
+```bash
+cd ~/scalper
+cp .env.example .env
+nano .env                     # fill in MT5_LOGIN / MT5_PASSWORD / MT5_SERVER / VNC_PASSWORD
+docker compose up -d          # (re)creates the mt5 container with those secrets
+```
+
+Notes:
+
+- `docker-compose.yml` contains no secrets and is safe to commit.
+- The image uses the credentials only for its first-run auto-login. Once the
+  Wine prefix exists, the login is stored inside it — manage it via the noVNC
+  UI at `http://<server-ip>:8080`.
+- If you rotate the MT5 password, change it in MT5 (noVNC), then keep `.env`
+  in sync for the record.
+- Requires the Docker Compose plugin (`docker compose version`); if missing:
+  `apt-get install docker-compose-plugin`.
 
 ---
 
