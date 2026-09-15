@@ -1,0 +1,18 @@
+[Unit]
+Description=Gold Scalper Live Trading Bot
+After=network.target docker.service
+Wants=docker.service
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/root/scalper
+Environment=PATH=/root/scalper/mt5env/bin:/usr/local/bin:/usr/bin:/bin
+ExecStart=/root/scalper/mt5env/bin/python /root/scalper/run.py
+Restart=always
+RestartSec=10
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

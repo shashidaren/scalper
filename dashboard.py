@@ -1,24 +1,19 @@
 #!/usr/bin/env python3
 """
 Simple FastAPI dashboard for the Gold Scalper.
-Run with:  uvicorn dashboard:app --host 0.0.0.0 --port 8088 --reload
+Run with:  uvicorn dashboard:app --host 0.0.0.0 --port 8088
 """
 
 import json
 from pathlib import Path
 from datetime import datetime
-from typing import Optional
 
 from fastapi import FastAPI, Request
 from fastapi.responses import HTMLResponse
 from fastapi.templating import Jinja2Templates
-from fastapi.staticfiles import StaticFiles
 
 import config
 
-# ---------------------------------------------------------------------------
-# Paths
-# ---------------------------------------------------------------------------
 BASE_DIR = Path(__file__).parent
 LOG_DIR = BASE_DIR / "logs"
 TRADES_FILE = LOG_DIR / "trades.jsonl"
@@ -28,10 +23,8 @@ DAILY_STATS_FILE = LOG_DIR / "daily_stats.json"
 app = FastAPI(title="Gold Scalper Dashboard", version="1.0")
 templates = Jinja2Templates(directory=str(BASE_DIR / "templates"))
 
-# ---------------------------------------------------------------------------
-# Helpers
-# ---------------------------------------------------------------------------
-def read_jsonl(path: Path, limit: int = 50) -> list[dict]:
+
+def read_jsonl(path: Path, limit: int = 50) -> list:
     if not path.exists():
         return []
     lines = path.read_text().strip().splitlines()
@@ -54,7 +47,7 @@ def get_daily_stats() -> dict:
 
 
 def get_live_mt5():
-    """Try to fetch live data from MT5. Returns None on failure."""
+    """Try to fetch live data from MT5. Returns dict with connected=False on failure."""
     try:
         from mt5_bridge import MT5Bridge
         bridge = MT5Bridge()
@@ -80,23 +73,20 @@ def get_live_mt5():
 
         data = {
             "connected": True,
-            "balance": acc.balance if acc else 0,
-            "equity": acc.equity if acc else 0,
-            "margin_free": acc.margin_free if acc else 0,
-            "bid": tick.bid if tick else 0,
-            "ask": tick.ask if tick else 0,
+            "balance": float(acc.balance) if acc else 0.0,
+            "equity": float(acc.equity) if acc else 0.0,
+            "margin_free": float(acc.margin_free) if acc else 0.0,
+            "bid": float(tick.bid) if tick else 0.0,
+            "ask": float(tick.ask) if tick else 0.0,
             "spread": round((tick.ask - tick.bid) / sym.point) if (tick and sym) else 0,
             "positions": positions
         }
         bridge.close()
         return data
     except Exception as e:
-        return {"connected": False, "error": str(e)}
+        return {"connected": False, "error": str(e), "balance": 0, "equity": 0, "bid": 0, "ask": 0, "spread": 0, "positions": []}
 
 
-# ---------------------------------------------------------------------------
-# Routes
-# ---------------------------------------------------------------------------
 @app.get("/", response_class=HTMLResponse)
 async def index(request: Request):
     live = get_live_mt5()
@@ -104,26 +94,28 @@ async def index(request: Request):
     recent_trades = read_jsonl(TRADES_FILE, limit=40)
     recent_system = read_jsonl(SYSTEM_FILE, limit=30)
 
-    return templates.TemplateResponse("index.html", {
-        "request": request,
-        "live": live,
-        "stats": stats,
-        "trades": recent_trades,
-        "system_logs": recent_system,
-        "config": {
-            "symbol": config.SYMBOL,
-            "lot_size": config.LOT_SIZE,
-            "max_spread": config.MAX_SPREAD_POINTS,
-            "max_daily_loss": config.MAX_DAILY_LOSS,
-            "max_trades": config.MAX_TRADES_PER_DAY,
-        },
-        "now": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    })
+    return templates.TemplateResponse(
+        request=request,
+        name="index.html",
+        context={
+            "live": live,
+            "stats": stats,
+            "trades": recent_trades,
+            "system_logs": recent_system,
+            "config": {
+                "symbol": config.SYMBOL,
+                "lot_size": config.LOT_SIZE,
+                "max_spread": config.MAX_SPREAD_POINTS,
+                "max_daily_loss": config.MAX_DAILY_LOSS,
+                "max_trades": config.MAX_TRADES_PER_DAY,
+            },
+            "now": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        }
+    )
 
 
 @app.get("/api/status")
 async def api_status():
-    """JSON endpoint for future auto-refresh / mobile."""
     return {
         "live": get_live_mt5(),
         "stats": get_daily_stats(),
