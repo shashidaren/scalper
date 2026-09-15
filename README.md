@@ -1,90 +1,140 @@
 # Python MT5 Gold Scalper & Backtester Framework
 
-An experimental algorithmic trading and backtesting framework for GOLD / XAUUSD using MetaTrader 5 inside a Docker container (Wine) bridged to a host Python environment via RPyC.
+An experimental algorithmic trading and backtesting framework for **GOLD / XAUUSD** using MetaTrader 5 inside a Docker container (Wine) bridged to a host Python environment via RPyC.
 
 Trading logic, risk controls, and failure handling have been thoroughly tested and validated through historical simulation.
 
 ---
 
-## System Architecture Overview
+## Changelog
 
-The system strictly separates trading logic from the MetaTrader 5 execution environment:
+### 2026-09-15 – Live Trading Fixes & Project Hygiene
 
-1. Host Python Environment (mt5env):
-   Runs strategy analysis, data processing, backtesting engine, and live execution loop on Linux.
+**Critical bug fixes (live trading was previously non-functional):**
 
-2. Docker Container (lprett/mt5linux:latest):
-   Provides the Windows-compatible MT5 terminal via Wine (XM Global Broker).
+- Fixed signal handling in `run.py`: `check_signal()` returns a tuple `(signal, sl_dist, tp_dist)`. The previous code treated it as a string, so no trades could ever be placed.
+- Increased bar request from 50 → 250 so the 200-EMA has enough data.
+- Made `mt5_bridge.open_trade()` accept and use **dynamic ATR-based** SL/TP distances instead of the old fixed `SL_POINTS` / `TP_POINTS`.
+- Converted `run.py` into a continuous loop with proper error handling, spread checks, and position guards.
 
-3. RPyC Bridge (Port 18812):
-   Enables real-time remote function calls between host Python and the Wine MT5 library.
+**Project hygiene:**
 
-4. Separation of Concerns:
-   MT5 handles broker connectivity; host Python handles signals, risk management, and order parameter calculations.
-
----
-
-## File Structure & Responsibilities
-
-- config.py: Global parameters (Symbol: GOLD, Magic: 999111, Timeframe: M5, Lot Size: 0.01, Spread Limits).
-- mt5_bridge.py: RPyC wrapper for connection handling, tick/candle streams, active order queries, and live order execution.
-- strategy.py: Core Strategy v5 (200 EMA trend filter + RSI(14) pullback signals + ATR(14) volatility filter + dynamic SL/TP).
-- fetch_data.py: High-speed historical candle downloader using rpyc.classic.obtain() to store local CSV data.
-- backtest.py: Bar-by-bar simulator accounting for $0.30/oz spread cost, dynamic SL/TP checks, and net PnL tracking.
-- run.py: Live trading execution engine with pre-trade safety checks and position guards.
+- Added `.gitignore` (blocks `__pycache__`, virtualenvs, large CSVs, secrets).
+- Live and backtest engines now share the same dynamic risk rules (1 : 2.5 R:R based on ATR).
 
 ---
 
-## Risk Controls & Failure Safeguards
+## System Architecture
 
-1. Spread Filter Guard: Checks live market spread prior to trade execution (MAX_SPREAD_POINTS = 50). Skips entry if spread spikes.
-2. Active Position Guard: Checks open positions via MAGIC_NUMBER before placing orders, preventing duplicate re-entries.
-3. Volatility Guard (ATR): Skips trade entries when market volatility drops below $0.50/min (prevents choppy range-bound losses).
-4. Dynamic Risk-to-Reward Ratio (1 : 2.5):
-   - Stop Loss (SL): Entry +/- (2.0 x ATR)
-   - Take Profit (TP): Entry -/+ (5.0 x ATR)
-5. Fixed Position Sizing: Controlled lot sizing (0.01 lots for testing) to prevent over-leveraging.
-6. RPyC Stream EOF Prevention: Solved socket disconnects when pulling large arrays by using rpyc.classic.obtain().
-7. Strict Crossover Logic: Replaced continuous directional conditions with single-bar state triggers to eliminate duplicate trade loops.
+```text
+┌───────────────────────────────────────────────────────────┐
+│              Host OS (Linux / Ubuntu)                  │
+│                                                        │
+│  Python Virtual Environment: (mt5env)                  │
+│                                                        │
+│  ~/scalper/                                            │
+│  ├── config.py       ←─ System & Strategy Settings    │
+│  ├── mt5_bridge.py   ←─ RPyC / MT5 Wrapper           │
+│  ├── strategy.py     ←─ Dynamic ATR/RSI Strategy      │
+│  ├── fetch_data.py   ←─ Fast Batch Data Downloader    │
+│  ├── backtest.py     ←─ Bar-by-Bar Backtest Engine    │
+│  ├── run.py          ←─ Continuous Live Execution     │
+│  └── data/           ←─ Historical CSV Storage        │
+└──────────────────────────┬────────────────────────────────────┘
+                            │
+                            │ RPyC Bridge (Port 18812)
+                            │
+┌────────────────────────────▼────────────────────────────┐
+│        Docker Container: lprett/mt5linux:latest        │
+│                                                        │
+│  ├── Wine Emulation Environment                        │
+│  ├── MetaTrader 5 Terminal                             │
+│  │     └── XM Global Broker                            │
+│  └── RPyC Server (0.0.0.0:18812)                       │
+└─────────────────────────────────────────────────────────┘
+```
+
+**Separation of concerns**
+- Host Python → strategy, risk, order parameters, continuous execution loop  
+- Docker/MT5 → broker connectivity & order execution  
+- RPyC → real-time bridge on port 18812
+
+---
+
+## File Responsibilities
+
+| File | Purpose |
+|------|---------|
+| `config.py` | Global parameters (symbol, magic, timeframe, lot size, spread limit) |
+| `mt5_bridge.py` | RPyC wrapper – ticks, rates, position checks, order execution with dynamic SL/TP |
+| `strategy.py` | Strategy v5: 200-EMA filter + RSI(14) pullback + ATR(14) volatility filter + dynamic SL/TP |
+| `fetch_data.py` | Fast historical candle downloader (`rpyc.classic.obtain`) |
+| `backtest.py` | Bar-by-bar simulator with realistic $0.30/oz spread cost |
+| `run.py` | Continuous live execution engine with safety guards |
+
+---
+
+## Risk Controls & Safeguards
+
+1. **Spread Filter** – skips entry if live spread > `MAX_SPREAD_POINTS` (50)
+2. **Active Position Guard** – blocks new entries while a trade with our magic number is open
+3. **Volatility Guard (ATR)** – skips when ATR < $0.50 (avoids choppy ranges)
+4. **Dynamic 1 : 2.5 Risk-to-Reward**
+   - Stop Loss  = Entry ± (2.0 × ATR)
+   - Take Profit = Entry ∓ (5.0 × ATR)
+5. **Fixed Position Sizing** – currently 0.01 lots (testing size)
+6. **RPyC Stream Safety** – large arrays transferred via `rpyc.classic.obtain()`
+7. **Strict single-bar crossover logic** – prevents re-entry spam
 
 ---
 
 ## Strategy Evolution & Backtest History
 
-- Stage 1 (Baseline - M1, 5k bars): Raw 5/20 EMA Crossover | Trades: 1644 | Win Rate: 34.8% | Net PnL: -$385.20 (Heavy overtrading)
-- Stage 2 (M1, 5k bars): + 200 EMA Trend Filter | Trades: 1155 | Win Rate: 33.7% | Net PnL: -$328.50 (Cut counter-trend trades)
-- Stage 3 (M1, 5k bars): + Strict Crossover Trigger | Trades: 147 | Win Rate: 35.4% | Net PnL: -$30.60 (Cut 90% of re-entry losses)
-- Stage 4 (M1, 5k bars): + RSI(14) Pullback (35/65) | Trades: 111 | Win Rate: 42.3% | Net PnL: -$20.30 (Mean-reversion entry)
-- Stage 5 (M1, 5k bars): + Fixed 1:2.75 R:R & ATR filter | Trades: 65 | Win Rate: 33.8% | Net PnL: +$15.50 (Profitable on small sample)
-- Stage 6 (M1, 20k bars): Fixed 1:2.75 R:R on larger dataset | Trades: 207 | Win Rate: 29.0% | Net PnL: -$17.41 (M1 spread ate profit)
-- FINAL STAGE (M5, 20k bars): Dynamic ATR SL/TP (1:2.5 R:R) | Trades: 187 | Win Rate: 29.4% | Net PnL: +$43.68 (PROFITABLE - Beats broker spread)
+| Stage | Timeframe | Logic | Trades | Win Rate | Net PnL | Notes |
+|-------|-----------|-------|--------|----------|---------|-------|
+| Baseline | M1 (5k) | 5/20 EMA crossover | 1,644 | 34.8% | -$385.20 | Heavy overtrading |
+| Stage 2 | M1 (5k) | + 200 EMA filter | 1,155 | 33.7% | -$328.50 | Cut counter-trend trades |
+| Stage 3 | M1 (5k) | + strict crossover | 147 | 35.4% | -$30.60 | Cut 90% of re-entries |
+| Stage 4 | M1 (5k) | + RSI(14) 35/65 | 111 | 42.3% | -$20.30 | Better entries |
+| Stage 5 | M1 (5k) | + fixed 1:2.75 R:R + ATR | 65 | 33.8% | +$15.50 | First profitable sample |
+| Stage 6 | M1 (20k) | fixed R:R larger set | 207 | 29.0% | -$17.41 | M1 spread ate profits |
+| **FINAL** | **M5 (20k)** | **Dynamic ATR 1:2.5** | **187** | **29.4%** | **+$43.68** | **Profitable – beats spread** |
 
 ---
 
 ## Active Strategy Rules (v5)
 
-1. Timeframe: 5-Minute Chart (M5).
-2. Trend Filter: 200-period Exponential Moving Average (EMA).
-   - Only BUY if Price > 200 EMA.
-   - Only SELL if Price < 200 EMA.
-3. Entry Trigger (RSI 14 Pullback):
-   - BUY Signal: RSI dips <= 28 (oversold) and crosses back above 28.
-   - SELL Signal: RSI spikes >= 72 (overbought) and crosses back below 72.
-4. Volatility Guard (ATR 14):
-   - Skip entry if current ATR < $0.50 per candle.
-5. Dynamic SL / TP Levels:
-   - Stop Loss: Entry +/- (2.0 x ATR)
-   - Take Profit: Entry -/+ (5.0 x ATR)
+- **Timeframe**: M5
+- **Trend Filter**: 200-period EMA  
+  - BUY only when price > 200 EMA  
+  - SELL only when price < 200 EMA
+- **Entry Trigger (RSI 14)**:  
+  - BUY: RSI dips ≤ 28 then crosses back above 28  
+  - SELL: RSI spikes ≥ 72 then crosses back below 72
+- **Volatility Guard**: Skip if ATR(14) < $0.50
+- **Dynamic SL / TP**:  
+  - SL = Entry ± 2.0 × ATR  
+  - TP = Entry ∓ 5.0 × ATR
 
 ---
 
-## Execution Guide
+## Quick Start
 
-1. Download Historical Data (20,000 M5 Candles):
-   python3 fetch_data.py
+```bash
+# 1. Download historical data (20 000 M5 candles)
+python3 fetch_data.py
 
-2. Run Strategy Backtest:
-   python3 backtest.py
+# 2. Run backtest
+python3 backtest.py
 
-3. Run Live Pre-Trade Pipeline:
-   python3 run.py
+# 3. Run live continuous engine
+python3 run.py
+```
+
+---
+
+## Notes
+
+- Always keep the Docker MT5 container running and RPyC listening on port 18812.
+- Never commit credentials, login numbers, or large CSV files (see `.gitignore`).
+- The old fixed `SL_POINTS` / `TP_POINTS` in `config.py` are legacy and no longer used by the live path.
