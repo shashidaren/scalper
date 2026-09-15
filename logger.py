@@ -2,7 +2,10 @@ import json
 from datetime import datetime, date
 from pathlib import Path
 
-LOG_DIR = Path("logs")
+# Anchor logs to the repository directory (not the process CWD) so logs are
+# always in <repo>/logs no matter where the bot is started from.
+BASE_DIR = Path(__file__).resolve().parent
+LOG_DIR = BASE_DIR / "logs"
 LOG_DIR.mkdir(exist_ok=True)
 
 TRADES_FILE = LOG_DIR / "trades.jsonl"

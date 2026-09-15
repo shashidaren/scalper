@@ -1,17 +1,105 @@
+"""Robust bridge to MetaTrader5 running behind an RPyC classic server.
+
+Failure modes handled here:
+  * RPyC server not listening (connection refused)      -> actionable error
+  * Host firewalled / down (connect timeout)            -> actionable error
+  * MT5 terminal not ready (initialize() fails)         -> actionable error
+  * Symbol missing from Market Watch                    -> fail fast
+  * Dead/hung server mid-session                        -> bounded RPC timeout
+  * Any of the above during setup                       -> connection cleaned up
+"""
+import socket
 import time
+
 import rpyc
+from rpyc.core.service import MasterService
+from rpyc.utils.factory import connect as rpyc_connect
+
 import config
 
+
+class MT5ConnectionError(ConnectionError):
+    """Raised when the RPyC bridge or the MT5 terminal cannot be reached."""
+
+
+def probe_bridge(host=None, port=None, timeout=5.0):
+    """Cheap TCP probe of the RPyC endpoint.
+
+    Returns (ok, human_readable_error). Classifies the failure so the logs
+    explain *what* to fix instead of just saying "Connection refused".
+    """
+    host = host or config.HOST
+    port = port if port is not None else config.PORT
+    try:
+        with socket.create_connection((host, int(port)), timeout=timeout):
+            return True, None
+    except ConnectionRefusedError:
+        return False, (
+            f"Connection refused by {host}:{port} - nothing is listening. "
+            f"Is the MT5 Docker container (RPyC server) running?"
+        )
+    except (socket.timeout, TimeoutError):
+        return False, (
+            f"Connection to {host}:{port} timed out after {timeout}s "
+            f"(host down or firewalled?)"
+        )
+    except OSError as e:
+        return False, f"Connection to {host}:{port} failed: {e}"
+
+
 class MT5Bridge:
+    """Connects to MetaTrader5 through the RPyC classic server."""
+
     def __init__(self):
-        self.conn = rpyc.classic.connect(config.HOST, config.PORT)
-        self.mt5 = self.conn.modules.MetaTrader5
-        
-        if not self.mt5.initialize():
-            raise Exception(f"MT5 Init failed: {self.mt5.last_error()}")
-            
-        self.mt5.symbol_select(config.SYMBOL, True)
-        time.sleep(1)
+        self.conn = None
+        self.mt5 = None
+        self._closed = False
+
+        # 1) Classified TCP pre-check so errors are actionable.
+        ok, err = probe_bridge(timeout=getattr(config, "CONNECT_TIMEOUT_SECONDS", 10))
+        if not ok:
+            raise MT5ConnectionError(err)
+
+        # 2) RPyC connect with a bounded per-request timeout so a dead or hung
+        #    server can never wedge the engine forever. MasterService is the
+        #    client-side peer for the classic (SlaveService) server and gives
+        #    us the conn.modules namespace.
+        try:
+            self.conn = rpyc_connect(
+                config.HOST,
+                config.PORT,
+                service=MasterService,
+                config={
+                    "sync_request_timeout": getattr(config, "RPC_TIMEOUT_SECONDS", 30),
+                },
+                keepalive=True,
+            )
+        except Exception as e:
+            raise MT5ConnectionError(
+                f"RPyC handshake with {config.HOST}:{config.PORT} failed: {e}"
+            ) from e
+
+        # 3) Bring up MT5 inside the remote process, cleaning up on any failure.
+        try:
+            self.mt5 = self.conn.modules.MetaTrader5
+
+            if not self.mt5.initialize():
+                try:
+                    last_err = self.mt5.last_error()
+                except Exception:
+                    last_err = "unknown"
+                raise MT5ConnectionError(f"MT5 initialize() failed: {last_err}")
+
+            if not self.mt5.symbol_select(config.SYMBOL, True):
+                raise MT5ConnectionError(
+                    f"symbol_select('{config.SYMBOL}') failed - "
+                    f"symbol missing or Market Watch unavailable"
+                )
+
+            time.sleep(1)  # let the terminal settle after symbol activation
+        except Exception:
+            self.close()
+            raise
 
     def get_account_info(self):
         return self.mt5.account_info()
@@ -88,5 +176,17 @@ class MT5Bridge:
         return result
 
     def close(self):
-        self.mt5.shutdown()
-        self.conn.close()
+        """Idempotent teardown that survives an already-dead connection."""
+        if self._closed:
+            return
+        self._closed = True
+        try:
+            if self.mt5 is not None:
+                self.mt5.shutdown()
+        except Exception:
+            pass
+        try:
+            if self.conn is not None:
+                self.conn.close()
+        except Exception:
+            pass

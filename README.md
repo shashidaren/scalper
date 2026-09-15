@@ -6,6 +6,15 @@ An experimental algorithmic trading and backtesting framework for **GOLD / XAUUS
 
 ## Changelog
 
+### 2026-09-15 – MT5 Engine Hardening
+
+- Actionable connection errors: refused vs timeout vs MT5 init vs symbol failures
+- Exponential reconnect backoff (10s → 60s cap) instead of hammering every 10s
+- Bounded RPyC request timeout (`RPC_TIMEOUT_SECONDS`) so a frozen MT5 terminal can't hang the engine
+- Stale-tick detection: warns when the feed stops moving, forces a reconnect if it stays frozen
+- `wait_for_mt5.py` readiness gate used as `ExecStartPre` so the service waits for the MT5 Docker container after boot
+- Logs are always written to `<repo>/logs` regardless of the working directory
+
 ### 2026-09-15 – Dashboard Fix + Systemd Services
 
 - Fixed FastAPI/Starlette `TemplateResponse` compatibility issue
@@ -66,6 +75,38 @@ journalctl -u scalper-dashboard -f
 ```
 
 Both services will now start automatically after reboot.
+
+---
+
+## Troubleshooting: "Connection refused" / "MT5 bridge unreachable"
+
+The bot talks to MT5 through an RPyC server (default `localhost:18812`) that
+runs inside the MT5 Docker container. "Connection refused" means nothing is
+listening on that port — almost always the MT5 container being down or still
+booting (common right after a host reboot):
+
+```bash
+# 1. Is the MT5 container running?
+docker ps
+
+# 2. Is the RPyC port open on the host?
+ss -tlnp | grep 18812
+
+# 3. Restart the MT5 container (adjust name to yours)
+docker restart mt5
+
+# 4. Wait until the bridge is fully ready (TCP + MT5 initialized)
+cd ~/scalper && mt5env/bin/python wait_for_mt5.py --timeout 120
+```
+
+No need to restart the bot — it retries with backoff and reconnects
+automatically once the container is back. If you change the service files,
+re-install them:
+
+```bash
+cp services/scalper-bot.service services/scalper-dashboard.service /etc/systemd/system/
+systemctl daemon-reload && systemctl restart scalper-bot
+```
 
 ---
 
