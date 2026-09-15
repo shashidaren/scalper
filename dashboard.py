@@ -13,6 +13,7 @@ from fastapi.responses import HTMLResponse
 from fastapi.templating import Jinja2Templates
 
 import config
+from logger import get_connection_status
 
 BASE_DIR = Path(__file__).parent
 LOG_DIR = BASE_DIR / "logs"
@@ -20,7 +21,7 @@ TRADES_FILE = LOG_DIR / "trades.jsonl"
 SYSTEM_FILE = LOG_DIR / "system.jsonl"
 DAILY_STATS_FILE = LOG_DIR / "daily_stats.json"
 
-app = FastAPI(title="Gold Scalper Dashboard", version="1.0")
+app = FastAPI(title="Gold Scalper Dashboard", version="1.1")
 templates = Jinja2Templates(directory=str(BASE_DIR / "templates"))
 
 
@@ -84,15 +85,33 @@ def get_live_mt5():
         bridge.close()
         return data
     except Exception as e:
-        return {"connected": False, "error": str(e), "balance": 0, "equity": 0, "bid": 0, "ask": 0, "spread": 0, "positions": []}
+        return {
+            "connected": False,
+            "error": str(e),
+            "balance": 0,
+            "equity": 0,
+            "bid": 0,
+            "ask": 0,
+            "spread": 0,
+            "positions": []
+        }
 
 
 @app.get("/", response_class=HTMLResponse)
 async def index(request: Request):
     live = get_live_mt5()
     stats = get_daily_stats()
+    conn = get_connection_status()
     recent_trades = read_jsonl(TRADES_FILE, limit=40)
     recent_system = read_jsonl(SYSTEM_FILE, limit=30)
+
+    # Human-readable uptime
+    uptime_str = "—"
+    if conn.get("uptime_seconds", 0) > 0:
+        secs = conn["uptime_seconds"]
+        hours, rem = divmod(secs, 3600)
+        mins, secs = divmod(rem, 60)
+        uptime_str = f"{hours}h {mins}m {secs}s"
 
     return templates.TemplateResponse(
         request=request,
@@ -100,6 +119,8 @@ async def index(request: Request):
         context={
             "live": live,
             "stats": stats,
+            "conn": conn,
+            "uptime_str": uptime_str,
             "trades": recent_trades,
             "system_logs": recent_system,
             "config": {
@@ -119,6 +140,7 @@ async def api_status():
     return {
         "live": get_live_mt5(),
         "stats": get_daily_stats(),
+        "connection": get_connection_status(),
         "trades": read_jsonl(TRADES_FILE, limit=20),
         "system": read_jsonl(SYSTEM_FILE, limit=15),
         "timestamp": datetime.now().isoformat()

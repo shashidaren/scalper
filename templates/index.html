@@ -29,7 +29,7 @@
     .subtitle { color: var(--muted); font-size: 0.875rem; margin-bottom: 1.5rem; }
     .grid {
       display: grid;
-      grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+      grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
       gap: 1rem;
       margin-bottom: 1.5rem;
     }
@@ -46,8 +46,8 @@
       color: var(--muted);
       margin-bottom: 0.75rem;
     }
-    .value { font-size: 1.75rem; font-weight: 700; }
-    .value.small { font-size: 1.25rem; }
+    .value { font-size: 1.6rem; font-weight: 700; }
+    .value.small { font-size: 1.15rem; }
     .positive { color: var(--green); }
     .negative { color: var(--red); }
     .status-dot {
@@ -108,13 +108,18 @@
   <!-- Top metrics -->
   <div class="grid">
     <div class="card">
-      <h2>Connection</h2>
+      <h2>MT5 Connection</h2>
       {% if live.connected %}
         <div class="value small"><span class="status-dot on"></span>Connected</div>
       {% else %}
         <div class="value small"><span class="status-dot off"></span>Disconnected</div>
         <div style="color:var(--muted);font-size:0.8rem;margin-top:0.5rem">{{ live.error or "" }}</div>
       {% endif %}
+      <div style="margin-top:0.75rem;font-size:0.85rem;color:var(--muted)">
+        Uptime: <strong style="color:var(--text)">{{ uptime_str }}</strong><br/>
+        Reconnects: <strong style="color:var(--text)">{{ conn.reconnect_count or 0 }}</strong><br/>
+        Last tick: <strong style="color:var(--text)">{{ conn.last_tick_time or "—" }}</strong>
+      </div>
     </div>
 
     <div class="card">

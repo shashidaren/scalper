@@ -9,6 +9,7 @@ LOG_DIR.mkdir(exist_ok=True)
 TRADES_FILE = LOG_DIR / "trades.jsonl"
 SYSTEM_FILE = LOG_DIR / "system.jsonl"
 DAILY_STATS_FILE = LOG_DIR / "daily_stats.json"
+CONNECTION_STATUS_FILE = LOG_DIR / "connection_status.json"
 
 
 def _now():
@@ -52,7 +53,6 @@ def get_today_stats():
         stats = json.load(f)
 
     if stats.get("date") != _today():
-        # New day – reset
         stats = {"date": _today(), "pnl": 0.0, "trades": 0, "wins": 0, "losses": 0}
         save_daily_stats(stats)
 
@@ -75,3 +75,43 @@ def update_daily_pnl(pnl: float, is_win: bool):
         stats["losses"] += 1
     save_daily_stats(stats)
     return stats
+
+
+def update_connection_status(
+    connected: bool,
+    reconnect_count: int = 0,
+    connected_since: str = None,
+    last_tick_time: str = None,
+    last_error: str = None,
+    uptime_seconds: int = 0
+):
+    """Write current MT5 connection health to a status file."""
+    status = {
+        "connected": connected,
+        "reconnect_count": reconnect_count,
+        "connected_since": connected_since,
+        "last_tick_time": last_tick_time,
+        "last_error": last_error,
+        "uptime_seconds": uptime_seconds,
+        "updated_at": _now()
+    }
+    with open(CONNECTION_STATUS_FILE, "w") as f:
+        json.dump(status, f, indent=2)
+    return status
+
+
+def get_connection_status() -> dict:
+    if not CONNECTION_STATUS_FILE.exists():
+        return {
+            "connected": False,
+            "reconnect_count": 0,
+            "connected_since": None,
+            "last_tick_time": None,
+            "last_error": None,
+            "uptime_seconds": 0,
+            "updated_at": None
+        }
+    try:
+        return json.loads(CONNECTION_STATUS_FILE.read_text())
+    except Exception:
+        return {"connected": False, "reconnect_count": 0}

@@ -1,8 +1,12 @@
 import time
+from datetime import datetime
 import config
 from mt5_bridge import MT5Bridge
 from strategy import ScalpStrategy
-from logger import log_system, log_trade, get_today_stats
+from logger import (
+    log_system, log_trade, get_today_stats,
+    update_connection_status
+)
 
 def main():
     log_system("INFO", "=== Scalper Engine Started ===")
@@ -10,6 +14,9 @@ def main():
     strategy = ScalpStrategy()
 
     consecutive_errors = 0
+    reconnect_count = 0
+    connected_since = None
+    last_tick_time = None
 
     try:
         while True:
@@ -19,7 +26,17 @@ def main():
                     log_system("INFO", "Connecting to MT5...")
                     bridge = MT5Bridge()
                     consecutive_errors = 0
-                    log_system("INFO", "Connected successfully")
+                    reconnect_count += 1
+                    connected_since = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                    log_system("INFO", f"Connected successfully (reconnect #{reconnect_count})")
+                    update_connection_status(
+                        connected=True,
+                        reconnect_count=reconnect_count,
+                        connected_since=connected_since,
+                        last_tick_time=None,
+                        last_error=None,
+                        uptime_seconds=0
+                    )
 
                 # --- Daily risk checks ---
                 stats = get_today_stats()
@@ -41,12 +58,32 @@ def main():
                 if not tick or not sym or not acc:
                     raise ConnectionError("Market data unavailable")
 
+                # Connection is healthy
+                last_tick_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                uptime = 0
+                if connected_since:
+                    try:
+                        start = datetime.strptime(connected_since, "%Y-%m-%d %H:%M:%S")
+                        uptime = int((datetime.now() - start).total_seconds())
+                    except Exception:
+                        uptime = 0
+
+                update_connection_status(
+                    connected=True,
+                    reconnect_count=reconnect_count,
+                    connected_since=connected_since,
+                    last_tick_time=last_tick_time,
+                    last_error=None,
+                    uptime_seconds=uptime
+                )
+
                 spread_points = round((tick.ask - tick.bid) / sym.point)
 
                 log_system("INFO",
                     f"Balance: ${acc.balance:.2f} | Equity: ${acc.equity:.2f} | "
                     f"Price: {tick.bid}/{tick.ask} | Spread: {spread_points} | "
-                    f"Today PnL: ${stats['pnl']:.2f} | Trades: {stats['trades']}"
+                    f"Today PnL: ${stats['pnl']:.2f} | Trades: {stats['trades']} | "
+                    f"Uptime: {uptime}s | Reconnects: {reconnect_count}"
                 )
 
                 # Spread filter
@@ -94,6 +131,15 @@ def main():
                 consecutive_errors += 1
                 log_system("ERROR", f"Loop error ({consecutive_errors}): {e}")
 
+                update_connection_status(
+                    connected=False,
+                    reconnect_count=reconnect_count,
+                    connected_since=connected_since,
+                    last_tick_time=last_tick_time,
+                    last_error=str(e),
+                    uptime_seconds=0
+                )
+
                 # Force reconnect after repeated failures
                 if consecutive_errors >= 3:
                     log_system("WARNING", "Multiple errors – forcing reconnect")
@@ -103,6 +149,7 @@ def main():
                     except Exception:
                         pass
                     bridge = None
+                    connected_since = None
 
                 time.sleep(config.RETRY_SLEEP_SECONDS)
 
@@ -114,6 +161,14 @@ def main():
                 bridge.close()
             except Exception:
                 pass
+        update_connection_status(
+            connected=False,
+            reconnect_count=reconnect_count,
+            connected_since=None,
+            last_tick_time=last_tick_time,
+            last_error="Engine stopped",
+            uptime_seconds=0
+        )
         log_system("INFO", "Engine stopped")
 
 if __name__ == "__main__":
