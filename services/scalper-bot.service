@@ -11,7 +11,7 @@ Environment=PATH=/root/scalper/mt5env/bin:/usr/local/bin:/usr/bin:/bin
 # Wait for the MT5 Docker container / RPyC bridge before starting the engine.
 # The engine itself also retries with backoff if the bridge drops later.
 ExecStartPre=/root/scalper/mt5env/bin/python /root/scalper/wait_for_mt5.py --timeout 180
-ExecStart=/root/scalper/mt5env/bin/python /root/scalper/run.py
+ExecStart=/root/scalper/mt5env/bin/python -u /root/scalper/run.py
 Restart=always
 RestartSec=10
 StandardOutput=journal

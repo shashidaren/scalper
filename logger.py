@@ -29,7 +29,7 @@ def log_system(level: str, message: str):
         "level": level.upper(),
         "message": message
     }
-    print(f"[{entry['time']}] [{entry['level']}] {message}")
+    print(f"[{entry['time']}] [{entry['level']}] {message}", flush=True)
     with open(SYSTEM_FILE, "a") as f:
         f.write(json.dumps(entry) + "\n")
 
@@ -40,7 +40,7 @@ def log_trade(event: str, data: dict):
         "event": event,
         **data
     }
-    print(f"[{entry['time']}] TRADE {event.upper()}: {data}")
+    print(f"[{entry['time']}] TRADE {event.upper()}: {data}", flush=True)
     with open(TRADES_FILE, "a") as f:
         f.write(json.dumps(entry) + "\n")
 
