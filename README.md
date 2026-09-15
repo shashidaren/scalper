@@ -6,6 +6,17 @@ An experimental algorithmic trading and backtesting framework for **GOLD / XAUUS
 
 ## Changelog
 
+### 2026-09-15 – Forward-Test (Paper) Trading Mode
+
+- Ported the `FORWARD_TEST` approach from `shashidaren/gold-trading-bot`:
+  real MT5 ticks, fully simulated balance/positions — **no orders are sent**
+- `paper.py`: crash-safe simulated account ($200 start), SL/TP exit logic,
+  breakeven ratchet at +0.75R (same as the gold bot)
+- Simulated closes update the daily stats, so all risk gates apply in paper mode
+- Dashboard shows a `(PAPER)` badge and the simulated balance
+- Inspect/reset the sim account: `python paper.py` / `python paper.py --reset`
+- Go real by flipping `TRADING_MODE = "LIVE"` in `config.py`
+
 ### 2026-09-15 – MT5 Container via docker-compose + .env Secrets
 
 - `docker-compose.yml` runs the MT5 container (RPyC bridge) with ports 18812/5901/8080
@@ -138,6 +149,19 @@ re-install them:
 cp services/scalper-bot.service services/scalper-dashboard.service /etc/systemd/system/
 systemctl daemon-reload && systemctl restart scalper-bot
 ```
+
+---
+
+## Forward-Test (Paper) Mode
+
+`TRADING_MODE = "FORWARD_TEST"` (default) runs the exact same strategy and
+risk gates on **real MT5 ticks**, but fills are simulated against a $200
+paper balance (`SIM_START_BALANCE`). Open simulated positions survive bot
+restarts (`logs/paper_account.json`), exits resolve SL-first like the gold
+bot, and every simulated close counts toward the daily trade/loss limits.
+
+When the paper book proves out, set `TRADING_MODE = "LIVE"` in `config.py`
+and restart the service — same engine, real orders.
 
 ---
 

@@ -5,6 +5,17 @@ SYMBOL = "GOLD"
 MAGIC_NUMBER = 999111
 TIMEFRAME = "M5"
 
+# --- Trading mode ---
+# "FORWARD_TEST" = paper trading on real MT5 ticks: balance/positions are
+#                  simulated, NO orders are sent (port of the
+#                  gold-trading-bot FORWARD_TEST approach)
+# "LIVE"         = real orders through the MT5 bridge
+TRADING_MODE = "FORWARD_TEST"
+
+# Paper account (FORWARD_TEST only)
+SIM_START_BALANCE = 200.0   # dummy balance to emulate with
+BE_TRIGGER_R = 0.75         # move SL to breakeven once +0.75R (like gold-trading-bot)
+
 # Position sizing (testing size)
 LOT_SIZE = 0.01
 

@@ -129,7 +129,8 @@ def update_live_status(
     spread: int = 0,
     positions: list = None,
     connected: bool = True,
-    error: str = None
+    error: str = None,
+    mode: str = None
 ):
     """Write full live market + account snapshot for the dashboard."""
     status = {
@@ -142,6 +143,7 @@ def update_live_status(
         "ask": ask,
         "spread": spread,
         "positions": positions or [],
+        "mode": mode,
         "updated_at": _now()
     }
     with open(LIVE_STATUS_FILE, "w") as f:
@@ -160,6 +162,7 @@ def get_live_status() -> dict:
         "ask": 0.0,
         "spread": 0,
         "positions": [],
+        "mode": None,
         "updated_at": None
     }
     if not LIVE_STATUS_FILE.exists():
