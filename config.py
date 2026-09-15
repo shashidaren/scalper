@@ -8,10 +8,10 @@ TIMEFRAME = "M5"
 # Position sizing (testing size)
 LOT_SIZE = 0.01
 
-# Spread protection
-MAX_SPREAD_POINTS = 50
+# Spread protection (raised for current broker conditions)
+MAX_SPREAD_POINTS = 80
 
-# --- Risk Controls (new) ---
+# --- Risk Controls ---
 MAX_DAILY_LOSS = 30.0          # Stop trading for the day if daily PnL <= -$30
 MAX_TRADES_PER_DAY = 15        # Hard cap on number of trades per day
 MAX_CONSECUTIVE_LOSSES = 4     # Optional pause after X losses in a row

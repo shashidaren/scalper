@@ -17,6 +17,7 @@ def main():
     reconnect_count = 0
     connected_since = None
     last_tick_time = None
+    missing_data_count = 0
 
     try:
         while True:
@@ -26,6 +27,7 @@ def main():
                     log_system("INFO", "Connecting to MT5...")
                     bridge = MT5Bridge()
                     consecutive_errors = 0
+                    missing_data_count = 0
                     reconnect_count += 1
                     connected_since = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
                     log_system("INFO", f"Connected successfully (reconnect #{reconnect_count})")
@@ -50,16 +52,26 @@ def main():
                     time.sleep(300)
                     continue
 
-                # --- Market data ---
+                # --- Market data (tolerant) ---
                 acc = bridge.get_account_info()
                 tick = bridge.get_live_tick()
                 sym = bridge.get_symbol_info()
 
                 if not tick or not sym or not acc:
-                    raise ConnectionError("Market data unavailable")
+                    missing_data_count += 1
+                    log_system("WARNING", f"Market data temporarily unavailable (count={missing_data_count})")
 
-                # Connection is healthy
+                    # Only treat as hard error after several consecutive misses
+                    if missing_data_count >= 5:
+                        raise ConnectionError("Market data unavailable for too long")
+
+                    time.sleep(config.RETRY_SLEEP_SECONDS)
+                    continue
+
+                # Data is good → reset missing counter
+                missing_data_count = 0
                 last_tick_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
                 uptime = 0
                 if connected_since:
                     try:
@@ -140,9 +152,9 @@ def main():
                     uptime_seconds=0
                 )
 
-                # Force reconnect after repeated failures
+                # Force reconnect after repeated hard failures
                 if consecutive_errors >= 3:
-                    log_system("WARNING", "Multiple errors – forcing reconnect")
+                    log_system("WARNING", "Multiple hard errors – forcing reconnect")
                     try:
                         if bridge:
                             bridge.close()
@@ -150,6 +162,7 @@ def main():
                         pass
                     bridge = None
                     connected_since = None
+                    missing_data_count = 0
 
                 time.sleep(config.RETRY_SLEEP_SECONDS)
 
