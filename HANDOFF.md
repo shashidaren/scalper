@@ -6,31 +6,28 @@ code, parameters, or the server must update §1 (state), §3 (changelog) and
 
 ---
 
-## 1. Where things stand (as of 2026-09-15)
+## 1. Where things stand (as of 2026-09-17)
 
 - **Repo/branch:** `shashidaren/scalper`, work branch `arena/01a0a475-scalper`
-  (branched from `main` @ `dfa0c01`). **Not merged to main yet** — open a PR
-  once the paper book is trusted.
+  (branched from `main`). **Not merged to main yet** — open a PR once the
+  paper book is trusted.
 - **Server** (`scalping`):
   - `scalper-bot.service` active, running **FORWARD_TEST (paper)** mode with a
     $200 simulated balance on real GOLD ticks. No real orders are sent.
   - `scalper-dashboard.service` on port 8088 (reads files only).
   - MT5 container managed by `docker-compose.yml`, image
     `lprett-mt5linux-patched` (see §4), ports 18812/5901/8080,
-    restart `unless-stopped`. Survived a full reboot on 2026-09-15.
-- **Branch commits (old → new):**
-  - `dc197a5` engine hardening (backoff, timeouts, actionable errors, boot gate)
-  - `4369408` docker-compose for MT5 + `.env` secrets
-  - `e46ed16` unbuffered journald logging (`python -u`, flushed prints)
-  - `83cdd83` FORWARD_TEST paper mode (port of gold-trading-bot approach)
-  - `78fe7e8` rpyc classic-mode config + `obtain()` for numpy rates
+    restart `unless-stopped`.
+- **Strategy version:** v6 (session filter + softer RSI). Still paper-only.
+- **Daily automation:** `scalper-daily-review-9am-kl` runs every day 09:00
+  Asia/Kuala_Lumpur, reviews code/HANDOFF, may push small improvements.
 
 ## 2. Architecture
 
 ```
 run.py (engine loop)
   └─ mt5_bridge.MT5Bridge ──RPyC :18812──► mt5server.exe (Wine) ──► MT5 terminal
-  └─ strategy.ScalpStrategy (M5: EMA200 trend, RSI(14) pullback, ATR filter)
+  └─ strategy.ScalpStrategy (M5: EMA200 trend, RSI pullback, ATR filter, session filter)
   └─ paper.PaperAccount (FORWARD_TEST fills, ledger in logs/paper_account.json)
   └─ logger.* writes logs/{system,trades}.jsonl, live_status.json,
      connection_status.json, daily_stats.json
@@ -42,12 +39,13 @@ systemd: scalper-bot has ExecStartPre=wait_for_mt5.py (readiness gate)
 
 Key config (`config.py`): `TRADING_MODE` ("FORWARD_TEST" default / "LIVE"),
 `SIM_START_BALANCE=200`, `BE_TRIGGER_R=0.75`, `RPC_TIMEOUT_SECONDS=30`,
-backoff caps, stale-tick thresholds.
+backoff caps, stale-tick thresholds, **SESSION_FILTER_*** and **RSI_*_LEVEL**.
 
 ## 3. Changelog (what was done and why)
 
 | Date | Change | Why |
 |---|---|---|
+| 09-17 | **v6 strategy**: London/NY session filter (07–17 UTC), RSI extremes relaxed 28/72 → 30/70 (config-driven), backtester gains PF / max-DD / avg-R + BE ratchet + session awareness | Cut low-liquidity Asian-session noise; slightly more pullback signals; make offline evaluation more trustworthy before judging paper book |
 | 09-15 | Engine: classified connection errors, exponential backoff (10→60s), bounded RPyC timeouts, stale-tick detection, `wait_for_mt5.py` + `ExecStartPre` gate, logs anchored to repo dir | Post-reboot crash loop spammed `Connection refused` every 10s with no diagnostics |
 | 09-15 | Patched container `automation.sh` (`rm -f` + `mkfifo`) and `config.sh` (`return 0`); committed image as `lprett-mt5linux-patched`; moved container under `docker-compose.yml` + `.env` | Upstream `lprett/mt5linux` restart bugs (see §4); secrets out of git/CLI |
 | 09-15 | `FORWARD_TEST` paper mode: `paper.py` (crash-safe $200 ledger, SL/TP tick resolution, pessimistic SL-first, BE ratchet 0.75R, sim closes feed daily stats) | Emulate trading on real ticks before funding a live account (pattern from `shashidaren/gold-trading-bot`) |
@@ -88,6 +86,8 @@ Note: the patched image may still carry `set -ex` tracing in
   `TRADING_MODE = "LIVE"` in `config.py` (+ restart service).
 - [ ] Consider: GOLD symbol naming (`config.SYMBOL="GOLD"` works today on
   XMGlobal; revisit if broker changes it).
+- [ ] After more paper data: experiment with H1 trend confirmation or tighter
+  session window (e.g. 08–16 UTC only).
 
 ## 6. Runbook (common commands, on the server)
 
@@ -107,8 +107,8 @@ docker logs mt5 --tail 60
 mt5env/bin/python wait_for_mt5.py --timeout 120       # readiness probe
 docker compose up -d                                  # (re)create from compose+.env
 
-# deploy code
-cd ~/scalper && git pull && systemctl restart scalper-bot
+# deploy code (work branch)
+cd ~/scalper && git fetch && git checkout arena/01a0a475-scalper && git pull && systemctl restart scalper-bot
 # (service-file changes also need: cp services/*.service /etc/systemd/system/ && systemctl daemon-reload)
 ```
 

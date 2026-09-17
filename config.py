@@ -37,3 +37,15 @@ RPC_TIMEOUT_SECONDS = 30       # Max seconds to wait for any single RPyC/MT5 cal
 RECONNECT_MAX_DELAY_SECONDS = 60  # Cap for exponential reconnect backoff
 STALE_TICK_WARN_CYCLES = 20    # Warn after N loops with an unchanged tick
 STALE_TICK_RECONNECT_CYCLES = 120  # Force reconnect after N loops with an unchanged tick
+
+# --- Strategy filters (v6) ---
+# Session filter: only take signals during higher-liquidity hours (UTC).
+# London open ~07:00, NY open ~13:00; we allow 07:00–17:00 UTC to cover
+# London + London-NY overlap and early NY. Asian session is skipped.
+SESSION_FILTER_ENABLED = True
+SESSION_START_HOUR_UTC = 7
+SESSION_END_HOUR_UTC = 17
+
+# RSI extremes (softer than original 28/72 for more quality pullbacks)
+RSI_BUY_LEVEL = 30
+RSI_SELL_LEVEL = 70

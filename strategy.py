@@ -1,11 +1,27 @@
+from datetime import datetime, timezone
 import pandas as pd
+import config
 
 class ScalpStrategy:
     def __init__(self):
         pass
 
-    def check_signal(self, rates):
+    def _in_session(self, when=None):
+        """Return True if current (or given) UTC hour is inside the allowed session."""
+        if not getattr(config, "SESSION_FILTER_ENABLED", False):
+            return True
+        when = when or datetime.now(timezone.utc)
+        hour = when.hour
+        start = getattr(config, "SESSION_START_HOUR_UTC", 7)
+        end = getattr(config, "SESSION_END_HOUR_UTC", 17)
+        return start <= hour < end
+
+    def check_signal(self, rates, when=None):
         if rates is None or len(rates) < 200:
+            return None, 0, 0
+
+        # Session filter (live uses now; backtest can pass bar time)
+        if not self._in_session(when):
             return None, 0, 0
 
         df = pd.DataFrame(rates)
@@ -34,20 +50,23 @@ class ScalpStrategy:
         rsi_curr = df['rsi'].iloc[-1]
         rsi_prev = df['rsi'].iloc[-2]
 
-        # Minimum volatility filter ($0.50 per min)
+        # Minimum volatility filter ($0.50)
         if current_atr < 0.50:
             return None, 0, 0
 
-        # Dynamic SL & TP based on market volatility
+        # Dynamic SL & TP based on market volatility (still ~1:2.5 RR)
         sl_dist = current_atr * 2.0
         tp_dist = current_atr * 5.0
 
-        # BUY: Uptrend + Deep RSI Bounce (< 28)
-        if current_close > current_ema and rsi_prev <= 28 and rsi_curr > 28:
+        buy_level = getattr(config, "RSI_BUY_LEVEL", 30)
+        sell_level = getattr(config, "RSI_SELL_LEVEL", 70)
+
+        # BUY: Uptrend + RSI bounce from oversold
+        if current_close > current_ema and rsi_prev <= buy_level and rsi_curr > buy_level:
             return "BUY", sl_dist, tp_dist
 
-        # SELL: Downtrend + Deep RSI Reversal (> 72)
-        elif current_close < current_ema and rsi_prev >= 72 and rsi_curr < 72:
+        # SELL: Downtrend + RSI reversal from overbought
+        elif current_close < current_ema and rsi_prev >= sell_level and rsi_curr < sell_level:
             return "SELL", sl_dist, tp_dist
 
         return None, 0, 0
