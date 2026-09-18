@@ -9,9 +9,8 @@ code, parameters, or the server must update §1 (state), §3 (changelog) and
 ## 1. Where things stand (as of 2026-09-18)
 
 - **Repo/branch:** `shashidaren/scalper`, work branch `arena/01a0a475-scalper`
-  (branched from `main`). **Not merged to main yet** — open a PR once the
-  paper book is trusted. `main` is still the 09-15 squash (`a49dce4`); work
-  branch is ahead (v6 session/RSI + today's v7 closed-bar signals).
+  (branched from `main`). PR opened to merge v6+v7 (+ `deploy.sh`) into `main`.
+  Until that PR is merged, the server should keep tracking the work branch.
 - **Server** (`scalping`):
   - `scalper-bot.service` active, running **FORWARD_TEST (paper)** mode with a
     $200 simulated balance on real GOLD ticks. No real orders are sent.
@@ -19,6 +18,9 @@ code, parameters, or the server must update §1 (state), §3 (changelog) and
   - MT5 container managed by `docker-compose.yml`, image
     `lprett-mt5linux-patched` (see §4), ports 18812/5901/8080,
     restart `unless-stopped`.
+  - **Deploy:** `deploy.sh` pulls the tracked branch and restarts the bot only
+    when HEAD changes. Wire a cron (see §6) so daily-review pushes apply
+    without a manual pull.
 - **Strategy version:** v7 (closed-bar signals + one-shot per bar, on top of
   v6 London/NY session + RSI 30/70). Still paper-only.
 - **Paper book:** no server-side stats in this session (review is code-only).
@@ -39,6 +41,7 @@ dashboard.py ──reads those files only──► :8088
 MT5 container: lprett/mt5linux image (Xvfb→x11vnc→noVNC :8080, Wine MT5,
                RPyC server :18812), credentials via .env (env_file)
 systemd: scalper-bot has ExecStartPre=wait_for_mt5.py (readiness gate)
+deploy.sh: git pull --ff-only + systemctl restart only if HEAD moved
 ```
 
 Key config (`config.py`): `TRADING_MODE` ("FORWARD_TEST" default / "LIVE"),
@@ -50,6 +53,7 @@ backoff caps, stale-tick thresholds, **SESSION_FILTER_***, **RSI_*_LEVEL**,
 
 | Date | Change | Why |
 |---|---|---|
+| 09-18 | **`deploy.sh`** + HANDOFF cron notes; PR work branch → `main` (v6+v7) | Hands-off server updates after daily-review pushes; promote strategy stack to main without flipping LIVE |
 | 09-18 | **v7 strategy**: evaluate EMA/RSI/ATR on last *completed* M5 bar (`SIGNAL_ON_CLOSED_BAR`); one-shot per bar timestamp so the 15s loop cannot re-fire the same RSI cross after a scratch/BE | Forming-bar RSI flicker + same-bar re-entry after quick exits inflate trade count and hurt expectancy vs the bar-close backtest |
 | 09-17 | **v6 strategy**: London/NY session filter (07–17 UTC), RSI extremes relaxed 28/72 → 30/70 (config-driven), backtester gains PF / max-DD / avg-R + BE ratchet + session awareness | Cut low-liquidity Asian-session noise; slightly more pullback signals; make offline evaluation more trustworthy before judging paper book |
 | 09-15 | Engine: classified connection errors, exponential backoff (10→60s), bounded RPyC timeouts, stale-tick detection, `wait_for_mt5.py` + `ExecStartPre` gate, logs anchored to repo dir | Post-reboot crash loop spammed `Connection refused` every 10s with no diagnostics |
@@ -59,7 +63,7 @@ backoff caps, stale-tick thresholds, **SESSION_FILTER_***, **RSI_*_LEVEL**,
 
 ### Daily review notes
 
-- **2026-09-18:** Work branch still ahead of `main`. Paper ledger not visible from this session. Inspected v6 (session 07–17 UTC, RSI 30/70, ATR SL 2 / TP 5, BE 0.75R). Highest-confidence hole: live `check_signal` used the forming M5 bar and the engine polls every 15s, so a single RSI cross stayed true until the next close and could re-arm after a fast BE/SL. Shipped v7 (closed-bar + one-shot). Left alone: RR, session window, spread 80, `TRADING_MODE`. Next experiments after paper sample: Friday early-close (skip after ~16 UTC Fri), H1 EMA confirmation, spread-aware min ATR.
+- **2026-09-18:** Work branch still ahead of `main`. Paper ledger not visible from this session. Inspected v6 (session 07–17 UTC, RSI 30/70, ATR SL 2 / TP 5, BE 0.75R). Highest-confidence hole: live `check_signal` used the forming M5 bar and the engine polls every 15s, so a single RSI cross stayed true until the next close and could re-arm after a fast BE/SL. Shipped v7 (closed-bar + one-shot). Left alone: RR, session window, spread 80, `TRADING_MODE`. Next experiments after paper sample: Friday early-close (skip after ~16 UTC Fri), H1 EMA confirmation, spread-aware min ATR. Later same day: added `deploy.sh` and opened PR to `main`.
 
 ## 4. Server-side patches NOT in git (baked into the container image)
 
@@ -91,7 +95,10 @@ Note: the patched image may still carry `set -ex` tracing in
   in the Wine prefix.)
 - [ ] Revert `set -ex` → `set -e` in the container's `main.sh` (see §4 note).
 - [ ] File upstream issues for the two `lucas-campagna/mt5linux` bugs.
-- [ ] Open PR `arena/01a0a475-scalper` → `main` once paper book is trusted.
+- [x] Open PR `arena/01a0a475-scalper` → `main` (v6+v7 + deploy.sh) — merge when ready.
+- [ ] After merge: optionally set `DEPLOY_BRANCH=main` on the server (or keep
+  tracking the work branch if daily review still pushes there).
+- [ ] Install deploy cron once (see §6).
 - [ ] Judge the paper book after 100+ trades across sessions; only then flip
   `TRADING_MODE = "LIVE"` in `config.py` (+ restart service).
 - [ ] Consider: GOLD symbol naming (`config.SYMBOL="GOLD"` works today on
@@ -119,8 +126,21 @@ docker logs mt5 --tail 60
 mt5env/bin/python wait_for_mt5.py --timeout 120       # readiness probe
 docker compose up -d                                  # (re)create from compose+.env
 
-# deploy code (work branch)
-cd ~/scalper && git fetch && git checkout arena/01a0a475-scalper && git pull && systemctl restart scalper-bot
+# one-shot deploy (work branch)
+cd /root/scalper && git pull && chmod +x deploy.sh && ./deploy.sh
+
+# hands-off deploy cron (every 15 min; only restarts when commits land)
+# crontab -e  →
+# */15 * * * * /root/scalper/deploy.sh >> /root/scalper/logs/deploy.cron.log 2>&1
+#
+# After merging PR to main, either keep the work branch as deploy target
+# (daily review still pushes there) or:
+#   echo 'DEPLOY_BRANCH=main' > /root/scalper/.deploy.env
+# and source it from cron, or:
+#   DEPLOY_BRANCH=main /root/scalper/deploy.sh
+
+# manual deploy (legacy)
+cd /root/scalper && git fetch && git checkout arena/01a0a475-scalper && git pull && systemctl restart scalper-bot
 # (service-file changes also need: cp services/*.service /etc/systemd/system/ && systemctl daemon-reload)
 ```
 
