@@ -1,15 +1,33 @@
+from datetime import datetime, timezone
 import pandas as pd
+import config
 
 class ScalpStrategy:
     def __init__(self):
-        pass
+        # Last closed-bar timestamp we already emitted a BUY/SELL for.
+        # Prevents the 15s live loop from re-entering on the same RSI cross.
+        self._last_fired_bar_ts = None
 
-    def check_signal(self, rates):
-        if rates is None or len(rates) < 200:
+    def _in_session(self, when=None):
+        """Return True if current (or given) UTC hour is inside the allowed session."""
+        if not getattr(config, "SESSION_FILTER_ENABLED", False):
+            return True
+        when = when or datetime.now(timezone.utc)
+        hour = when.hour
+        start = getattr(config, "SESSION_START_HOUR_UTC", 7)
+        end = getattr(config, "SESSION_END_HOUR_UTC", 17)
+        return start <= hour < end
+
+    def check_signal(self, rates, when=None):
+        if rates is None or len(rates) < 202:
+            return None, 0, 0
+
+        # Session filter (live uses now; backtest can pass bar time)
+        if not self._in_session(when):
             return None, 0, 0
 
         df = pd.DataFrame(rates)
-        
+
         # 1. Trend Filter: 200 EMA
         df['ema200'] = df['close'].ewm(span=200, adjust=False).mean()
 
@@ -27,27 +45,54 @@ class ScalpStrategy:
         tr = pd.concat([high_low, high_cp, low_cp], axis=1).max(axis=1)
         df['atr'] = tr.rolling(14).mean()
 
-        current_close = df['close'].iloc[-1]
-        current_ema = df['ema200'].iloc[-1]
-        current_atr = df['atr'].iloc[-1]
-        
-        rsi_curr = df['rsi'].iloc[-1]
-        rsi_prev = df['rsi'].iloc[-2]
+        # Prefer last *completed* bar so live (forming M5 candle) matches backtest
+        # and does not flicker as the current bar's RSI wiggles through the level.
+        use_closed = getattr(config, "SIGNAL_ON_CLOSED_BAR", True)
+        idx = -2 if use_closed and len(df) >= 3 else -1
+        prev_idx = idx - 1
 
-        # Minimum volatility filter ($0.50 per min)
+        current_close = df['close'].iloc[idx]
+        current_ema = df['ema200'].iloc[idx]
+        current_atr = df['atr'].iloc[idx]
+        rsi_curr = df['rsi'].iloc[idx]
+        rsi_prev = df['rsi'].iloc[prev_idx]
+
+        bar_ts = None
+        if 'time' in df.columns:
+            try:
+                bar_ts = df['time'].iloc[idx]
+                if hasattr(bar_ts, "item"):
+                    bar_ts = bar_ts.item()
+            except Exception:
+                bar_ts = None
+
+        # Minimum volatility filter ($0.50)
         if current_atr < 0.50:
             return None, 0, 0
 
-        # Dynamic SL & TP based on market volatility
+        # Dynamic SL & TP based on market volatility (still ~1:2.5 RR)
         sl_dist = current_atr * 2.0
         tp_dist = current_atr * 5.0
 
-        # BUY: Uptrend + Deep RSI Bounce (< 28)
-        if current_close > current_ema and rsi_prev <= 28 and rsi_curr > 28:
-            return "BUY", sl_dist, tp_dist
+        buy_level = getattr(config, "RSI_BUY_LEVEL", 30)
+        sell_level = getattr(config, "RSI_SELL_LEVEL", 70)
 
-        # SELL: Downtrend + Deep RSI Reversal (> 72)
-        elif current_close < current_ema and rsi_prev >= 72 and rsi_curr < 72:
-            return "SELL", sl_dist, tp_dist
+        signal = None
+        # BUY: Uptrend + RSI bounce from oversold
+        if current_close > current_ema and rsi_prev <= buy_level and rsi_curr > buy_level:
+            signal = "BUY"
+        # SELL: Downtrend + RSI reversal from overbought
+        elif current_close < current_ema and rsi_prev >= sell_level and rsi_curr < sell_level:
+            signal = "SELL"
 
-        return None, 0, 0
+        if signal is None:
+            return None, 0, 0
+
+        # One-shot per closed bar: same RSI cross must not re-fire every 15s
+        # (or after a quick scratch) while that bar is still the latest complete one.
+        if bar_ts is not None and bar_ts == self._last_fired_bar_ts:
+            return None, 0, 0
+        if bar_ts is not None:
+            self._last_fired_bar_ts = bar_ts
+
+        return signal, sl_dist, tp_dist
