@@ -38,7 +38,7 @@ RECONNECT_MAX_DELAY_SECONDS = 60  # Cap for exponential reconnect backoff
 STALE_TICK_WARN_CYCLES = 20    # Warn after N loops with an unchanged tick
 STALE_TICK_RECONNECT_CYCLES = 120  # Force reconnect after N loops with an unchanged tick
 
-# --- Strategy filters (v6) ---
+# --- Strategy filters (v7) ---
 # Session filter: only take signals during higher-liquidity hours (UTC).
 # London open ~07:00, NY open ~13:00; we allow 07:00–17:00 UTC to cover
 # London + London-NY overlap and early NY. Asian session is skipped.
@@ -49,3 +49,8 @@ SESSION_END_HOUR_UTC = 17
 # RSI extremes (softer than original 28/72 for more quality pullbacks)
 RSI_BUY_LEVEL = 30
 RSI_SELL_LEVEL = 70
+
+# Evaluate EMA/RSI/ATR on the last *completed* M5 bar (not the forming one).
+# Combined with one-shot-per-bar in ScalpStrategy so the 15s live loop cannot
+# re-fire the same RSI cross after a quick scratch/BE exit.
+SIGNAL_ON_CLOSED_BAR = True
