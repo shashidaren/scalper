@@ -9,10 +9,19 @@ class ScalpStrategy:
         self._last_fired_bar_ts = None
 
     def _in_session(self, when=None):
-        """Return True if current (or given) UTC hour is inside the allowed session."""
+        """Return True if current (or given) UTC time is allowed for new entries."""
+        when = when or datetime.now(timezone.utc)
+        if when.tzinfo is None:
+            # Backtest CSV times are treated as UTC-naive.
+            pass
+
+        if getattr(config, "FRIDAY_CUTOFF_ENABLED", False):
+            cutoff = getattr(config, "FRIDAY_CUTOFF_HOUR_UTC", 16)
+            if when.weekday() == 4 and when.hour >= cutoff:
+                return False
+
         if not getattr(config, "SESSION_FILTER_ENABLED", False):
             return True
-        when = when or datetime.now(timezone.utc)
         hour = when.hour
         start = getattr(config, "SESSION_START_HOUR_UTC", 7)
         end = getattr(config, "SESSION_END_HOUR_UTC", 17)
