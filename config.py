@@ -38,7 +38,7 @@ RECONNECT_MAX_DELAY_SECONDS = 60  # Cap for exponential reconnect backoff
 STALE_TICK_WARN_CYCLES = 20    # Warn after N loops with an unchanged tick
 STALE_TICK_RECONNECT_CYCLES = 120  # Force reconnect after N loops with an unchanged tick
 
-# --- Strategy filters (v8) ---
+# --- Strategy filters (v9) ---
 # Session filter: only take signals during higher-liquidity hours (UTC).
 # London open ~07:00, NY open ~13:00; we allow 07:00–17:00 UTC to cover
 # London + London-NY overlap and early NY. Asian session is skipped.
@@ -50,6 +50,10 @@ SESSION_END_HOUR_UTC = 17
 # this UTC hour on Friday. Open trades still manage to SL/TP/BE.
 FRIDAY_CUTOFF_ENABLED = True
 FRIDAY_CUTOFF_HOUR_UTC = 16
+
+# Weekend flat: session hours alone would still allow Sat/Sun 07–17 UTC.
+# Skip *new* entries on Saturday and Sunday (weekend gap / thin quotes).
+WEEKEND_FLAT_ENABLED = True
 
 # RSI extremes (softer than original 28/72 for more quality pullbacks)
 RSI_BUY_LEVEL = 30

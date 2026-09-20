@@ -6,11 +6,12 @@ code, parameters, or the server must update §1 (state), §3 (changelog) and
 
 ---
 
-## 1. Where things stand (as of 2026-09-19)
+## 1. Where things stand (as of 2026-09-20)
 
 - **Repo/branch:** `shashidaren/scalper`. Daily-review work still lands on
-  `arena/01a0a475-scalper` (server `deploy.sh` defaults here). `main` already
-  contains the 2026-09-18 v6–v7 + deploy.sh merge (PR #3 / `resolve/v6-v7-deploy`).
+  `arena/01a0a475-scalper` (server `deploy.sh` defaults here). `main` is behind
+  the work branch (has v6–v7 + deploy.sh via PR #3; does **not** have v8 Friday
+  cutoff or v9 weekend flat).
 - **Server** (`scalping`):
   - `scalper-bot.service` active, running **FORWARD_TEST (paper)** mode with a
     $200 simulated balance on real GOLD ticks. No real orders are sent.
@@ -20,8 +21,9 @@ code, parameters, or the server must update §1 (state), §3 (changelog) and
     restart `unless-stopped`.
   - **Deploy:** `deploy.sh` pulls the tracked branch and restarts the bot only
     when HEAD changes.
-- **Strategy version:** v8 (Friday 16:00 UTC cutoff on top of v7 closed-bar +
-  v6 London/NY + RSI 30/70). Still paper-only. `TRADING_MODE` unchanged.
+- **Strategy version:** v9 (weekend Sat/Sun flat on top of v8 Friday 16:00 UTC
+  cutoff + v7 closed-bar + v6 London/NY + RSI 30/70). Still paper-only.
+  `TRADING_MODE` unchanged.
 - **Paper book:** not visible from this daily-review session (no server logs).
   After deploy: `python paper.py` and note win/loss in §1.
 - **Daily automation:** `scalper-daily-review-9am-kl` runs every day 09:00
@@ -32,7 +34,7 @@ code, parameters, or the server must update §1 (state), §3 (changelog) and
 ```
 run.py (engine loop)
   └─ mt5_bridge.MT5Bridge ──RPyC :18812──► mt5server.exe (Wine) ──► MT5 terminal
-  └─ strategy.ScalpStrategy (M5: EMA200 trend, RSI pullback, ATR filter, session filter, Friday cutoff, closed-bar)
+  └─ strategy.ScalpStrategy (M5: EMA200 trend, RSI pullback, ATR filter, session filter, Friday cutoff, weekend flat, closed-bar)
   └─ paper.PaperAccount (FORWARD_TEST fills, ledger in logs/paper_account.json)
   └─ logger.* writes logs/{system,trades}.jsonl, live_status.json,
      connection_status.json, daily_stats.json
@@ -46,12 +48,13 @@ deploy.sh: git pull --ff-only + systemctl restart only if HEAD moved
 Key config (`config.py`): `TRADING_MODE` ("FORWARD_TEST" default / "LIVE"),
 `SIM_START_BALANCE=200`, `BE_TRIGGER_R=0.75`, `RPC_TIMEOUT_SECONDS=30`,
 backoff caps, stale-tick thresholds, **SESSION_FILTER_***, **FRIDAY_CUTOFF_***,
-**RSI_*_LEVEL**, **SIGNAL_ON_CLOSED_BAR**.
+**WEEKEND_FLAT_ENABLED**, **RSI_*_LEVEL**, **SIGNAL_ON_CLOSED_BAR**.
 
 ## 3. Changelog (what was done and why)
 
 | Date | Change | Why |
 |---|---|---|
+| 09-20 | **v9 strategy**: `WEEKEND_FLAT_ENABLED` — no *new* entries Sat/Sun | Session hours are UTC-hour only; Sat/Sun 07–17 could still fire on thin/gap quotes; companion to v8 |
 | 09-19 | **v8 strategy**: `FRIDAY_CUTOFF_ENABLED` + `FRIDAY_CUTOFF_HOUR_UTC=16` — no *new* entries Fri ≥16:00 UTC | Thin Friday gold / weekend-gap risk; already queued in TODOs; reversible flags |
 | 09-18 | **Conflict resolve + merge to main:** `resolve/v6-v7-deploy` (PR #3) | Promote v6+v7 + deploy.sh without conflict markers |
 | 09-18 | **`deploy.sh`** + HANDOFF cron notes | Hands-off server updates after daily-review pushes |
@@ -61,6 +64,7 @@ backoff caps, stale-tick thresholds, **SESSION_FILTER_***, **FRIDAY_CUTOFF_***,
 
 ### Daily review notes
 
+- **2026-09-20 (Sun):** Work branch still ahead of `main` (v8 not merged). Reviewed v8 stack: M5 EMA200 + RSI 30/70 + ATR 2/5 + session 07–17 UTC + closed-bar one-shot + Fri≥16:00 cutoff. Paper ledger still not in this session — left RR, RSI, spread 80, ATR min $0.50, and `TRADING_MODE` alone. Shipped weekend Sat/Sun flat (config-gated) so hour-only session filter cannot open on weekend quotes. Next after a paper sample: H1 EMA confirmation, spread-aware min ATR, tighter 08–16 window. Merge v8+v9 to main when ready.
 - **2026-09-19:** `main` is ahead of the previous work-branch HANDOFF (PR #3 merged v6–v7). Reviewed M5 EMA200 + RSI 30/70 + ATR 2/5 + session 07–17 UTC + closed-bar one-shot. Paper ledger not in this session. Left RR, RSI, spread 80, and `TRADING_MODE` alone — no paper stats to justify those. Shipped Friday 16:00 UTC cutoff (config-gated) as the next listed, low-risk overtrading cut. Next after a paper sample: H1 EMA confirmation, spread-aware min ATR, tighter 08–16 window.
 - **2026-09-18:** Shipped v7, deploy.sh. Server tracks work branch until you opt into `DEPLOY_BRANCH=main`.
 
@@ -93,7 +97,7 @@ Note: the patched image may still carry `set -ex` tracing in
 - [ ] Revert `set -ex` → `set -e` in the container's `main.sh` (see §4 note).
 - [ ] File upstream issues for the two `lucas-campagna/mt5linux` bugs.
 - [x] Merge clean PR (`resolve/v6-v7-deploy` → `main`); close conflicted PR #2.
-- [ ] After more work-branch commits (v8+): merge work branch → `main` or keep
+- [ ] After more work-branch commits (v8+v9): merge work branch → `main` or keep
   `DEPLOY_BRANCH` on `arena/01a0a475-scalper`.
 - [ ] Install deploy cron once (see §6) if not already wired.
 - [ ] Judge the paper book after 100+ trades across sessions; only then flip
@@ -103,6 +107,7 @@ Note: the patched image may still carry `set -ex` tracing in
 - [ ] After more paper data: experiment with H1 trend confirmation or tighter
   session window (e.g. 08–16 UTC only).
 - [x] Friday early-close filter (skip new entries after 16:00 UTC Friday) — shipped 2026-09-19 as v8.
+- [x] Weekend flat (skip new entries Sat/Sun) — shipped 2026-09-20 as v9.
 - [ ] After pull+restart: dump `python paper.py` and note win rate / PF in §1.
 
 ## 6. Runbook (common commands, on the server)

@@ -15,6 +15,10 @@ class ScalpStrategy:
             # Backtest CSV times are treated as UTC-naive.
             pass
 
+        # Sat=5, Sun=6 — do not open into weekend gap / thin quotes.
+        if getattr(config, "WEEKEND_FLAT_ENABLED", False) and when.weekday() >= 5:
+            return False
+
         if getattr(config, "FRIDAY_CUTOFF_ENABLED", False):
             cutoff = getattr(config, "FRIDAY_CUTOFF_HOUR_UTC", 16)
             if when.weekday() == 4 and when.hour >= cutoff:
