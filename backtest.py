@@ -34,7 +34,11 @@ def run_backtest(csv_file):
     trades_history = []
     spread_cost = 0.30  # approximate GOLD spread in price units
 
-    for i in range(200, len(df)):
+    # Strategy requires len(rates) >= 202; live uses get_rates(250).
+    # Window must be at least that wide or every bar early-returns None.
+    lookback = 250
+
+    for i in range(lookback, len(df)):
         current_bar = df.iloc[i]
         bar_time = _parse_bar_time(current_bar.get("time"))
 
@@ -101,7 +105,7 @@ def run_backtest(csv_file):
 
         # 2. Check for New Signal
         if active_trade is None:
-            window = df.iloc[i-200:i+1].to_dict('records')
+            window = df.iloc[i - lookback + 1:i + 1].to_dict('records')
             signal, sl_dist, tp_dist = strategy.check_signal(window, when=bar_time)
 
             if signal == "BUY":
