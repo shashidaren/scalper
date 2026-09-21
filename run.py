@@ -240,6 +240,19 @@ def main():
                 rates = bridge.get_rates(count=250)
                 signal, sl_dist, tp_dist = strategy.check_signal(rates)
 
+                # Skip if SL would be too small vs the live spread (R eaten by bid/ask).
+                min_mult = float(getattr(config, "MIN_SL_SPREAD_MULT", 0) or 0)
+                if signal in ("BUY", "SELL") and min_mult > 0 and sl_dist > 0:
+                    spread_price = float(tick.ask) - float(tick.bid)
+                    if spread_price > 0 and sl_dist < min_mult * spread_price:
+                        log_trade("SKIP", {
+                            "reason": "sl_vs_spread",
+                            "sl_dist": round(sl_dist, 2),
+                            "spread_price": round(spread_price, 4),
+                            "min_mult": min_mult,
+                        })
+                        signal, sl_dist, tp_dist = None, 0, 0
+
                 log_trade("SIGNAL", {
                     "signal": signal,
                     "sl_dist": round(sl_dist, 2),

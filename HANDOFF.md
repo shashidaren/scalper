@@ -31,20 +31,21 @@ No manual `git pull` / `systemctl restart` required.
 
 ---
 
-## 1. Where things stand (as of 2026-09-20)
+## 1. Where things stand (as of 2026-09-21)
 
 - **Repo/branch:** `shashidaren/scalper`. Daily-review work lands on
   `arena/01a0a475-scalper` (server `deploy.sh` defaults here). `main` is behind
-  (has v6–v7 + deploy.sh via PR #3; does **not** have v8 Friday cutoff or v9
-  weekend flat).
+  (has v6–v7 + deploy.sh via PR #3; does **not** have v8 Friday cutoff, v9
+  weekend flat, or v10 min-ATR / SL-vs-spread).
 - **Server** (`scalping`):
   - `scalper-bot.service` → **FORWARD_TEST (paper)** only. $200 sim balance on
     real GOLD ticks. **No real orders.**
   - `scalper-dashboard.service` on port 8088 (reads log files only).
   - MT5 container via `docker-compose.yml` (`lprett-mt5linux-patched`, see §4).
   - **Deploy:** hands-off via `deploy.sh` + cron (see §0).
-- **Strategy version:** v9 (weekend Sat/Sun flat + v8 Fri ≥16:00 UTC cutoff +
-  v7 closed-bar + v6 London/NY + RSI 30/70). Paper-only. `TRADING_MODE` unchanged.
+- **Strategy version:** v10 (spread-aware `MIN_ATR=0.80` + live `MIN_SL_SPREAD_MULT=3`
+  on top of v9 weekend flat + v8 Fri ≥16:00 UTC + v7 closed-bar + v6 London/NY +
+  RSI 30/70). Paper-only. `TRADING_MODE` unchanged.
 - **Paper book:** lives on the server (`logs/paper_account.json`). Not visible to
   daily-review sessions. Optional check: `python paper.py` on the server; paste
   win/loss into §1 when you have a sample. Not required for hands-off operation.
@@ -55,7 +56,7 @@ No manual `git pull` / `systemctl restart` required.
 ```
 run.py (engine loop)
   └─ mt5_bridge.MT5Bridge ──RPyC :18812──► mt5server.exe (Wine) ──► MT5 terminal
-  └─ strategy.ScalpStrategy (M5: EMA200, RSI, ATR, session, Friday cutoff, weekend flat, closed-bar)
+  └─ strategy.ScalpStrategy (M5: EMA200, RSI, ATR, session, Friday cutoff, weekend flat, closed-bar, min ATR)
   └─ paper.PaperAccount (FORWARD_TEST fills → logs/paper_account.json)
   └─ logger.* → logs/{system,trades}.jsonl, live_status.json, connection_status.json, daily_stats.json
 dashboard.py ──reads those files only──► :8088
@@ -67,12 +68,13 @@ deploy.sh (cron */15): git pull --ff-only + restart only if HEAD moved
 Key config (`config.py`): `TRADING_MODE` ("FORWARD_TEST" default / "LIVE"),
 `SIM_START_BALANCE=200`, `BE_TRIGGER_R=0.75`, `RPC_TIMEOUT_SECONDS=30`,
 **SESSION_FILTER_***, **FRIDAY_CUTOFF_***, **WEEKEND_FLAT_ENABLED**,
-**RSI_*_LEVEL**, **SIGNAL_ON_CLOSED_BAR**.
+**RSI_*_LEVEL**, **SIGNAL_ON_CLOSED_BAR**, **MIN_ATR**, **MIN_SL_SPREAD_MULT**.
 
 ## 3. Changelog (what was done and why)
 
 | Date | Change | Why |
 |---|---|---|
+| 09-21 | **v10**: `MIN_ATR=0.80` (was hardcoded 0.50) + live `MIN_SL_SPREAD_MULT=3` | Dead-market ATR vs 30–80pt GOLD spread ate R; listed next experiment on 09-20 |
 | 09-20 | **HANDOFF §0**: hands-off model as default; deploy cron is the path | User wants zero day-to-day SSH for code updates |
 | 09-20 | **v9 strategy**: `WEEKEND_FLAT_ENABLED` — no *new* entries Sat/Sun | Session hours are UTC-hour only; Sat/Sun 07–17 could still fire on thin/gap quotes |
 | 09-19 | **v8 strategy**: Friday ≥16:00 UTC no *new* entries | Thin Friday gold / weekend-gap risk |
@@ -83,6 +85,9 @@ Key config (`config.py`): `TRADING_MODE` ("FORWARD_TEST" default / "LIVE"),
 
 ### Daily review notes
 
+- **2026-09-21 (Mon AM):** First London week after v9. No paper ledger visible here.
+  Shipped v10 (min ATR + SL-vs-spread). Left RR 1:2.5, RSI 30/70, session 07–17,
+  and LIVE alone. Next after paper sample: H1 EMA confirm or tighter 08–16 window.
 - **2026-09-20 (later):** User requested fully hands-off. Documented §0 (deploy
   cron as default). No strategy change. Paper ledger still on-server only.
 - **2026-09-20 (Sun AM):** Shipped v9 weekend flat. Left RR/RSI/spread/ATR/LIVE alone
@@ -108,12 +113,13 @@ container crash-loops after first restart. **TODO:** file upstream.
 - [ ] Revert container `main.sh` `set -ex` → `set -e` if log noise bothers you.
 - [ ] File upstream issues for the two `mt5linux` bugs (§4).
 - [x] Merge clean PR (`resolve/v6-v7-deploy` → `main`).
-- [ ] Later: merge work branch (v8+v9) → `main`, or keep `DEPLOY_BRANCH` on work branch.
+- [ ] Later: merge work branch (v8+v9+v10) → `main`, or keep `DEPLOY_BRANCH` on work branch.
 - [ ] Judge paper book after **100+ trades**; only then consider `TRADING_MODE = "LIVE"`.
 - [ ] Optional: GOLD symbol if broker renames it.
 - [ ] After paper data: H1 trend filter or tighter session (08–16 UTC).
 - [x] Friday early-close (v8).
 - [x] Weekend flat (v9).
+- [x] Spread-aware min ATR + SL-vs-spread (v10).
 - [ ] Optional (not required for hands-off): dump `python paper.py` and note WR/PF in §1.
 
 ## 6. Runbook (only if something breaks or you want a peek)
@@ -154,6 +160,7 @@ docker compose up -d
 | `Market data temporarily unavailable` | symbol/tick/login issue |
 | container `Restarting (1)` silently | upstream `set -e` bugs (§4) |
 | deploy.log shows "already up to date" | normal; no new commits |
+| `SKIP reason=sl_vs_spread` | v10: ATR-based SL too small vs live bid/ask |
 
 ## 8. Session protocol (for agents / daily review)
 

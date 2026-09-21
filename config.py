@@ -38,7 +38,7 @@ RECONNECT_MAX_DELAY_SECONDS = 60  # Cap for exponential reconnect backoff
 STALE_TICK_WARN_CYCLES = 20    # Warn after N loops with an unchanged tick
 STALE_TICK_RECONNECT_CYCLES = 120  # Force reconnect after N loops with an unchanged tick
 
-# --- Strategy filters (v9) ---
+# --- Strategy filters (v10) ---
 # Session filter: only take signals during higher-liquidity hours (UTC).
 # London open ~07:00, NY open ~13:00; we allow 07:00–17:00 UTC to cover
 # London + London-NY overlap and early NY. Asian session is skipped.
@@ -63,3 +63,11 @@ RSI_SELL_LEVEL = 70
 # Combined with one-shot-per-bar in ScalpStrategy so the 15s live loop cannot
 # re-fire the same RSI cross after a quick scratch/BE exit.
 SIGNAL_ON_CLOSED_BAR = True
+
+# Minimum M5 ATR in price units. $0.50 was too low vs typical GOLD spread
+# (30–80 points ≈ $0.30–$0.80), so SL/TP were mostly the bid/ask.
+MIN_ATR = 0.80
+
+# Live/paper only: require sl_dist >= this multiple of (ask-bid).
+# 0 disables. 3.0 means R must be at least 3 spreads before we take the trade.
+MIN_SL_SPREAD_MULT = 3.0

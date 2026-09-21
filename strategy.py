@@ -79,8 +79,8 @@ class ScalpStrategy:
             except Exception:
                 bar_ts = None
 
-        # Minimum volatility filter ($0.50)
-        if current_atr < 0.50:
+        min_atr = float(getattr(config, "MIN_ATR", 0.50))
+        if current_atr < min_atr:
             return None, 0, 0
 
         # Dynamic SL & TP based on market volatility (still ~1:2.5 RR)
