@@ -23,6 +23,17 @@ def _today():
     return date.today().isoformat()
 
 
+def _empty_stats():
+    return {
+        "date": _today(),
+        "pnl": 0.0,
+        "trades": 0,
+        "wins": 0,
+        "losses": 0,
+        "consecutive_losses": 0,
+    }
+
+
 def log_system(level: str, message: str):
     entry = {
         "time": _now(),
@@ -47,14 +58,16 @@ def log_trade(event: str, data: dict):
 
 def get_today_stats():
     if not DAILY_STATS_FILE.exists():
-        return {"date": _today(), "pnl": 0.0, "trades": 0, "wins": 0, "losses": 0}
+        return _empty_stats()
 
     with open(DAILY_STATS_FILE) as f:
         stats = json.load(f)
 
     if stats.get("date") != _today():
-        stats = {"date": _today(), "pnl": 0.0, "trades": 0, "wins": 0, "losses": 0}
+        stats = _empty_stats()
         save_daily_stats(stats)
+    else:
+        stats.setdefault("consecutive_losses", 0)
 
     return stats
 
@@ -70,8 +83,10 @@ def update_daily_pnl(pnl: float, is_win: bool):
     stats["trades"] += 1
     if is_win:
         stats["wins"] += 1
+        stats["consecutive_losses"] = 0
     else:
         stats["losses"] += 1
+        stats["consecutive_losses"] = int(stats.get("consecutive_losses", 0)) + 1
     save_daily_stats(stats)
     return stats
 
