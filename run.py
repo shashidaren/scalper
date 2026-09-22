@@ -102,6 +102,16 @@ def main():
                     time.sleep(300)
                     continue
 
+                max_cl = int(getattr(config, "MAX_CONSECUTIVE_LOSSES", 0) or 0)
+                if max_cl > 0 and int(stats.get("consecutive_losses", 0) or 0) >= max_cl:
+                    log_system(
+                        "WARNING",
+                        f"Consecutive-loss pause ({stats.get('consecutive_losses')} >= {max_cl}). "
+                        f"No new entries until tomorrow."
+                    )
+                    time.sleep(300)
+                    continue
+
                 # --- Market data (tolerant) ---
                 acc = bridge.get_account_info()
                 tick = bridge.get_live_tick()
