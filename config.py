@@ -25,7 +25,10 @@ MAX_SPREAD_POINTS = 80
 # --- Risk Controls ---
 MAX_DAILY_LOSS = 30.0          # Stop trading for the day if daily PnL <= -$30
 MAX_TRADES_PER_DAY = 15        # Hard cap on number of trades per day
-MAX_CONSECUTIVE_LOSSES = 4     # Optional pause after X losses in a row
+# Pause *new* entries for the rest of the calendar day after this many
+# consecutive closed losses (paper or live). 0 disables. Open trades still
+# manage to SL/TP/BE. Streak resets on a win or a new day.
+MAX_CONSECUTIVE_LOSSES = 4
 
 # Loop timing
 CHECK_INTERVAL_SECONDS = 15    # How often the live loop checks for signals
