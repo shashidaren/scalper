@@ -31,7 +31,7 @@ No manual `git pull` / `systemctl restart` required.
 
 ---
 
-## 1. Where things stand (as of 2026-09-22)
+## 1. Where things stand (as of 2026-09-23)
 
 - **Repo/branch:** `shashidaren/scalper`. Daily-review work lands on
   `arena/01a0a475-scalper` (server `deploy.sh` defaults here). `main` is behind
@@ -74,6 +74,7 @@ Key config (`config.py`): `TRADING_MODE` ("FORWARD_TEST" default / "LIVE"),
 
 | Date | Change | Why |
 |---|---|---|
+| 09-23 | Daily review only — no strategy/engine change. | v11 is <24h old; no paper sample; stacking another filter would be guesswork |
 | 09-22 | **v11**: wire `MAX_CONSECUTIVE_LOSSES=4` (already in config, unused). Track streak in daily_stats; pause *new* entries rest of day. Open trades still SL/TP/BE. `0` disables. | Stop revenge/overtrade after a losing cluster; listed risk control was a no-op |
 | 09-21 | **v10**: `MIN_ATR=0.80` (was hardcoded 0.50) + live `MIN_SL_SPREAD_MULT=3` | Dead-market ATR vs 30–80pt GOLD spread ate R; listed next experiment on 09-20 |
 | 09-20 | **HANDOFF §0**: hands-off model as default; deploy cron is the path | User wants zero day-to-day SSH for code updates |
@@ -86,6 +87,15 @@ Key config (`config.py`): `TRADING_MODE` ("FORWARD_TEST" default / "LIVE"),
 
 ### Daily review notes
 
+- **2026-09-23 (Wed AM):** Reviewed work-branch HEAD `b13025b` (v11) vs `main`
+  (`69d7478`, still v6–v7 only). Strategy remains M5 EMA200 + RSI 30/70 cross +
+  ATR×2 / ×5 RR, session 07–17 UTC, Fri≥16:00, weekend flat, closed-bar one-shot,
+  MIN_ATR 0.80, sl≥3×spread, MAX_CONSECUTIVE_LOSSES=4. `TRADING_MODE` still
+  FORWARD_TEST. Paper ledger not visible here. Weaknesses still on the list but
+  **not** changed today: late RSI recoveries (curr can print far from 30/70),
+  no H1 trend confirm, 07 and 16 UTC edge hours, BE@0.75R can scratch winners,
+  open Friday trades can still ride the weekend. Next after a paper sample:
+  H1 EMA confirm or tighter 08–16 UTC — not both at once.
 - **2026-09-22 (Tue AM):** `main` still behind work branch (v8–v11). No paper
   ledger visible here. Did not change RR 1:2.5, RSI 30/70, session 07–17, ATR,
   or LIVE. Wired the unused consecutive-loss circuit breaker (v11). Next after
