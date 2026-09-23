@@ -28,7 +28,8 @@ MAX_TRADES_PER_DAY = 15        # Hard cap on number of trades per day
 # Pause *new* entries for the rest of the calendar day after this many
 # consecutive closed losses (paper or live). 0 disables. Open trades still
 # manage to SL/TP/BE. Streak resets on a win or a new day.
-MAX_CONSECUTIVE_LOSSES = 4
+# v12: tightened 4→2 after paper 0/13 wipe so a bad cluster stops faster.
+MAX_CONSECUTIVE_LOSSES = 2
 
 # Loop timing
 CHECK_INTERVAL_SECONDS = 15    # How often the live loop checks for signals
@@ -41,26 +42,32 @@ RECONNECT_MAX_DELAY_SECONDS = 60  # Cap for exponential reconnect backoff
 STALE_TICK_WARN_CYCLES = 20    # Warn after N loops with an unchanged tick
 STALE_TICK_RECONNECT_CYCLES = 120  # Force reconnect after N loops with an unchanged tick
 
-# --- Strategy filters (v10) ---
+# --- Strategy filters (v12) ---
 # Session filter: only take signals during higher-liquidity hours (UTC).
-# London open ~07:00, NY open ~13:00; we allow 07:00–17:00 UTC to cover
-# London + London-NY overlap and early NY. Asian session is skipped.
+# v12: 08–16 UTC (was 07–17). Drops London-open noise and late-NY fade.
 SESSION_FILTER_ENABLED = True
-SESSION_START_HOUR_UTC = 7
-SESSION_END_HOUR_UTC = 17
+SESSION_START_HOUR_UTC = 8
+SESSION_END_HOUR_UTC = 16
 
 # Friday early-close: gold thins into the weekend; skip *new* entries after
 # this UTC hour on Friday. Open trades still manage to SL/TP/BE.
 FRIDAY_CUTOFF_ENABLED = True
 FRIDAY_CUTOFF_HOUR_UTC = 16
 
-# Weekend flat: session hours alone would still allow Sat/Sun 07–17 UTC.
+# Weekend flat: session hours alone would still allow Sat/Sun session hours.
 # Skip *new* entries on Saturday and Sunday (weekend gap / thin quotes).
 WEEKEND_FLAT_ENABLED = True
 
 # RSI extremes (softer than original 28/72 for more quality pullbacks)
 RSI_BUY_LEVEL = 30
 RSI_SELL_LEVEL = 70
+# v12 recovery band: reject late RSI crosses that already ran far from the
+# extreme (chase entries). 0 disables the cap/floor.
+RSI_BUY_MAX = 40    # BUY only if rsi_curr <= this after crossing BUY_LEVEL
+RSI_SELL_MIN = 60   # SELL only if rsi_curr >= this after crossing SELL_LEVEL
+
+# v12: signal bar body must agree with direction (bullish candle for BUY).
+REQUIRE_SIGNAL_CANDLE = True
 
 # Evaluate EMA/RSI/ATR on the last *completed* M5 bar (not the forming one).
 # Combined with one-shot-per-bar in ScalpStrategy so the 15s live loop cannot

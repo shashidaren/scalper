@@ -31,23 +31,24 @@ No manual `git pull` / `systemctl restart` required.
 
 ---
 
-## 1. Where things stand (as of 2026-09-23)
+## 1. Where things stand (as of 2026-09-23 PM)
 
 - **Repo/branch:** `shashidaren/scalper`. Daily-review work lands on
   `arena/01a0a475-scalper` (server `deploy.sh` defaults here). `main` is behind
-  (has v6–v7 + deploy.sh via PR #3; does **not** have v8–v11).
+  (has v6–v7 + deploy.sh via PR #3; does **not** have v8–v12).
 - **Server** (`scalping`):
-  - `scalper-bot.service` → **FORWARD_TEST (paper)** only. $200 sim balance on
+  - `scalper-bot.service` → **FORWARD_TEST (paper)** only. $200 sim start on
     real GOLD ticks. **No real orders.**
   - `scalper-dashboard.service` on port 8088 (reads log files only).
   - MT5 container via `docker-compose.yml` (`lprett-mt5linux-patched`, see §4).
   - **Deploy:** hands-off via `deploy.sh` + cron (see §0).
-- **Strategy version:** v11 (consecutive-loss day pause wired; still v10 filters:
-  `MIN_ATR=0.80` + `MIN_SL_SPREAD_MULT=3` + v9 weekend + v8 Fri ≥16:00 UTC +
-  v7 closed-bar + v6 London/NY + RSI 30/70). Paper-only. `TRADING_MODE` unchanged.
-- **Paper book:** lives on the server (`logs/paper_account.json`). Not visible to
-  daily-review sessions. Optional check: `python paper.py` on the server; paste
-  win/loss into §1 when you have a sample. Not required for hands-off operation.
+- **Strategy version:** **v12** after paper wipe under v11. Filters: RSI recovery
+  band 40/60 + signal-candle confirm + session **08–16 UTC** + consecutive-loss
+  pause **@2** + prior v10/v9/v8/v7/v6 stack. Paper-only. `TRADING_MODE` unchanged.
+- **Paper book (user dump 2026-09-23):** balance **$142.03** (start $200),
+  **0 wins / 13 losses**, no open position. Avg ~−$4.46/trade ≈ full ATR SL hits.
+  Edge under v6–v11 filters is **negative**. Optional: `python paper.py --reset`
+  after v12 deploys for a clean sample (or keep ledger as evidence).
 - **Daily automation:** `scalper-daily-review-9am-kl` @ 09:00 Asia/Kuala_Lumpur.
 
 ## 2. Architecture
@@ -55,7 +56,7 @@ No manual `git pull` / `systemctl restart` required.
 ```
 run.py (engine loop)
   └─ mt5_bridge.MT5Bridge ──RPyC :18812──► mt5server.exe (Wine) ──► MT5 terminal
-  └─ strategy.ScalpStrategy (M5: EMA200, RSI, ATR, session, Friday cutoff, weekend flat, closed-bar, min ATR)
+  └─ strategy.ScalpStrategy (M5: EMA200, RSI band, ATR, session 08-16, candle confirm, …)
   └─ paper.PaperAccount (FORWARD_TEST fills → logs/paper_account.json)
   └─ logger.* → logs/{system,trades}.jsonl, live_status.json, connection_status.json, daily_stats.json
 dashboard.py ──reads those files only──► :8088
@@ -66,20 +67,22 @@ deploy.sh (cron */15): git pull --ff-only + restart only if HEAD moved
 
 Key config (`config.py`): `TRADING_MODE` ("FORWARD_TEST" default / "LIVE"),
 `SIM_START_BALANCE=200`, `BE_TRIGGER_R=0.75`, `RPC_TIMEOUT_SECONDS=30`,
-**SESSION_FILTER_***, **FRIDAY_CUTOFF_***, **WEEKEND_FLAT_ENABLED**,
-**RSI_*_LEVEL**, **SIGNAL_ON_CLOSED_BAR**, **MIN_ATR**, **MIN_SL_SPREAD_MULT**,
-**MAX_CONSECUTIVE_LOSSES**.
+**SESSION_FILTER_*** (08–16), **FRIDAY_CUTOFF_***, **WEEKEND_FLAT_ENABLED**,
+**RSI_*_LEVEL**, **RSI_BUY_MAX / RSI_SELL_MIN**, **REQUIRE_SIGNAL_CANDLE**,
+**SIGNAL_ON_CLOSED_BAR**, **MIN_ATR**, **MIN_SL_SPREAD_MULT**,
+**MAX_CONSECUTIVE_LOSSES=2**.
 
 ## 3. Changelog (what was done and why)
 
 | Date | Change | Why |
 |---|---|---|
-| 09-23 | Daily review only — no strategy/engine change. | v11 is <24h old; no paper sample; stacking another filter would be guesswork |
-| 09-22 | **v11**: wire `MAX_CONSECUTIVE_LOSSES=4` (already in config, unused). Track streak in daily_stats; pause *new* entries rest of day. Open trades still SL/TP/BE. `0` disables. | Stop revenge/overtrade after a losing cluster; listed risk control was a no-op |
-| 09-21 | **v10**: `MIN_ATR=0.80` (was hardcoded 0.50) + live `MIN_SL_SPREAD_MULT=3` | Dead-market ATR vs 30–80pt GOLD spread ate R; listed next experiment on 09-20 |
-| 09-20 | **HANDOFF §0**: hands-off model as default; deploy cron is the path | User wants zero day-to-day SSH for code updates |
-| 09-20 | **v9 strategy**: `WEEKEND_FLAT_ENABLED` — no *new* entries Sat/Sun | Session hours are UTC-hour only; Sat/Sun 07–17 could still fire on thin/gap quotes |
-| 09-19 | **v8 strategy**: Friday ≥16:00 UTC no *new* entries | Thin Friday gold / weekend-gap risk |
+| 09-23 PM | **v12**: RSI recovery band (BUY≤40 / SELL≥60), signal-candle body confirm, session 08–16 UTC, `MAX_CONSECUTIVE_LOSSES` 4→2 | Paper **0/13**, $200→$142; late RSI chases + edge-hour noise; stop bleeding clusters faster |
+| 09-23 AM | Daily review only — no strategy/engine change | v11 <24h old; no paper sample yet |
+| 09-22 | **v11**: wire `MAX_CONSECUTIVE_LOSSES=4`. Track streak; pause *new* entries rest of day. `0` disables. | Stop revenge/overtrade after a losing cluster |
+| 09-21 | **v10**: `MIN_ATR=0.80` + live `MIN_SL_SPREAD_MULT=3` | Dead-market ATR vs GOLD spread ate R |
+| 09-20 | **HANDOFF §0**: hands-off model; deploy cron is the path | Zero day-to-day SSH for code updates |
+| 09-20 | **v9**: `WEEKEND_FLAT_ENABLED` — no *new* entries Sat/Sun | Thin/gap weekend quotes |
+| 09-19 | **v8**: Friday ≥16:00 UTC no *new* entries | Thin Friday gold / weekend-gap |
 | 09-18 | **Conflict resolve + merge to main** (PR #3); **`deploy.sh`** | Promote v6+v7; hands-off pull+restart |
 | 09-18 | **v7**: closed-bar signal + one-shot per bar | Forming-bar RSI flicker / re-entry |
 | 09-17 | **v6**: London/NY 07–17 UTC, RSI 30/70, better backtest stats | Cut Asian noise |
@@ -87,29 +90,20 @@ Key config (`config.py`): `TRADING_MODE` ("FORWARD_TEST" default / "LIVE"),
 
 ### Daily review notes
 
-- **2026-09-23 (Wed AM):** Reviewed work-branch HEAD `b13025b` (v11) vs `main`
-  (`69d7478`, still v6–v7 only). Strategy remains M5 EMA200 + RSI 30/70 cross +
-  ATR×2 / ×5 RR, session 07–17 UTC, Fri≥16:00, weekend flat, closed-bar one-shot,
-  MIN_ATR 0.80, sl≥3×spread, MAX_CONSECUTIVE_LOSSES=4. `TRADING_MODE` still
-  FORWARD_TEST. Paper ledger not visible here. Weaknesses still on the list but
-  **not** changed today: late RSI recoveries (curr can print far from 30/70),
-  no H1 trend confirm, 07 and 16 UTC edge hours, BE@0.75R can scratch winners,
-  open Friday trades can still ride the weekend. Next after a paper sample:
-  H1 EMA confirm or tighter 08–16 UTC — not both at once.
-- **2026-09-22 (Tue AM):** `main` still behind work branch (v8–v11). No paper
-  ledger visible here. Did not change RR 1:2.5, RSI 30/70, session 07–17, ATR,
-  or LIVE. Wired the unused consecutive-loss circuit breaker (v11). Next after
-  paper sample: H1 EMA confirm or tighter 08–16 window. Optional later: max hold
-  / flatten into Friday close (open trades can still ride the weekend).
-- **2026-09-21 (Mon AM):** First London week after v9. No paper ledger visible here.
-  Shipped v10 (min ATR + SL-vs-spread). Left RR 1:2.5, RSI 30/70, session 07–17,
-  and LIVE alone. Next after paper sample: H1 EMA confirm or tighter 08–16 window.
-- **2026-09-20 (later):** User requested fully hands-off. Documented §0 (deploy
-  cron as default). No strategy change. Paper ledger still on-server only.
-- **2026-09-20 (Sun AM):** Shipped v9 weekend flat. Left RR/RSI/spread/ATR/LIVE alone
-  (no paper sample). Next experiments after data: H1 EMA confirm, spread-aware min ATR, tighter 08–16 window.
-- **2026-09-19:** Shipped v8 Friday cutoff.
-- **2026-09-18:** Shipped v7 + deploy.sh.
+- **2026-09-23 (Wed PM — paper dump):** User pasted paper ledger: **$142.03,
+  closed=13, wins=0, losses=13**. Under v11 stack the strategy has no edge on
+  this sample (avg loss ≈ full SL). Shipped **v12** quality filters (recovery
+  band + candle confirm + 08–16 session) and faster day-pause (2 losses).
+  Did **not** change RR 1:2.5, RSI cross levels 30/70, MIN_ATR, or LIVE.
+  Next after a **fresh** v12 sample: H1 EMA confirm **or** mean-reversion
+  experiment (drop EMA filter) — only with data. Optional `paper.py --reset`.
+- **2026-09-23 (Wed AM):** No paper sample yet; no code change. Listed late RSI
+  recoveries and 07/16 edge hours as next candidates — those are now in v12.
+- **2026-09-22 (Tue AM):** Wired consecutive-loss pause (v11).
+- **2026-09-21 (Mon AM):** Shipped v10 (min ATR + SL-vs-spread).
+- **2026-09-20:** Hands-off §0 + v9 weekend flat.
+- **2026-09-19:** v8 Friday cutoff.
+- **2026-09-18:** v7 + deploy.sh.
 
 ## 4. Server-side patches NOT in git (baked into the container image)
 
@@ -129,16 +123,18 @@ container crash-loops after first restart. **TODO:** file upstream.
 - [ ] Revert container `main.sh` `set -ex` → `set -e` if log noise bothers you.
 - [ ] File upstream issues for the two `mt5linux` bugs (§4).
 - [x] Merge clean PR (`resolve/v6-v7-deploy` → `main`).
-- [ ] Later: merge work branch (v8+v9+v10+v11) → `main`, or keep `DEPLOY_BRANCH` on work branch.
-- [ ] Judge paper book after **100+ trades**; only then consider `TRADING_MODE = "LIVE"`.
+- [ ] Later: merge work branch (v8…v12) → `main`, or keep `DEPLOY_BRANCH` on work branch.
+- [ ] Judge paper book after **100+ trades under a single version**; only then consider LIVE.
 - [ ] Optional: GOLD symbol if broker renames it.
-- [ ] After paper data: H1 trend filter or tighter session (08–16 UTC).
+- [x] Tighter session 08–16 UTC (v12).
+- [ ] After v12 sample: H1 trend filter **or** test pure RSI mean-reversion (no EMA).
 - [x] Friday early-close (v8).
 - [x] Weekend flat (v9).
 - [x] Spread-aware min ATR + SL-vs-spread (v10).
-- [x] Consecutive-loss day pause (v11; was config-only).
-- [ ] Optional later: max-hold / flatten before Friday close (open trades can still ride weekend).
-- [ ] Optional (not required for hands-off): dump `python paper.py` and note WR/PF in §1.
+- [x] Consecutive-loss day pause (v11; tightened to 2 in v12).
+- [x] RSI recovery band + signal-candle confirm (v12).
+- [ ] Optional later: max-hold / flatten before Friday close.
+- [ ] Optional: `python paper.py --reset` then note new WR/PF in §1.
 
 ## 6. Runbook (only if something breaks or you want a peek)
 
@@ -152,6 +148,8 @@ tail -5 /root/scalper/logs/deploy.log
 
 # paper account (optional)
 cd /root/scalper && mt5env/bin/python paper.py
+# clean sample for v12 (optional — destroys evidence of v11 wipe):
+# mt5env/bin/python paper.py --reset
 grep SIM_ logs/trades.jsonl | tail
 
 # MT5 container
@@ -165,7 +163,6 @@ docker compose up -d
 
 # switch deploy target to main after you merge (optional)
 # DEPLOY_BRANCH=main /root/scalper/deploy.sh
-# (or set DEPLOY_BRANCH permanently in the cron line)
 ```
 
 ## 7. Failure signatures
@@ -179,7 +176,7 @@ docker compose up -d
 | container `Restarting (1)` silently | upstream `set -e` bugs (§4) |
 | deploy.log shows "already up to date" | normal; no new commits |
 | `SKIP reason=sl_vs_spread` | v10: ATR-based SL too small vs live bid/ask |
-| `Consecutive-loss pause` | v11: 4 losing closes in a row today; no new entries until next day |
+| `Consecutive-loss pause` | v12: 2 losing closes in a row today; no new entries until next day |
 
 ## 8. Session protocol (for agents / daily review)
 

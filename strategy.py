@@ -65,6 +65,7 @@ class ScalpStrategy:
         prev_idx = idx - 1
 
         current_close = df['close'].iloc[idx]
+        current_open = df['open'].iloc[idx] if 'open' in df.columns else current_close
         current_ema = df['ema200'].iloc[idx]
         current_atr = df['atr'].iloc[idx]
         rsi_curr = df['rsi'].iloc[idx]
@@ -89,17 +90,28 @@ class ScalpStrategy:
 
         buy_level = getattr(config, "RSI_BUY_LEVEL", 30)
         sell_level = getattr(config, "RSI_SELL_LEVEL", 70)
+        buy_max = float(getattr(config, "RSI_BUY_MAX", 0) or 0)
+        sell_min = float(getattr(config, "RSI_SELL_MIN", 0) or 0)
 
         signal = None
-        # BUY: Uptrend + RSI bounce from oversold
+        # BUY: Uptrend + RSI bounce from oversold (not a late chase)
         if current_close > current_ema and rsi_prev <= buy_level and rsi_curr > buy_level:
-            signal = "BUY"
-        # SELL: Downtrend + RSI reversal from overbought
+            if buy_max <= 0 or rsi_curr <= buy_max:
+                signal = "BUY"
+        # SELL: Downtrend + RSI reversal from overbought (not a late chase)
         elif current_close < current_ema and rsi_prev >= sell_level and rsi_curr < sell_level:
-            signal = "SELL"
+            if sell_min <= 0 or rsi_curr >= sell_min:
+                signal = "SELL"
 
         if signal is None:
             return None, 0, 0
+
+        # v12: signal-bar body must agree with direction (reject doji / opposite).
+        if getattr(config, "REQUIRE_SIGNAL_CANDLE", False):
+            if signal == "BUY" and not (current_close > current_open):
+                return None, 0, 0
+            if signal == "SELL" and not (current_close < current_open):
+                return None, 0, 0
 
         # One-shot per closed bar: same RSI cross must not re-fire every 15s
         # (or after a quick scratch) while that bar is still the latest complete one.
