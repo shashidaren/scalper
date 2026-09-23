@@ -12,18 +12,20 @@ You should **not** need to SSH for day-to-day updates.
 
 | Who | Does what |
 |---|---|
-| **Daily review** (09:00 Asia/KL) | Reviews strategy, may push small reversible changes to `arena/01a0a475-scalper`, updates this file |
-| **Server** | `deploy.sh` cron every 15 min: `git pull --ff-only` + restart `scalper-bot` **only if HEAD moved** |
-| **You** | One-time: install the deploy cron (below). Optional: glance at dashboard `:8088` or `python paper.py` when curious. **Never** flip `TRADING_MODE` to LIVE without a deliberate paper review |
+| **Daily review** (09:00 Asia/KL) | Reviews strategy, may push small reversible changes to `arena/01a0a475-scalper`, updates this file. **Records paper book** when a `python paper.py` dump is in the conversation; otherwise notes "not available" and asks you to paste. |
+| **Server** | `deploy.sh` cron every 15 min: `git pull --ff-only` + restart `scalper-bot` **only if HEAD moved**. Optional: `scripts/paper_status_daily.sh` cron for on-server paper history (`logs/paper_daily.jsonl`). |
+| **You** | One-time: install the deploy cron (below). **Daily paper into HANDOFF:** paste output of `cd /root/scalper && mt5env/bin/python paper.py` into chat when convenient (after session is ideal). **Never** flip `TRADING_MODE` to LIVE without a deliberate paper review |
 
 **One-time server setup** (run once if not already wired):
 
 ```bash
-# ensure script is executable
-chmod +x /root/scalper/deploy.sh
+# ensure scripts are executable
+chmod +x /root/scalper/deploy.sh /root/scalper/scripts/paper_status_daily.sh
 
 # crontab -e  → add:
 */15 * * * * /root/scalper/deploy.sh >> /root/scalper/logs/deploy.cron.log 2>&1
+# optional — on-server paper trail after London/NY (17:05 UTC weekdays):
+5 17 * * 1-5 /root/scalper/scripts/paper_status_daily.sh >> /root/scalper/logs/paper_status.cron.log 2>&1
 ```
 
 After that: push to the work branch → within ~15 min the bot is on the new code.
@@ -37,19 +39,18 @@ No manual `git pull` / `systemctl restart` required.
   `arena/01a0a475-scalper` (server `deploy.sh` defaults here). `main` is behind
   (has v6–v7 + deploy.sh via PR #3; does **not** have v8–v12).
 - **Server** (`scalping`):
-  - `scalper-bot.service` → **FORWARD_TEST (paper)** only. $200 sim start on
-    real GOLD ticks. **No real orders.**
+  - `scalper-bot.service` → **FORWARD_TEST (paper)** only. **No real orders.**
   - `scalper-dashboard.service` on port 8088 (reads log files only).
   - MT5 container via `docker-compose.yml` (`lprett-mt5linux-patched`, see §4).
   - **Deploy:** hands-off via `deploy.sh` + cron (see §0).
-- **Strategy version:** **v12** after paper wipe under v11. Filters: RSI recovery
-  band 40/60 + signal-candle confirm + session **08–16 UTC** + consecutive-loss
-  pause **@2** + prior v10/v9/v8/v7/v6 stack. Paper-only. `TRADING_MODE` unchanged.
-- **Paper book (user dump 2026-09-23):** balance **$142.03** (start $200),
-  **0 wins / 13 losses**, no open position. Avg ~−$4.46/trade ≈ full ATR SL hits.
-  Edge under v6–v11 filters is **negative**. Optional: `python paper.py --reset`
-  after v12 deploys for a clean sample (or keep ledger as evidence).
-- **Daily automation:** `scalper-daily-review-9am-kl` @ 09:00 Asia/Kuala_Lumpur.
+- **Strategy version:** **v12** (HEAD `781d7dd`). RSI recovery band 40/60 +
+  signal-candle confirm + session **08–16 UTC** + consecutive-loss pause **@2** +
+  prior v10/v9/v8/v7/v6 stack. `TRADING_MODE` = FORWARD_TEST.
+- **Paper book (2026-09-23 after reset):** balance **$200.00**, closed **0**,
+  wins **0**, losses **0**, position null. (Prior v11 sample was 0/13, $142 —
+  wiped via `paper.py --reset` for a clean v12 book.)
+- **Daily automation:** `scalper-daily-review-9am-kl` @ 09:00 Asia/Kuala_Lumpur
+  (prompt now requires recording paper dump when pasted).
 
 ## 2. Architecture
 
@@ -60,6 +61,7 @@ run.py (engine loop)
   └─ paper.PaperAccount (FORWARD_TEST fills → logs/paper_account.json)
   └─ logger.* → logs/{system,trades}.jsonl, live_status.json, connection_status.json, daily_stats.json
 dashboard.py ──reads those files only──► :8088
+scripts/paper_status_daily.sh → logs/paper_daily.jsonl (optional cron)
 MT5 container: lprett/mt5linux (patched image), .env secrets
 systemd: scalper-bot ExecStartPre=wait_for_mt5.py
 deploy.sh (cron */15): git pull --ff-only + restart only if HEAD moved
@@ -76,34 +78,26 @@ Key config (`config.py`): `TRADING_MODE` ("FORWARD_TEST" default / "LIVE"),
 
 | Date | Change | Why |
 |---|---|---|
-| 09-23 PM | **v12**: RSI recovery band (BUY≤40 / SELL≥60), signal-candle body confirm, session 08–16 UTC, `MAX_CONSECUTIVE_LOSSES` 4→2 | Paper **0/13**, $200→$142; late RSI chases + edge-hour noise; stop bleeding clusters faster |
-| 09-23 AM | Daily review only — no strategy/engine change | v11 <24h old; no paper sample yet |
-| 09-22 | **v11**: wire `MAX_CONSECUTIVE_LOSSES=4`. Track streak; pause *new* entries rest of day. `0` disables. | Stop revenge/overtrade after a losing cluster |
-| 09-21 | **v10**: `MIN_ATR=0.80` + live `MIN_SL_SPREAD_MULT=3` | Dead-market ATR vs GOLD spread ate R |
-| 09-20 | **HANDOFF §0**: hands-off model; deploy cron is the path | Zero day-to-day SSH for code updates |
-| 09-20 | **v9**: `WEEKEND_FLAT_ENABLED` — no *new* entries Sat/Sun | Thin/gap weekend quotes |
-| 09-19 | **v8**: Friday ≥16:00 UTC no *new* entries | Thin Friday gold / weekend-gap |
-| 09-18 | **Conflict resolve + merge to main** (PR #3); **`deploy.sh`** | Promote v6+v7; hands-off pull+restart |
-| 09-18 | **v7**: closed-bar signal + one-shot per bar | Forming-bar RSI flicker / re-entry |
-| 09-17 | **v6**: London/NY 07–17 UTC, RSI 30/70, better backtest stats | Cut Asian noise |
-| 09-15 | Engine hardening, paper mode, docker-compose/.env, HANDOFF | Production recovery + FORWARD_TEST |
+| 09-23 | Daily paper protocol: automation prompt + `scripts/paper_status_daily.sh` + HANDOFF | Need paper W/L in every review; Grok cannot SSH |
+| 09-23 PM | **v12**: RSI recovery band, signal-candle confirm, session 08–16, pause@2 | Paper **0/13** under v11 |
+| 09-23 AM | Daily review only — no strategy change | No paper sample yet |
+| 09-22 | **v11**: wire `MAX_CONSECUTIVE_LOSSES` | Stop revenge clusters |
+| 09-21 | **v10**: `MIN_ATR=0.80` + `MIN_SL_SPREAD_MULT=3` | Spread ate R |
+| 09-20 | Hands-off §0 + **v9** weekend flat | |
+| 09-19 | **v8** Friday cutoff | |
+| 09-18 | PR #3 + deploy.sh + **v7** closed-bar | |
+| 09-17 | **v6** session + RSI 30/70 | |
+| 09-15 | Engine + paper mode + HANDOFF | |
 
 ### Daily review notes
 
-- **2026-09-23 (Wed PM — paper dump):** User pasted paper ledger: **$142.03,
-  closed=13, wins=0, losses=13**. Under v11 stack the strategy has no edge on
-  this sample (avg loss ≈ full SL). Shipped **v12** quality filters (recovery
-  band + candle confirm + 08–16 session) and faster day-pause (2 losses).
-  Did **not** change RR 1:2.5, RSI cross levels 30/70, MIN_ATR, or LIVE.
-  Next after a **fresh** v12 sample: H1 EMA confirm **or** mean-reversion
-  experiment (drop EMA filter) — only with data. Optional `paper.py --reset`.
-- **2026-09-23 (Wed AM):** No paper sample yet; no code change. Listed late RSI
-  recoveries and 07/16 edge hours as next candidates — those are now in v12.
-- **2026-09-22 (Tue AM):** Wired consecutive-loss pause (v11).
-- **2026-09-21 (Mon AM):** Shipped v10 (min ATR + SL-vs-spread).
-- **2026-09-20:** Hands-off §0 + v9 weekend flat.
-- **2026-09-19:** v8 Friday cutoff.
-- **2026-09-18:** v7 + deploy.sh.
+- **2026-09-23 (Wed PM):** v12 live on server (`781d7dd`), bot restarted, paper
+  **reset to $200 / 0 closed**. Session filter idle until 08:00 UTC. Daily review
+  automation updated to always record paper dumps. Optional server cron for
+  `paper_status_daily.sh`.
+- **2026-09-23 (Wed earlier):** v11 paper wipe 0/13 $142 → shipped v12.
+- **2026-09-22:** v11 consecutive-loss pause.
+- **2026-09-21:** v10 min ATR + SL-vs-spread.
 
 ## 4. Server-side patches NOT in git (baked into the container image)
 
@@ -119,6 +113,7 @@ container crash-loops after first restart. **TODO:** file upstream.
 ## 5. Open TODOs
 
 - [ ] **One-time:** confirm deploy cron is installed (see §0). If yes, mark done.
+- [ ] **Optional:** install `paper_status_daily.sh` weekday cron (see §0).
 - [ ] **Rotate MT5 + VNC passwords** (were in plain text). Update `.env` after XM change.
 - [ ] Revert container `main.sh` `set -ex` → `set -e` if log noise bothers you.
 - [ ] File upstream issues for the two `mt5linux` bugs (§4).
@@ -134,7 +129,7 @@ container crash-loops after first restart. **TODO:** file upstream.
 - [x] Consecutive-loss day pause (v11; tightened to 2 in v12).
 - [x] RSI recovery band + signal-candle confirm (v12).
 - [ ] Optional later: max-hold / flatten before Friday close.
-- [ ] Optional: `python paper.py --reset` then note new WR/PF in §1.
+- [x] Daily paper status in review protocol (automation + HANDOFF).
 
 ## 6. Runbook (only if something breaks or you want a peek)
 
@@ -146,11 +141,11 @@ journalctl -u scalper-bot -n 20 --no-pager
 cat /root/scalper/logs/connection_status.json /root/scalper/logs/live_status.json
 tail -5 /root/scalper/logs/deploy.log
 
-# paper account (optional)
+# paper account — paste this JSON into chat for daily review / HANDOFF
 cd /root/scalper && mt5env/bin/python paper.py
-# clean sample for v12 (optional — destroys evidence of v11 wipe):
-# mt5env/bin/python paper.py --reset
 grep SIM_ logs/trades.jsonl | tail
+# on-server history if cron installed:
+tail logs/paper_daily.jsonl
 
 # MT5 container
 docker ps | grep mt5
@@ -158,11 +153,8 @@ docker logs mt5 --tail 60
 mt5env/bin/python wait_for_mt5.py --timeout 120
 docker compose up -d
 
-# force deploy now (skip waiting for cron)
+# force deploy now
 /root/scalper/deploy.sh
-
-# switch deploy target to main after you merge (optional)
-# DEPLOY_BRANCH=main /root/scalper/deploy.sh
 ```
 
 ## 7. Failure signatures
@@ -185,3 +177,4 @@ docker compose up -d
 3. **Never** touch `.env` / secrets.
 4. Push commits; server cron deploys. Do not ask the user to `git pull` unless cron is missing.
 5. Update §1, §3, §5 here every session that changes code or state.
+6. **Paper status:** if user pasted `python paper.py` output, write balance/W/L/closed into §1 and a dated §3 note. If not, say so and request a paste — do not invent stats.
