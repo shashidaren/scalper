@@ -18,6 +18,7 @@ cd "$REPO_DIR"
 
 git fetch "$REMOTE"
 BEFORE="$(git rev-parse HEAD)"
+TS="$(date -Is)"
 
 # Stay on the deploy branch (create local tracking if needed)
 if git show-ref --verify --quiet "refs/heads/${BRANCH}"; then
@@ -26,9 +27,17 @@ else
   git checkout -B "$BRANCH" "${REMOTE}/${BRANCH}"
 fi
 
+# Local edits (e.g. accidental script tweaks) block `git pull --ff-only`.
+# Stash tracked changes so cron stays hands-off; do not auto-pop (avoids
+# silent conflict noise). Untracked files (logs/, .env) are left alone.
+if ! git diff --quiet || ! git diff --cached --quiet; then
+  STASH_MSG="deploy-stash $(date -u +%Y%m%dT%H%M%SZ)"
+  echo "$TS stashing local modifications before pull: $STASH_MSG" | tee -a "${LOG_DIR}/deploy.log"
+  git stash push -m "$STASH_MSG" --quiet || true
+fi
+
 git pull --ff-only "$REMOTE" "$BRANCH"
 AFTER="$(git rev-parse HEAD)"
-TS="$(date -Is)"
 
 if [ "$BEFORE" != "$AFTER" ]; then
   if command -v systemctl >/dev/null 2>&1; then
