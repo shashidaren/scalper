@@ -33,7 +33,7 @@ No manual `git pull` / `systemctl restart` required.
 
 ---
 
-## 1. Where things stand (as of 2026-09-23 PM)
+## 1. Where things stand (as of 2026-09-24)
 
 - **Repo/branch:** `shashidaren/scalper`. Daily-review work lands on
   `arena/01a0a475-scalper` (server `deploy.sh` defaults here). `main` is behind
@@ -43,14 +43,14 @@ No manual `git pull` / `systemctl restart` required.
   - `scalper-dashboard.service` on port 8088 (reads log files only).
   - MT5 container via `docker-compose.yml` (`lprett-mt5linux-patched`, see §4).
   - **Deploy:** hands-off via `deploy.sh` + cron (see §0).
-- **Strategy version:** **v12** (HEAD `781d7dd`). RSI recovery band 40/60 +
-  signal-candle confirm + session **08–16 UTC** + consecutive-loss pause **@2** +
-  prior v10/v9/v8/v7/v6 stack. `TRADING_MODE` = FORWARD_TEST.
-- **Paper book (2026-09-23 after reset):** balance **$200.00**, closed **0**,
-  wins **0**, losses **0**, position null. (Prior v11 sample was 0/13, $142 —
-  wiped via `paper.py --reset` for a clean v12 book.)
-- **Daily automation:** `scalper-daily-review-9am-kl` @ 09:00 Asia/Kuala_Lumpur
-  (prompt now requires recording paper dump when pasted).
+- **Strategy version:** **v12** (HEAD still `781d7dd` + paper-protocol commit).
+  RSI recovery band 40/60 + signal-candle confirm + session **08–16 UTC** +
+  consecutive-loss pause **@2** + prior v10/v9/v8/v7/v6 stack.
+  `TRADING_MODE` = FORWARD_TEST.
+- **Paper book:** not available this run (no `python paper.py` dump in chat).
+  Last recorded (2026-09-23 after reset): balance **$200.00**, closed **0**,
+  wins **0**, losses **0**, position null. Prior v11 sample was 0/13, $142.
+- **Daily automation:** `scalper-daily-review-9am-kl` @ 09:00 Asia/Kuala_Lumpur.
 
 ## 2. Architecture
 
@@ -78,6 +78,7 @@ Key config (`config.py`): `TRADING_MODE` ("FORWARD_TEST" default / "LIVE"),
 
 | Date | Change | Why |
 |---|---|---|
+| 09-24 | Daily review note only — no strategy/config change | v12 needs a paper sample before another tweak |
 | 09-23 | Daily paper protocol: automation prompt + `scripts/paper_status_daily.sh` + HANDOFF | Need paper W/L in every review; Grok cannot SSH |
 | 09-23 PM | **v12**: RSI recovery band, signal-candle confirm, session 08–16, pause@2 | Paper **0/13** under v11 |
 | 09-23 AM | Daily review only — no strategy change | No paper sample yet |
@@ -91,6 +92,12 @@ Key config (`config.py`): `TRADING_MODE` ("FORWARD_TEST" default / "LIVE"),
 
 ### Daily review notes
 
+- **2026-09-24 (Thu):** Paper status **not available this run**. Work branch
+  `arena/01a0a475-scalper` is ahead of `main` (v8–v12). Reviewed `strategy.py`,
+  `config.py`, `run.py`. v12 filters look coherent; no high-confidence code
+  change without a post-reset W/L sample. Next: collect paper after London/NY;
+  only then consider H1 trend filter vs dropping EMA (mean-reversion). Do not
+  flip LIVE.
 - **2026-09-23 (Wed PM):** v12 live on server (`781d7dd`), bot restarted, paper
   **reset to $200 / 0 closed**. Session filter idle until 08:00 UTC. Daily review
   automation updated to always record paper dumps. Optional server cron for
