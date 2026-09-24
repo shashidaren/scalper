@@ -8,28 +8,53 @@ code, parameters, or the server must update §1 (state), §3 (changelog) and
 
 ## 0. Hands-off operating model (default)
 
-You should **not** need to SSH for day-to-day updates.
+You should **not** need to SSH for day-to-day updates — including paper book.
 
 | Who | Does what |
 |---|---|
-| **Daily review** (09:00 Asia/KL) | Reviews strategy, may push small reversible changes to `arena/01a0a475-scalper`, updates this file. **Records paper book** when a `python paper.py` dump is in the conversation; otherwise notes "not available" and asks you to paste. |
-| **Server** | `deploy.sh` cron every 15 min: `git pull --ff-only` + restart `scalper-bot` **only if HEAD moved**. Optional: `scripts/paper_status_daily.sh` cron for on-server paper history (`logs/paper_daily.jsonl`). |
-| **You** | One-time: install the deploy cron (below). **Daily paper into HANDOFF:** paste output of `cd /root/scalper && mt5env/bin/python paper.py` into chat when convenient (after session is ideal). **Never** flip `TRADING_MODE` to LIVE without a deliberate paper review |
+| **Daily review** (09:00 Asia/KL) | Reviews strategy on `arena/01a0a475-scalper`. **Paper book:** first try GitHub `status/paper` → `status/paper_latest.json`; else chat paste; else note "not available". |
+| **Server** | `deploy.sh` cron every 15 min. **Paper:** `paper_status_daily.sh` writes local logs + optionally publishes sanitized snapshot to branch `status/paper` (no SSH needed for review). |
+| **You** | One-time: deploy cron + paper-status cron + optional PAT (below). **Never** flip `TRADING_MODE` to LIVE without a deliberate paper review |
+
+### Paper book path (preferred → fallback)
+
+1. **Automated (preferred):** server cron runs `scripts/paper_status_daily.sh` with `PAPER_STATUS_TOKEN` set → updates `status/paper_latest.json` on branch **`status/paper`**. Daily review reads that file via GitHub API.
+2. **Chat paste (fallback):** paste output of `cd /root/scalper && mt5env/bin/python paper.py`.
+3. If neither: write "paper status not available this run" — **do not invent numbers**.
 
 **One-time server setup** (run once if not already wired):
 
 ```bash
-# ensure scripts are executable
 chmod +x /root/scalper/deploy.sh /root/scalper/scripts/paper_status_daily.sh
 
 # crontab -e  → add:
 */15 * * * * /root/scalper/deploy.sh >> /root/scalper/logs/deploy.cron.log 2>&1
-# optional — on-server paper trail after London/NY (17:05 UTC weekdays):
+
+# Paper snapshot after London/NY (17:05 UTC weekdays) — local + optional GitHub publish:
 5 17 * * 1-5 /root/scalper/scripts/paper_status_daily.sh >> /root/scalper/logs/paper_status.cron.log 2>&1
+# Optional: also just before KL morning review (01:00 UTC = 09:00 Asia/KL):
+0 1 * * 1-5 /root/scalper/scripts/paper_status_daily.sh >> /root/scalper/logs/paper_status.cron.log 2>&1
 ```
 
-After that: push to the work branch → within ~15 min the bot is on the new code.
-No manual `git pull` / `systemctl restart` required.
+**One-time: enable GitHub publish** (so you never need to paste for daily review):
+
+1. GitHub → Settings → Developer settings → Fine-grained PAT:
+   - Resource: only `shashidaren/scalper`
+   - Permissions: **Contents: Read and write**
+   - No other scopes
+2. On server (root-only file, **never commit**):
+
+```bash
+cat > /root/scalper/.env.paper_status <<'EOF'
+PAPER_STATUS_TOKEN=github_pat_YOUR_TOKEN_HERE
+EOF
+chmod 600 /root/scalper/.env.paper_status
+```
+
+3. Test once: `/root/scalper/scripts/paper_status_daily.sh` — should print `published ... status/paper`.
+4. Confirm: https://github.com/shashidaren/scalper/blob/status/paper/status/paper_latest.json
+
+After that: push to work branch → deploy cron applies code; paper cron feeds HANDOFF automatically.
 
 ---
 
@@ -43,11 +68,10 @@ No manual `git pull` / `systemctl restart` required.
   - `scalper-dashboard.service` on port 8088 (reads log files only).
   - MT5 container via `docker-compose.yml` (`lprett-mt5linux-patched`, see §4).
   - **Deploy:** hands-off via `deploy.sh` + cron (see §0).
-- **Strategy version:** **v12** (HEAD still `781d7dd` + paper-protocol commit).
+- **Strategy version:** **v12** + paper auto-publish plumbing (script + status branch).
   RSI recovery band 40/60 + signal-candle confirm + session **08–16 UTC** +
-  consecutive-loss pause **@2** + prior v10/v9/v8/v7/v6 stack.
-  `TRADING_MODE` = FORWARD_TEST.
-- **Paper book:** not available this run (no `python paper.py` dump in chat).
+  consecutive-loss pause **@2** + prior stack. `TRADING_MODE` = FORWARD_TEST.
+- **Paper book:** not available this run (no status publish yet; no chat paste).
   Last recorded (2026-09-23 after reset): balance **$200.00**, closed **0**,
   wins **0**, losses **0**, position null. Prior v11 sample was 0/13, $142.
 - **Daily automation:** `scalper-daily-review-9am-kl` @ 09:00 Asia/Kuala_Lumpur.
@@ -61,7 +85,8 @@ run.py (engine loop)
   └─ paper.PaperAccount (FORWARD_TEST fills → logs/paper_account.json)
   └─ logger.* → logs/{system,trades}.jsonl, live_status.json, connection_status.json, daily_stats.json
 dashboard.py ──reads those files only──► :8088
-scripts/paper_status_daily.sh → logs/paper_daily.jsonl (optional cron)
+scripts/paper_status_daily.sh → logs/paper_latest.json + paper_daily.jsonl
+                 └─ (optional PAT) GitHub status/paper_latest.json on branch status/paper
 MT5 container: lprett/mt5linux (patched image), .env secrets
 systemd: scalper-bot ExecStartPre=wait_for_mt5.py
 deploy.sh (cron */15): git pull --ff-only + restart only if HEAD moved
@@ -78,6 +103,7 @@ Key config (`config.py`): `TRADING_MODE` ("FORWARD_TEST" default / "LIVE"),
 
 | Date | Change | Why |
 |---|---|---|
+| 09-24 | **Paper auto-publish:** enhanced `paper_status_daily.sh` + branch `status/paper` + HANDOFF protocol | Stop requiring manual `python paper.py` paste before each daily review |
 | 09-24 | Daily review note only — no strategy/config change | v12 needs a paper sample before another tweak |
 | 09-23 | Daily paper protocol: automation prompt + `scripts/paper_status_daily.sh` + HANDOFF | Need paper W/L in every review; Grok cannot SSH |
 | 09-23 PM | **v12**: RSI recovery band, signal-candle confirm, session 08–16, pause@2 | Paper **0/13** under v11 |
@@ -92,6 +118,9 @@ Key config (`config.py`): `TRADING_MODE` ("FORWARD_TEST" default / "LIVE"),
 
 ### Daily review notes
 
+- **2026-09-24 (Thu, later):** Shipped paper auto-publish path. User still needs
+  one-time: paper cron + optional `PAPER_STATUS_TOKEN` in `/root/scalper/.env.paper_status`.
+  Until first successful publish, reviews fall back to paste / "not available".
 - **2026-09-24 (Thu):** Paper status **not available this run**. Work branch
   `arena/01a0a475-scalper` is ahead of `main` (v8–v12). Reviewed `strategy.py`,
   `config.py`, `run.py`. v12 filters look coherent; no high-confidence code
@@ -120,7 +149,8 @@ container crash-loops after first restart. **TODO:** file upstream.
 ## 5. Open TODOs
 
 - [ ] **One-time:** confirm deploy cron is installed (see §0). If yes, mark done.
-- [ ] **Optional:** install `paper_status_daily.sh` weekday cron (see §0).
+- [ ] **One-time:** install `paper_status_daily.sh` weekday cron (17:05 UTC; optional 01:00 UTC).
+- [ ] **One-time:** create fine-grained PAT + `/root/scalper/.env.paper_status` so paper publishes to `status/paper` (then no more pasting).
 - [ ] **Rotate MT5 + VNC passwords** (were in plain text). Update `.env` after XM change.
 - [ ] Revert container `main.sh` `set -ex` → `set -e` if log noise bothers you.
 - [ ] File upstream issues for the two `mt5linux` bugs (§4).
@@ -137,22 +167,24 @@ container crash-loops after first restart. **TODO:** file upstream.
 - [x] RSI recovery band + signal-candle confirm (v12).
 - [ ] Optional later: max-hold / flatten before Friday close.
 - [x] Daily paper status in review protocol (automation + HANDOFF).
+- [x] Paper auto-publish plumbing (script + `status/paper` branch).
 
 ## 6. Runbook (only if something breaks or you want a peek)
 
 ```bash
-# --- normal path: do nothing. deploy cron handles updates. ---
+# --- normal path: do nothing. deploy + paper-status crons handle it. ---
 
 # health peek
 journalctl -u scalper-bot -n 20 --no-pager
 cat /root/scalper/logs/connection_status.json /root/scalper/logs/live_status.json
 tail -5 /root/scalper/logs/deploy.log
 
-# paper account — paste this JSON into chat for daily review / HANDOFF
+# paper account (local)
 cd /root/scalper && mt5env/bin/python paper.py
-grep SIM_ logs/trades.jsonl | tail
-# on-server history if cron installed:
+cat logs/paper_latest.json
 tail logs/paper_daily.jsonl
+# force publish now (needs .env.paper_status):
+/root/scalper/scripts/paper_status_daily.sh
 
 # MT5 container
 docker ps | grep mt5
@@ -176,12 +208,18 @@ docker compose up -d
 | deploy.log shows "already up to date" | normal; no new commits |
 | `SKIP reason=sl_vs_spread` | v10: ATR-based SL too small vs live bid/ask |
 | `Consecutive-loss pause` | v12: 2 losing closes in a row today; no new entries until next day |
+| paper_status: `skip GitHub publish` | no `PAPER_STATUS_TOKEN` — local snapshot only |
+| paper_status: `GitHub publish failed` | bad/expired PAT, wrong repo perms, or branch missing |
 
 ## 8. Session protocol (for agents / daily review)
 
 1. Work on `arena/01a0a475-scalper`. Prefer small reversible, config-gated changes.
 2. **Never** set `TRADING_MODE = "LIVE"` without explicit user request + paper evidence.
-3. **Never** touch `.env` / secrets.
+3. **Never** touch `.env` / secrets / `.env.paper_status`.
 4. Push commits; server cron deploys. Do not ask the user to `git pull` unless cron is missing.
 5. Update §1, §3, §5 here every session that changes code or state.
-6. **Paper status:** if user pasted `python paper.py` output, write balance/W/L/closed into §1 and a dated §3 note. If not, say so and request a paste — do not invent stats.
+6. **Paper status (in order):**
+   1. Fetch `status/paper_latest.json` from branch `status/paper` (GitHub API).
+      If `ts` is present and not bootstrap, record balance / wins / losses / closed in §1 + §3.
+   2. Else if user pasted `python paper.py` output in chat, use that.
+   3. Else: "paper status not available this run" — do not invent stats.
