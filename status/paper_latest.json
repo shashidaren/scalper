@@ -1,0 +1,10 @@
+{
+  "ts": null,
+  "source": "bootstrap",
+  "balance": null,
+  "closed": null,
+  "wins": null,
+  "losses": null,
+  "position": null,
+  "note": "Awaiting first server publish via paper_status_daily.sh + PAPER_STATUS_TOKEN"
+}
