@@ -23,7 +23,7 @@ SYSTEM_FILE = LOG_DIR / "system.jsonl"
 PAPER_FILE = LOG_DIR / "paper_account.json"
 CONTRACT_SIZE = 100.0
 
-app = FastAPI(title="Gold Scalper Dashboard", version="1.4")
+app = FastAPI(title="Gold Scalper Dashboard", version="1.4.1")
 templates = Jinja2Templates(directory=str(BASE_DIR / "templates"))
 
 
@@ -41,6 +41,30 @@ def read_jsonl(path: Path, limit: int = 50) -> list:
         return entries
     except Exception:
         return []
+
+
+def _idle_signal(entry: dict) -> bool:
+    if entry.get("event") != "SIGNAL":
+        return False
+    sig = entry.get("signal")
+    return sig in (None, "", "None")
+
+
+def _heartbeat_system(entry: dict) -> bool:
+    msg = str(entry.get("message") or "")
+    return msg.startswith("SIM:") or "SimEquity:" in msg or msg.startswith("Balance:")
+
+
+def read_trade_events(limit: int = 30) -> list:
+    raw = read_jsonl(TRADES_FILE, limit=400)
+    out = [e for e in raw if not _idle_signal(e)]
+    return out[:limit]
+
+
+def read_system_events(limit: int = 25) -> list:
+    raw = read_jsonl(SYSTEM_FILE, limit=400)
+    out = [e for e in raw if not _heartbeat_system(e)]
+    return out[:limit]
 
 
 def get_paper_book() -> dict:
@@ -105,8 +129,8 @@ async def index(request: Request):
         stats = get_today_stats()
         conn = get_connection_status()
         paper = get_paper_book()
-        recent_trades = read_jsonl(TRADES_FILE, limit=40)
-        recent_system = read_jsonl(SYSTEM_FILE, limit=30)
+        recent_trades = read_trade_events(30)
+        recent_system = read_system_events(25)
         enrich_positions(live)
 
         uptime_str = "—"
@@ -186,8 +210,8 @@ async def api_status():
             "paper": get_paper_book(),
             "connection": get_connection_status(),
             "session": {"open": in_session, "label": session_label},
-            "trades": read_jsonl(TRADES_FILE, limit=20),
-            "system": read_jsonl(SYSTEM_FILE, limit=15),
+            "trades": read_trade_events(20),
+            "system": read_system_events(15),
             "timestamp": datetime.now().isoformat()
         }
     except Exception as e:
