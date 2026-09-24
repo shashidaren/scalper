@@ -1,5 +1,5 @@
 #!/bin/bash
-# Hands-off deploy: pull the tracked branch and restart scalper-bot only if HEAD moved.
+# Hands-off deploy: pull the tracked branch and restart bot+dashboard if HEAD moved.
 # Usage (from repo root or via absolute path):
 #   ./deploy.sh
 #   DEPLOY_BRANCH=main ./deploy.sh
@@ -11,6 +11,7 @@ REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 BRANCH="${DEPLOY_BRANCH:-arena/01a0a475-scalper}"
 REMOTE="${DEPLOY_REMOTE:-origin}"
 SERVICE="${DEPLOY_SERVICE:-scalper-bot}"
+DASHBOARD_SERVICE="${DEPLOY_DASHBOARD_SERVICE:-scalper-dashboard}"
 LOG_DIR="${REPO_DIR}/logs"
 mkdir -p "$LOG_DIR"
 
@@ -45,7 +46,10 @@ chmod +x "${REPO_DIR}/deploy.sh" "${REPO_DIR}/scripts/paper_status_daily.sh" 2>/
 if [ "$BEFORE" != "$AFTER" ]; then
   if command -v systemctl >/dev/null 2>&1; then
     systemctl restart "$SERVICE"
-    echo "$TS restarted ${SERVICE} at ${AFTER} (was ${BEFORE}) branch=${BRANCH}" | tee -a "${LOG_DIR}/deploy.log"
+    if systemctl list-unit-files --type=service 2>/dev/null | grep -q "^${DASHBOARD_SERVICE}\.service"; then
+      systemctl restart "$DASHBOARD_SERVICE" || true
+    fi
+    echo "$TS restarted ${SERVICE} (+ ${DASHBOARD_SERVICE} if present) at ${AFTER} (was ${BEFORE}) branch=${BRANCH}" | tee -a "${LOG_DIR}/deploy.log"
   else
     echo "$TS code updated to ${AFTER} but systemctl not found; restart ${SERVICE} manually" | tee -a "${LOG_DIR}/deploy.log"
   fi
