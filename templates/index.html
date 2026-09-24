@@ -16,6 +16,7 @@
       --red: #ef4444;
       --blue: #3b82f6;
       --yellow: #eab308;
+      --orange: #f59e0b;
     }
     * { box-sizing: border-box; margin: 0; padding: 0; }
     body {
@@ -58,6 +59,7 @@
     }
     .status-dot.on { background: var(--green); }
     .status-dot.off { background: var(--red); }
+    .status-dot.warn { background: var(--yellow); }
     table {
       width: 100%;
       border-collapse: collapse;
@@ -80,6 +82,7 @@
     .badge.sell { background: rgba(239,68,68,0.2); color: var(--red); }
     .badge.skip { background: rgba(234,179,8,0.2); color: var(--yellow); }
     .badge.signal { background: rgba(59,130,246,0.2); color: var(--blue); }
+    .badge.sim { background: rgba(245,158,11,0.2); color: var(--orange); }
     .log-row { font-family: ui-monospace, monospace; font-size: 0.8rem; }
     .section-title {
       font-size: 1.1rem;
@@ -99,13 +102,30 @@
       font-size: 0.8rem;
       text-align: center;
     }
+    .banner {
+      background: rgba(234,179,8,0.12);
+      border: 1px solid var(--yellow);
+      color: var(--yellow);
+      padding: 0.6rem 1rem;
+      border-radius: 0.5rem;
+      margin-bottom: 1rem;
+      font-size: 0.9rem;
+    }
   </style>
 </head>
 <body>
   <h1>Gold Scalper Dashboard</h1>
-  <p class="subtitle">Last refresh: {{ now }} &nbsp;•&nbsp; Auto-refresh every 15s</p>
+  <p class="subtitle">
+    {{ config.strategy }} &nbsp;•&nbsp; {{ config.mode }}
+    &nbsp;•&nbsp; Last refresh: {{ now }} &nbsp;•&nbsp; Auto-refresh 15s
+  </p>
 
-  <!-- Top metrics -->
+  {% if paused %}
+  <div class="banner">Consecutive-loss pause ({{ stats.consecutive_losses }} ≥ {{ config.max_consec }}). No new entries until tomorrow.</div>
+  {% elif not in_session %}
+  <div class="banner">Session closed ({{ session_label }}). New entries blocked; open trades still manage to SL/TP/BE.</div>
+  {% endif %}
+
   <div class="grid">
     <div class="card">
       <h2>MT5 Connection</h2>
@@ -129,6 +149,16 @@
     </div>
 
     <div class="card">
+      <h2>Paper book (lifetime)</h2>
+      <div class="value small">{{ paper.wins or 0 }}W / {{ paper.losses or 0 }}L</div>
+      <div style="color:var(--muted)">
+        Closed: {{ paper.closed or 0 }}
+        &nbsp;•&nbsp; Bal ${{ "%.2f"|format(paper.balance or live.balance or 0) }}
+        {% if paper.updated_at %}<br/>Updated {{ paper.updated_at }}{% endif %}
+      </div>
+    </div>
+
+    <div class="card">
       <h2>GOLD Price</h2>
       <div class="value small">{{ "%.2f"|format(live.bid or 0) }} / {{ "%.2f"|format(live.ask or 0) }}</div>
       <div style="color:var(--muted)">Spread: {{ live.spread or 0 }} points</div>
@@ -143,11 +173,21 @@
       <div style="color:var(--muted)">
         {{ stats.trades or 0 }} trades &nbsp;•&nbsp;
         {{ stats.wins or 0 }}W / {{ stats.losses or 0 }}L
+        &nbsp;•&nbsp; streak {{ stats.consecutive_losses or 0 }}
       </div>
+    </div>
+
+    <div class="card">
+      <h2>Session</h2>
+      {% if in_session %}
+        <div class="value small"><span class="status-dot on"></span>Open</div>
+      {% else %}
+        <div class="value small"><span class="status-dot warn"></span>Closed</div>
+      {% endif %}
+      <div style="color:var(--muted);margin-top:0.4rem">{{ session_label }}</div>
     </div>
   </div>
 
-  <!-- Open Positions -->
   <h2 class="section-title">Open Positions</h2>
   <div class="card" style="margin-bottom:1.5rem">
     {% if live.positions %}
@@ -186,21 +226,23 @@
     {% endif %}
   </div>
 
-  <!-- Config snapshot -->
   <div class="grid" style="margin-bottom:1.5rem">
     <div class="card">
-      <h2>Config Snapshot</h2>
+      <h2>Config Snapshot (v12)</h2>
       <div style="font-size:0.9rem;color:var(--muted)">
-        Symbol: <strong style="color:var(--text)">{{ config.symbol }}</strong><br/>
-        Lot size: <strong style="color:var(--text)">{{ config.lot_size }}</strong><br/>
+        Mode: <strong style="color:var(--text)">{{ config.mode }}</strong><br/>
+        Symbol / lot: <strong style="color:var(--text)">{{ config.symbol }} {{ config.lot_size }}</strong><br/>
+        Session: <strong style="color:var(--text)">{{ config.session }}</strong><br/>
+        RSI: <strong style="color:var(--text)">{{ config.rsi_buy }}/{{ config.rsi_sell }}</strong>
+        band {{ config.rsi_buy_max }}/{{ config.rsi_sell_min }}<br/>
+        Min ATR / SL×spread: <strong style="color:var(--text)">{{ config.min_atr }} / {{ config.min_sl_spread }}</strong><br/>
         Max spread: <strong style="color:var(--text)">{{ config.max_spread }}</strong><br/>
-        Daily loss limit: <strong style="color:var(--text)">${{ config.max_daily_loss }}</strong><br/>
-        Max trades/day: <strong style="color:var(--text)">{{ config.max_trades }}</strong>
+        Daily loss / trades: <strong style="color:var(--text)">${{ config.max_daily_loss }} / {{ config.max_trades }}</strong><br/>
+        Pause after losses: <strong style="color:var(--text)">{{ config.max_consec }}</strong>
       </div>
     </div>
   </div>
 
-  <!-- Recent activity -->
   <div class="two-col">
     <div>
       <h2 class="section-title">Recent Trade Events</h2>
@@ -214,8 +256,10 @@
             <tr class="log-row">
               <td>{{ t.time[11:19] if t.time else "" }}</td>
               <td>
-                {% if t.event == "ENTRY" %}
-                  <span class="badge buy">ENTRY</span>
+                {% if t.event in ["ENTRY", "SIM_ENTRY"] %}
+                  <span class="badge buy">{{ t.event }}</span>
+                {% elif t.event in ["SIM_EXIT"] %}
+                  <span class="badge sim">{{ t.event }}</span>
                 {% elif t.event == "SIGNAL" %}
                   <span class="badge signal">SIGNAL</span>
                 {% elif t.event == "SKIP" %}
@@ -225,10 +269,12 @@
                 {% endif %}
               </td>
               <td style="color:var(--muted)">
-                {% if t.signal %}{{ t.signal }}{% endif %}
-                {% if t.reason %}{{ t.reason }}{% endif %}
-                {% if t.side %}{{ t.side }}{% endif %}
-                {% if t.spread %}spread={{ t.spread }}{% endif %}
+                {% if t.signal %}{{ t.signal }} {% endif %}
+                {% if t.side %}{{ t.side }} {% endif %}
+                {% if t.reason %}{{ t.reason }} {% endif %}
+                {% if t.profit is defined and t.profit is not none %}pnl={{ t.profit }} {% endif %}
+                {% if t.spread %}spread={{ t.spread }} {% endif %}
+                {% if t.sl_dist %}SL={{ t.sl_dist }} {% endif %}
                 {% if t.ticket %}#{{ t.ticket }}{% endif %}
               </td>
             </tr>
@@ -266,7 +312,7 @@
   </div>
 
   <footer>
-    Gold Scalper Dashboard &nbsp;•&nbsp; Auto-refresh 15s &nbsp;•&nbsp; <a href="/api/status" style="color:var(--blue)">JSON API</a>
+    Gold Scalper Dashboard v1.4 &nbsp;•&nbsp; Auto-refresh 15s &nbsp;•&nbsp; <a href="/api/status" style="color:var(--blue)">JSON API</a>
   </footer>
 </body>
 </html>
