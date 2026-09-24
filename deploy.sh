@@ -39,6 +39,9 @@ fi
 git pull --ff-only "$REMOTE" "$BRANCH"
 AFTER="$(git rev-parse HEAD)"
 
+# GitHub Contents API / some checkouts drop the executable bit on shell scripts.
+chmod +x "${REPO_DIR}/deploy.sh" "${REPO_DIR}/scripts/paper_status_daily.sh" 2>/dev/null || true
+
 if [ "$BEFORE" != "$AFTER" ]; then
   if command -v systemctl >/dev/null 2>&1; then
     systemctl restart "$SERVICE"
