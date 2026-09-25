@@ -61,10 +61,12 @@ WEEKEND_FLAT_ENABLED = True
 # RSI extremes (softer than original 28/72 for more quality pullbacks)
 RSI_BUY_LEVEL = 30
 RSI_SELL_LEVEL = 70
-# v12 recovery band: reject late RSI crosses that already ran far from the
+# v12.1 recovery band: reject late RSI crosses that already ran far from the
 # extreme (chase entries). 0 disables the cap/floor.
-RSI_BUY_MAX = 40    # BUY only if rsi_curr <= this after crossing BUY_LEVEL
-RSI_SELL_MIN = 60   # SELL only if rsi_curr >= this after crossing SELL_LEVEL
+# Widened 40/60 → 45/55 after v12 produced 0 paper fills (gold M5 often
+# jumps >10 RSI points on the cross bar). Still rejects mid-range chases.
+RSI_BUY_MAX = 45    # BUY only if rsi_curr <= this after crossing BUY_LEVEL
+RSI_SELL_MIN = 55   # SELL only if rsi_curr >= this after crossing SELL_LEVEL
 
 # v12: signal bar body must agree with direction (bullish candle for BUY).
 REQUIRE_SIGNAL_CANDLE = True
