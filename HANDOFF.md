@@ -42,21 +42,22 @@ Confirm: https://github.com/shashidaren/scalper/blob/status/paper/status/paper_l
 
 ---
 
-## 1. Where things stand (as of 2026-09-24)
+## 1. Where things stand (as of 2026-09-26)
 
 - **Repo/branch:** `shashidaren/scalper`. Daily-review work lands on
   `arena/01a0a475-scalper` (server `deploy.sh` defaults here). `main` is behind
-  (has v6–v7 + deploy.sh via PR #3; does **not** have v8–v12).
+  (has v6–v7 + deploy.sh via PR #3; does **not** have v8–v12.1).
 - **Server** (`scalping`):
   - `scalper-bot.service` → **FORWARD_TEST (paper)** only. **No real orders.**
   - `scalper-dashboard.service` on port 8088 (reads log files only).
   - MT5 container via `docker-compose.yml` (`lprett-mt5linux-patched`, see §4).
   - **Deploy:** hands-off via `deploy.sh` + cron (see §0).
-- **Strategy version:** **v12** + paper auto-publish (no jq; PAT Contents write).
+- **Strategy version:** **v12.1** (RSI recovery band 45/55) + paper auto-publish.
   `TRADING_MODE` = FORWARD_TEST.
-- **Paper book** (`status/paper` @ 2026-09-24T02:00:12Z): balance **$200.00**,
-  closed **0**, wins **0**, losses **0**, position null. (v12 post-reset; session
-  08–16 UTC so no trades expected yet this morning.) Prior v11 sample 0/13, $142.
+- **Paper book:** last automated snapshot (`status/paper` @ 2026-09-24T02:00:12Z)
+  still **$200.00 / 0 closed / 0W 0L / flat**. No newer publish since then
+  (cron may be missing or idle). **Paper status not available this run** for
+  current day — do not invent. Prior v11 sample 0/13, $142.
 - **Daily automation:** `scalper-daily-review-9am-kl` @ 09:00 Asia/Kuala_Lumpur.
 
 ## 2. Architecture
@@ -78,7 +79,7 @@ deploy.sh (cron */15): git pull --ff-only + restart only if HEAD moved
 Key config (`config.py`): `TRADING_MODE` ("FORWARD_TEST" default / "LIVE"),
 `SIM_START_BALANCE=200`, `BE_TRIGGER_R=0.75`, `RPC_TIMEOUT_SECONDS=30`,
 **SESSION_FILTER_*** (08–16), **FRIDAY_CUTOFF_***, **WEEKEND_FLAT_ENABLED**,
-**RSI_*_LEVEL**, **RSI_BUY_MAX / RSI_SELL_MIN**, **REQUIRE_SIGNAL_CANDLE**,
+**RSI_*_LEVEL**, **RSI_BUY_MAX / RSI_SELL_MIN** (v12.1: 45/55), **REQUIRE_SIGNAL_CANDLE**,
 **SIGNAL_ON_CLOSED_BAR**, **MIN_ATR**, **MIN_SL_SPREAD_MULT**,
 **MAX_CONSECUTIVE_LOSSES=2**.
 
@@ -86,6 +87,8 @@ Key config (`config.py`): `TRADING_MODE` ("FORWARD_TEST" default / "LIVE"),
 
 | Date | Change | Why |
 |---|---|---|
+| 09-26 | Daily review — no strategy/config change | v12.1 still needs a paper sample; last book snapshot is stale (09-24) |
+| 09-25 | **v12.1**: RSI recovery band 40/60 → 45/55 | v12 produced zero paper fills; gold M5 often jumps >10 RSI on the cross bar |
 | 09-24 | First successful paper publish to `status/paper` | Daily review can read book without SSH/paste |
 | 09-24 | paper_status_daily.sh no longer needs jq | Server had no jq |
 | 09-24 | deploy.sh stashes dirty files + chmod +x scripts | Local script edits blocked pull; missing exec bit |
@@ -102,6 +105,13 @@ Key config (`config.py`): `TRADING_MODE` ("FORWARD_TEST" default / "LIVE"),
 
 ### Daily review notes
 
+- **2026-09-26 (Sat 01:00 UTC / 09:00 Asia/KL):** Reviewed strategy, config, engine,
+  paper path. **Paper status not available this run** (last `status/paper` snap is
+  2026-09-24T02:00:12Z: $200 / 0 closed / 0W 0L / flat). No code change — still
+  waiting for a non-zero paper sample under v12.1. Confirm paper-status cron is
+  installed so morning/evening snaps keep flowing. Next experiments only after
+  ≥20–30 closed trades under current params (then H1 trend filter or pure-RSI).
+- **2026-09-25:** v12.1 recovery band widened 40/60 → 45/55 after zero fills.
 - **2026-09-24 (Thu 02:00 UTC):** Auto-publish **works**. Book **$200 / 0 closed /
   0W 0L / flat**. PAT Contents write confirmed. Remaining: install weekday cron
   so you never run the script by hand.
@@ -130,16 +140,16 @@ container crash-loops after first restart. **TODO:** file upstream.
 - [ ] Revert container `main.sh` `set -ex` → `set -e` if log noise bothers you.
 - [ ] File upstream issues for the two `mt5linux` bugs (§4).
 - [x] Merge clean PR (`resolve/v6-v7-deploy` → `main`).
-- [ ] Later: merge work branch (v8…v12) → `main`, or keep `DEPLOY_BRANCH` on work branch.
+- [ ] Later: merge work branch (v8…v12.1) → `main`, or keep `DEPLOY_BRANCH` on work branch.
 - [ ] Judge paper book after **100+ trades under a single version**; only then consider LIVE.
 - [ ] Optional: GOLD symbol if broker renames it.
 - [x] Tighter session 08–16 UTC (v12).
-- [ ] After v12 sample: H1 trend filter **or** test pure RSI mean-reversion (no EMA).
+- [ ] After v12.1 sample: H1 trend filter **or** test pure RSI mean-reversion (no EMA).
 - [x] Friday early-close (v8).
 - [x] Weekend flat (v9).
 - [x] Spread-aware min ATR + SL-vs-spread (v10).
 - [x] Consecutive-loss day pause (v11; tightened to 2 in v12).
-- [x] RSI recovery band + signal-candle confirm (v12).
+- [x] RSI recovery band + signal-candle confirm (v12; band widened in v12.1).
 - [ ] Optional later: max-hold / flatten before Friday close.
 - [x] Daily paper status in review protocol (automation + HANDOFF).
 - [x] Paper auto-publish plumbing (script + `status/paper` branch).
