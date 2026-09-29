@@ -42,7 +42,7 @@ Confirm: https://github.com/shashidaren/scalper/blob/status/paper/status/paper_l
 
 ---
 
-## 1. Where things stand (as of 2026-09-26)
+## 1. Where things stand (as of 2026-09-29)
 
 - **Repo/branch:** `shashidaren/scalper`. Daily-review work lands on
   `arena/01a0a475-scalper` (server `deploy.sh` defaults here). `main` is behind
@@ -51,13 +51,12 @@ Confirm: https://github.com/shashidaren/scalper/blob/status/paper/status/paper_l
   - `scalper-bot.service` → **FORWARD_TEST (paper)** only. **No real orders.**
   - `scalper-dashboard.service` on port 8088 (reads log files only).
   - MT5 container via `docker-compose.yml` (`lprett-mt5linux-patched`, see §4).
-  - **Deploy:** hands-off via `deploy.sh` + cron (see §0).
-- **Strategy version:** **v12.1** (RSI recovery band 45/55) + paper auto-publish.
-  `TRADING_MODE` = FORWARD_TEST.
-- **Paper book:** last automated snapshot (`status/paper` @ 2026-09-24T02:00:12Z)
-  still **$200.00 / 0 closed / 0W 0L / flat**. No newer publish since then
-  (cron may be missing or idle). **Paper status not available this run** for
-  current day — do not invent. Prior v11 sample 0/13, $142.
+  - **Deploy:** hands-off via `deploy.sh` + cron **confirmed installed** (`*/15 * * * * /root/scalper/deploy.sh`).
+- **Strategy version:** **v12.1** (RSI recovery band 45/55). `TRADING_MODE` = FORWARD_TEST.
+- **Paper book (chat paste 2026-09-29):** **$169.84 / 3 closed / 0W 3L / flat**.
+  Automated `status/paper` snap still stale (2026-09-24T02:00:12Z $200 / 0 closed).
+  Net −$30.16 from $200 start. Sample too small to retune; still 0 wins under v12.1.
+  Prior v11 sample 0/13, $142.
 - **Daily automation:** `scalper-daily-review-9am-kl` @ 09:00 Asia/Kuala_Lumpur.
 
 ## 2. Architecture
@@ -86,7 +85,8 @@ Key config (`config.py`): `TRADING_MODE` ("FORWARD_TEST" default / "LIVE"),
 ## 3. Changelog (what was done and why)
 
 | Date | Change | Why |
-|---|---|---|
+|---|---|
+| 09-29 | Daily review — recorded paper book; no strategy/config change | v12.1 sample still tiny (0W/3L, $169.84); deploy cron confirmed |
 | 09-26 | Daily review — no strategy/config change | v12.1 still needs a paper sample; last book snapshot is stale (09-24) |
 | 09-25 | **v12.1**: RSI recovery band 40/60 → 45/55 | v12 produced zero paper fills; gold M5 often jumps >10 RSI on the cross bar |
 | 09-24 | First successful paper publish to `status/paper` | Daily review can read book without SSH/paste |
@@ -105,6 +105,14 @@ Key config (`config.py`): `TRADING_MODE` ("FORWARD_TEST" default / "LIVE"),
 
 ### Daily review notes
 
+- **2026-09-29 (Tue afternoon Asia/KL):** Chat paste of `paper.py`:
+  **$169.84 / 3 closed / 0W 3L / position null**. Auto-publish still stale
+  (09-24 $200 / 0). Deploy cron **is** installed (`*/15 deploy.sh`). Paper-status
+  weekday crons still not confirmed in crontab. No strategy change: n=3 is not
+  enough to retune RSI/session/RR; risk gates (daily -$30, consec-loss=2) look
+  like they fired as designed (~$30 drawdown). Next: keep v12.1 through ≥20–30
+  closed trades; if still 0-win, first experiment is H1 trend filter **or** drop
+  EMA and test pure RSI mean-reversion — not LIVE.
 - **2026-09-26 (Sat 01:00 UTC / 09:00 Asia/KL):** Reviewed strategy, config, engine,
   paper path. **Paper status not available this run** (last `status/paper` snap is
   2026-09-24T02:00:12Z: $200 / 0 closed / 0W 0L / flat). No code change — still
@@ -133,7 +141,7 @@ container crash-loops after first restart. **TODO:** file upstream.
 
 ## 5. Open TODOs
 
-- [ ] **One-time:** confirm deploy cron is installed (see §0). If yes, mark done.
+- [x] **One-time:** confirm deploy cron is installed (see §0). Confirmed 2026-09-29.
 - [ ] **One-time:** install `paper_status_daily.sh` weekday cron (17:05 UTC + 01:00 UTC).
 - [x] Fine-grained PAT + `.env.paper_status` — first publish 2026-09-24T02:00:12Z.
 - [ ] **Rotate MT5 + VNC passwords** (were in plain text). Update `.env` after XM change.
