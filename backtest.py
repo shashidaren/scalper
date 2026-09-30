@@ -32,16 +32,33 @@ def run_backtest(csv_file):
     max_dd = 0.0
     active_trade = None
     trades_history = []
-    spread_cost = 0.30  # approximate GOLD spread in price units
 
-    # The strategy evaluates indicators on a window of 202 bars (see
-    # strategy.check_signal's `len(rates) < 202` guard). Feeding fewer bars
-    # silently yields zero signals, so keep this in sync.
-    WINDOW_BARS = 202
+    # Prefer the data's own spread column (points, 2-digit gold -> *0.01) over a
+    # constant guess; it is the realistic per-bar cost. Fall back to
+    # config.SPREAD_COST_PRICE when the column is missing.
+    use_data_spread = "spread" in df.columns and df["spread"].notna().any()
+    fallback_spread = float(getattr(config, "SPREAD_COST_PRICE", 0.30))
+    if use_data_spread:
+        print(f"Using per-bar spread from the data (mean "
+              f"{df['spread'].mean() * 0.01:.3f} price units).")
+    else:
+        print(f"No spread column; using config.SPREAD_COST_PRICE={fallback_spread:.2f}.")
+
+    # Window length is shared with strategy.check_signal's guard and the live
+    # bridge's fetch count (config.INDICATOR_WINDOW_BARS); feeding fewer bars
+    # silently yields zero signals.
+    WINDOW_BARS = int(getattr(config, "INDICATOR_WINDOW_BARS", 202))
+    print(f"Indicator window: {WINDOW_BARS} bars.")
 
     for i in range(WINDOW_BARS - 1, len(df)):
         current_bar = df.iloc[i]
         bar_time = _parse_bar_time(current_bar.get("time"))
+        if use_data_spread:
+            raw_spread = current_bar.get("spread")
+            spread_cost = (float(raw_spread) * 0.01
+                           if raw_spread == raw_spread else fallback_spread)  # NaN-safe
+        else:
+            spread_cost = fallback_spread
 
         # 1. New signal? Mirrors live timing: with SIGNAL_ON_CLOSED_BAR the
         #    signal comes from the last *completed* bar (window[-2] = bar i-1)
@@ -152,6 +169,10 @@ def run_backtest(csv_file):
         print(f"Win Rate:         {win_rate:.1f}%")
         print(f"Profit Factor:    {profit_factor:.2f}")
         print(f"Average R:        {avg_r:.2f}")
+        by_result = {r: sum(1 for t in trades_history if t["result"] == r)
+                     for r in ("TP", "BE", "SL")}
+        print(f"Exits:            {by_result['TP']} TP / {by_result['BE']} BE / "
+              f"{by_result['SL']} SL")
     print("==================================================")
 
 if __name__ == "__main__":

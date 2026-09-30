@@ -19,7 +19,11 @@ class ScalpStrategy:
         return start <= hour < end
 
     def check_signal(self, rates, when=None):
-        if rates is None or len(rates) < 202:
+        # Window length must match the backtester's and the bridge's fetch
+        # count, otherwise the EMA200 warm-up differs between live and backtest
+        # (see config.INDICATOR_WINDOW_BARS).
+        min_bars = getattr(config, "INDICATOR_WINDOW_BARS", 202)
+        if rates is None or len(rates) < min_bars:
             return None, 0, 0
 
         # Session filter (live uses now; backtest can pass bar time)

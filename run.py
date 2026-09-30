@@ -264,7 +264,7 @@ def main():
                     continue
 
                 # Strategy evaluation
-                rates = bridge.get_rates(count=250)
+                rates = bridge.get_rates()  # -> config.INDICATOR_WINDOW_BARS
                 signal, sl_dist, tp_dist = strategy.check_signal(rates)
 
                 log_trade("SIGNAL", {

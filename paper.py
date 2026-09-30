@@ -2,7 +2,7 @@
 
 Ported from the gold-trading-bot repo's FORWARD_TEST approach:
   * simulated balance ledger, restored from a crash-safe state file
-  * breakeven ratchet (BE_TRIGGER_R): SL moves to entry once +0.75R
+  * breakeven ratchet (BE_TRIGGER_R): SL moves to entry once +<trigger>R
   * pessimistic exit resolution: if SL and TP are both touched in the
     same tick, the SL fill is assumed
   * closed trades update the daily stats, so the existing risk gates

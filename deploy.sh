@@ -8,7 +8,7 @@
 set -euo pipefail
 
 REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-BRANCH="${DEPLOY_BRANCH:-arena/01a0a475-scalper}"
+BRANCH="${DEPLOY_BRANCH:-main}"
 REMOTE="${DEPLOY_REMOTE:-origin}"
 SERVICE="${DEPLOY_SERVICE:-scalper-bot}"
 LOG_DIR="${REPO_DIR}/logs"
