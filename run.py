@@ -264,13 +264,14 @@ def main():
                     continue
 
                 # Strategy evaluation
-                rates = bridge.get_rates()  # -> config.INDICATOR_WINDOW_BARS
+                rates = bridge.get_rates()  # -> window + fetch margin
                 signal, sl_dist, tp_dist = strategy.check_signal(rates)
 
                 log_trade("SIGNAL", {
                     "signal": signal,
                     "sl_dist": round(sl_dist, 2),
-                    "tp_dist": round(tp_dist, 2)
+                    "tp_dist": round(tp_dist, 2),
+                    "reason": strategy.last_skip_reason,
                 })
 
                 if signal in ("BUY", "SELL"):

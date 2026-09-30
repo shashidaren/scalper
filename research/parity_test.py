@@ -61,6 +61,38 @@ def main(csv_file: str | None = None, step: int = 137) -> int:
             mismatches.append((i, str(df["time"].iloc[i]), live, replay))
 
     print(f"window={window} bars, checked={checked} bars, replay signals={signals}")
+
+    # Margin invariance: the bridge fetches window + INDICATOR_FETCH_MARGIN
+    # bars and check_signal must slice back to `window`, so the extra bars
+    # cannot shift the signal (live stays identical to the backtest).
+    margin = int(getattr(config, "INDICATOR_FETCH_MARGIN", 0))
+    margin_bad = []
+    if margin > 0:
+        for i in sampled:
+            if i - window - margin + 1 < 0:
+                continue
+            wide = df.iloc[i - window - margin + 1:i + 1][cols].to_dict("records")
+            got, _, _ = ScalpStrategy().check_signal(wide, when=df["time"].iloc[i])
+            if got != replay_all[i]:
+                margin_bad.append((i, str(df["time"].iloc[i]), got, replay_all[i]))
+            # Real extra bars barely move a converged EMA, so the check above
+            # alone cannot prove the slice exists. Poison the margin bars: if
+            # check_signal really ignores everything before the last `window`
+            # bars, the result is unchanged; a missing slice would flip it.
+            poisoned = [dict(r) for r in wide]
+            for r in poisoned[:margin]:
+                for k in ("open", "high", "low", "close"):
+                    r[k] = float(r[k]) * 1000.0
+            got, _, _ = ScalpStrategy().check_signal(poisoned, when=df["time"].iloc[i])
+            if got != replay_all[i]:
+                margin_bad.append((i, str(df["time"].iloc[i]), got, replay_all[i]))
+        print(f"margin check: window+{margin} bars (real and poisoned) vs window alone, "
+              f"{len(margin_bad)} mismatches")
+        if margin_bad:
+            print("FAIL: INDICATOR_FETCH_MARGIN shifts signals:")
+            for m in margin_bad[:10]:
+                print("   bar %d %s: wide=%s replay=%s" % m)
+            return 1
     if mismatches:
         print(f"FAIL: {len(mismatches)} mismatches, first few:")
         for m in mismatches[:10]:

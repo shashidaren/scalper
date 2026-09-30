@@ -126,10 +126,12 @@ class MT5Bridge:
         return self.mt5.symbol_info(config.SYMBOL)
 
     def get_rates(self, count=None):
-        # Default to the shared indicator window so the live signal sees the
-        # same warm-up as the backtester (see config.INDICATOR_WINDOW_BARS).
+        # Default to the shared indicator window (+ a small safety margin) so
+        # the live signal sees the same warm-up as the backtester; the strategy
+        # slices back to INDICATOR_WINDOW_BARS (see config.INDICATOR_FETCH_MARGIN).
         if count is None:
-            count = getattr(config, "INDICATOR_WINDOW_BARS", 250)
+            count = (getattr(config, "INDICATOR_WINDOW_BARS", 250)
+                     + getattr(config, "INDICATOR_FETCH_MARGIN", 0))
         tf_map = {
             "M1": self.mt5.TIMEFRAME_M1,
             "M5": self.mt5.TIMEFRAME_M5,
