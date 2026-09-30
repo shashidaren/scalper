@@ -6,6 +6,25 @@ An experimental algorithmic trading and backtesting framework for **GOLD / XAUUS
 
 ## Changelog
 
+### 2026-09-30 – Strategy iteration + honest backtest measurement
+
+- **Breakeven ratchet moved from +0.75R to +1.5R** (`BE_TRIGGER_R`): with a 5R
+  target the 0.75R ratchet scratched ~half of all trades at entry (each paying a
+  full spread) and almost no winner reached target. Monotone across the ladder
+  0.5R → off; 1.5R is the conservative end of the plateau
+- **Indicator window pinned to `INDICATOR_WINDOW_BARS = 1000`**, shared by the
+  strategy guard, the bridge fetch and the backtester. Previously the live path
+  fetched 250 bars and the backtester used 202, and because
+  `ewm(adjust=False)` keeps `(1-α)^(n-1)` weight on its seed the "EMA200" was
+  silently a much shorter average — and a *different* one in each path
+- **Backtester now prices the real spread** from the data's `spread` column
+  (mean $0.47) instead of a flat $0.30, and prints the spread source, the window
+  size and the TP/BE/SL exit split
+- Added `research/strategy_sweep.py`: fast one-variable-at-a-time parameter
+  sweeps, verified to reproduce `backtest.py` exactly
+- Rejected after testing: session 08–16 UTC, H1 trend confirmation, RSI 40/60,
+  wider/narrower ATR multiples (details in `docs/strategy_iteration_2026-09-30.md`)
+
 ### 2026-09-15 – Forward-Test (Paper) Trading Mode
 
 - Ported the `FORWARD_TEST` approach from `shashidaren/gold-trading-bot`:
