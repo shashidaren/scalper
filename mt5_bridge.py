@@ -146,46 +146,125 @@ class MT5Bridge:
                     return True
         return False
 
-    def open_trade(self, signal, sl_dist, tp_dist):
-        """Executes market trade using dynamic ATR-based SL/TP distances."""
-        tick = self.get_live_tick()
-        sym_info = self.get_symbol_info()
+    def _filling_mode(self, sym_info):
+        """Pick an order filling mode the symbol actually supports.
 
-        if not tick or not sym_info:
-            print("[ERROR] Market data unavailable for trade execution.")
+        symbol_info.filling_mode is a bitmask (1 = FOK allowed, 2 = IOC allowed).
+        Sending a mode the broker doesn't support fails with
+        TRADE_RETCODE_INVALID_FILL, which is why the old hard-coded IOC was a
+        live-path risk. If neither bit is set, fall back to RETURN.
+        """
+        try:
+            mask = int(sym_info.filling_mode)
+        except Exception:
+            mask = 0
+        if mask & 1:
+            return self.mt5.ORDER_FILLING_FOK
+        if mask & 2:
+            return self.mt5.ORDER_FILLING_IOC
+        return self.mt5.ORDER_FILLING_RETURN
+
+    def _margin_ok(self, order_type, volume, price):
+        """Best-effort pre-flight margin check before sending an order.
+
+        Returns True when the check cannot be performed (let the broker decide),
+        False only when we can prove free margin is insufficient.
+        """
+        try:
+            required = self.mt5.order_calc_margin(order_type, config.SYMBOL, float(volume), float(price))
+        except Exception:
+            return True
+        if required is None:
+            return True
+        try:
+            acc = self.mt5.account_info()
+            free = float(acc.margin_free) if acc else None
+        except Exception:
+            return True
+        if free is None:
+            return True
+        return float(required) <= free
+
+    def open_trade(self, signal, sl_dist, tp_dist, max_attempts=3):
+        """Execute a market trade with dynamic ATR-based SL/TP distances.
+
+        Retries transient failures (requotes, price moved/off) up to
+        max_attempts times, refreshing the tick each attempt. Returns the
+        final order_send result (check .retcode) or None if market data or
+        the margin pre-flight failed.
+        """
+        if signal not in ("BUY", "SELL"):
             return None
 
-        digits = sym_info.digits
+        retriable = set()
+        try:
+            retriable = {
+                int(self.mt5.TRADE_RETCODE_REQUOTE),
+                int(self.mt5.TRADE_RETCODE_PRICE_CHANGED),
+                int(self.mt5.TRADE_RETCODE_PRICE_OFF),
+            }
+        except Exception:
+            pass
+        try:
+            retcode_done = int(self.mt5.TRADE_RETCODE_DONE)
+        except Exception:
+            retcode_done = 10009
 
-        if signal == "BUY":
-            price = tick.ask
-            order_type = self.mt5.ORDER_TYPE_BUY
-            sl = round(price - sl_dist, digits)
-            tp = round(price + tp_dist, digits)
-        elif signal == "SELL":
-            price = tick.bid
-            order_type = self.mt5.ORDER_TYPE_SELL
-            sl = round(price + sl_dist, digits)
-            tp = round(price - tp_dist, digits)
-        else:
-            return None
+        result = None
+        for attempt in range(1, max_attempts + 1):
+            tick = self.get_live_tick()
+            sym_info = self.get_symbol_info()
+            if not tick or not sym_info:
+                print("[ERROR] Market data unavailable for trade execution.")
+                return None
 
-        request = {
-            "action": self.mt5.TRADE_ACTION_DEAL,
-            "symbol": config.SYMBOL,
-            "volume": float(config.LOT_SIZE),
-            "type": order_type,
-            "price": float(price),
-            "sl": float(sl),
-            "tp": float(tp),
-            "deviation": 20,
-            "magic": config.MAGIC_NUMBER,
-            "comment": "Gold Scalper v5",
-            "type_time": self.mt5.ORDER_TIME_GTC,
-            "type_filling": self.mt5.ORDER_FILLING_IOC,
-        }
+            digits = sym_info.digits
+            if signal == "BUY":
+                price = tick.ask
+                order_type = self.mt5.ORDER_TYPE_BUY
+                sl = round(price - sl_dist, digits)
+                tp = round(price + tp_dist, digits)
+            else:
+                price = tick.bid
+                order_type = self.mt5.ORDER_TYPE_SELL
+                sl = round(price + sl_dist, digits)
+                tp = round(price - tp_dist, digits)
 
-        result = self.mt5.order_send(request)
+            if not self._margin_ok(order_type, config.LOT_SIZE, price):
+                print(f"[ERROR] Insufficient free margin for {signal} {config.LOT_SIZE} {config.SYMBOL} - order not sent.")
+                return None
+
+            request = {
+                "action": self.mt5.TRADE_ACTION_DEAL,
+                "symbol": config.SYMBOL,
+                "volume": float(config.LOT_SIZE),
+                "type": order_type,
+                "price": float(price),
+                "sl": float(sl),
+                "tp": float(tp),
+                "deviation": 20,
+                "magic": config.MAGIC_NUMBER,
+                "comment": "Gold Scalper v7",
+                "type_time": self.mt5.ORDER_TIME_GTC,
+                "type_filling": self._filling_mode(sym_info),
+            }
+
+            result = self.mt5.order_send(request)
+            if result is None:
+                print(f"[ERROR] order_send returned no result (attempt {attempt}/{max_attempts}).")
+                time.sleep(1)
+                continue
+            try:
+                retcode = int(result.retcode)
+            except Exception:
+                return result
+            if retcode == retcode_done:
+                return result
+            if retcode in retriable and attempt < max_attempts:
+                print(f"[WARN] Transient fill failure retcode={retcode} ({getattr(result, 'comment', '')}) - retrying ({attempt}/{max_attempts}).")
+                time.sleep(1)
+                continue
+            return result
         return result
 
     def close(self):

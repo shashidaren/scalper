@@ -34,11 +34,41 @@ def run_backtest(csv_file):
     trades_history = []
     spread_cost = 0.30  # approximate GOLD spread in price units
 
-    for i in range(200, len(df)):
+    # The strategy evaluates indicators on a window of 202 bars (see
+    # strategy.check_signal's `len(rates) < 202` guard). Feeding fewer bars
+    # silently yields zero signals, so keep this in sync.
+    WINDOW_BARS = 202
+
+    for i in range(WINDOW_BARS - 1, len(df)):
         current_bar = df.iloc[i]
         bar_time = _parse_bar_time(current_bar.get("time"))
 
-        # 1. Manage Active Trade (with rough BE ratchet)
+        # 1. New signal? Mirrors live timing: with SIGNAL_ON_CLOSED_BAR the
+        #    signal comes from the last *completed* bar (window[-2] = bar i-1)
+        #    and the live engine enters on a tick shortly after that bar
+        #    closes, so we approximate the fill at the signal bar's close and
+        #    manage the trade from the current bar onwards.
+        if active_trade is None:
+            window = df.iloc[i - WINDOW_BARS + 1:i + 1].to_dict('records')
+            signal, sl_dist, tp_dist = strategy.check_signal(window, when=bar_time)
+
+            if signal in ("BUY", "SELL"):
+                if getattr(config, "SIGNAL_ON_CLOSED_BAR", True):
+                    entry = df.iloc[i - 1]['close']
+                else:
+                    entry = current_bar['close']  # signal bar IS the entry bar
+                active_trade = {
+                    'type': signal,
+                    'entry_price': entry,
+                    'sl': entry - sl_dist if signal == "BUY" else entry + sl_dist,
+                    'tp': entry + tp_dist if signal == "BUY" else entry - tp_dist,
+                    'sl_dist': sl_dist,
+                    'be_armed': False,
+                }
+                if not getattr(config, "SIGNAL_ON_CLOSED_BAR", True):
+                    continue  # entry bar already counted; manage from next bar
+
+        # 2. Manage Active Trade (with rough BE ratchet)
         if active_trade is not None:
             direction = active_trade['type']
             entry_price = active_trade['entry_price']
@@ -98,32 +128,6 @@ def run_backtest(csv_file):
                     'r': (pnl / sl_dist) if sl_dist else 0.0,
                 })
                 active_trade = None
-
-        # 2. Check for New Signal
-        if active_trade is None:
-            window = df.iloc[i-200:i+1].to_dict('records')
-            signal, sl_dist, tp_dist = strategy.check_signal(window, when=bar_time)
-
-            if signal == "BUY":
-                entry = current_bar['close']
-                active_trade = {
-                    'type': "BUY",
-                    'entry_price': entry,
-                    'sl': entry - sl_dist,
-                    'tp': entry + tp_dist,
-                    'sl_dist': sl_dist,
-                    'be_armed': False,
-                }
-            elif signal == "SELL":
-                entry = current_bar['close']
-                active_trade = {
-                    'type': "SELL",
-                    'entry_price': entry,
-                    'sl': entry + sl_dist,
-                    'tp': entry - tp_dist,
-                    'sl_dist': sl_dist,
-                    'be_armed': False,
-                }
 
     print("\n================ BACKTEST RESULTS ================")
     print(f"Initial Balance:  ${initial_balance:.2f}")

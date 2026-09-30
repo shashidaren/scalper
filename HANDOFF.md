@@ -6,11 +6,25 @@ code, parameters, or the server must update §1 (state), §3 (changelog) and
 
 ---
 
-## 1. Where things stand (as of 2026-09-30 09:36 UTC)
+## 1. Where things stand (as of 2026-09-30 10:30 UTC)
 
 - **Repo/branch:** `shashidaren/scalper`; PR #4 merged to `main` (merge commit
   `4a21a33`, 2026-09-30 09:31 UTC) — RSI 35/65 paper-test is now on `main`.
-  Current session branch is `arena/01a0f1b0-scalper`.
+  Current session branch is `arena/01a0f1c8-scalper`, carrying the
+  **"Gate 1+2: live-path hardening + backtest fix"** work (see §3). PR to
+  `main` opened; **not yet deployed** — server still runs `4a21a33`.
+- **First real backtest verdict (2026-09-30, fixed backtester on
+  `data/GOLD_M5.csv`, 20,000 M5 bars ≈ Jun–Sep 2026):**
+  201 trades, win rate 14.4%, **PF 0.92, −$57.78, max DD $93** (0.01 lot,
+  $0.30 spread). Exits: 29 TP / 96 BE / 76 SL — the BE ratchet works, but
+  spread turns scratches into losses. **The strategy is not yet profitable
+  offline; do NOT flip TRADING_MODE="LIVE" on this evidence.** This is the
+  first time the backtester produced any trades at all (it previously fed 201
+  bars into a 202-bar guard → zero signals).
+- **Live-path hardening (this branch, fake-bridge tested):** LiveLedger makes
+  the daily loss / max-trades gates work in LIVE mode; filling mode is now
+  auto-selected from `symbol_info.filling_mode` (FOK→IOC→RETURN fallback);
+  margin pre-flight check + transient-fill retries; KILL_SWITCH file gate.
 - **Server** (`scalping`), deployed 2026-09-30 09:36 UTC:
   - `scalper-bot.service` is active in **FORWARD_TEST (paper)** mode; no real
     orders are sent. Server now runs `main` at `4a21a33` (PR #4 deploy).
@@ -40,6 +54,9 @@ run.py (engine loop)
   └─ mt5_bridge.MT5Bridge ──RPyC :18812──► mt5server.exe (Wine) ──► MT5 terminal
   └─ strategy.ScalpStrategy (M5: EMA200 trend, RSI pullback, ATR filter, session filter, closed-bar)
   └─ paper.PaperAccount (FORWARD_TEST fills, ledger in logs/paper_account.json)
+  └─ live_ledger.LiveLedger (LIVE only: polls deal history, records realized
+     PnL so daily risk gates fire; state in logs/live_ledger.json)
+  └─ kill switch: logs/KILL_SWITCH file disables new entries (see §6)
   └─ logger.* writes logs/{system,trades}.jsonl, live_status.json,
      connection_status.json, daily_stats.json
 dashboard.py ──reads those files only──► :8088
@@ -58,6 +75,8 @@ backoff caps, stale-tick thresholds, **SESSION_FILTER_***, **RSI_*_LEVEL**,
 
 | Date | Change | Why |
 |---|---|---|
+| 09-30 | **Gate 1: live-path hardening** (`live_ledger.py` + `run.py` + `mt5_bridge.py`, branch `arena/01a0f1c8-scalper`, PR pending) | Previously `update_daily_pnl` was only called by paper.py, so in LIVE the daily-loss/max-trades gates could never fire (exits happen broker-side). LiveLedger polls `history_deals_get` for OUT deals (magic-matched), records profit+swap+commission via the same gates, dedup/persisted in `logs/live_ledger.json`. Also: filling mode auto-selected from `symbol_info.filling_mode` (was hard-coded IOC → `INVALID_FILL` risk on XM), pre-flight margin check, requote/price-off retries (3 attempts, fresh tick each), `logs/KILL_SWITCH` file disables new entries. All verified against the fake-bridge pattern (FOK/IOC/RETURN selection, retry, margin block, ledger dedup + restart persistence) |
+| 09-30 | **Gate 2: backtester fixed** (`backtest.py`) — was feeding 201 bars into the strategy's 202-bar guard → zero signals ever | Window now 202 bars (`WINDOW_BARS`, keep in sync with strategy guard); entry fill moved to the signal bar's close (mirrors live closed-bar timing) and trades are managed from the next bar. **First honest run on 20k M5 bars: 201 trades, PF 0.92, WR 14.4%, −$58, max DD $93 (exits 29 TP / 96 BE / 76 SL). Strategy currently loses after spread — this is the new baseline to beat; do not go live on it.** |
 | 09-30 | **PR #4 merged + deployed (`4a21a33`, 09:36 UTC); confirmed RSI 35/65, `MAX_SPREAD_POINTS=80` on server** | RSI paper-test now on `main` and active in FORWARD_TEST; baseline for trade-count/quality comparison |
 | 09-30 | **Stashed `paper_status_daily.sh` edits; backup at `/root/paper_status_daily.sh.backup`; `.env.paper_status` kept private** | Keep deploy clean (`git pull --ff-only`) without losing local status-script work or leaking secrets |
 | 09-30 | **Paper-test RSI 35/65** (from 30/70) | Modest, controlled relaxation after recent UTC-session logs showed repeated null signals; compare trade count and quality before further changes |
@@ -78,6 +97,12 @@ backoff caps, stale-tick thresholds, **SESSION_FILTER_***, **RSI_*_LEVEL**,
   Verified RSI 35/65 and `MAX_SPREAD_POINTS=80` in the server checkout. Local
   `paper_status_daily.sh` edits were stashed with a backup at
   `/root/paper_status_daily.sh.backup`; `.env.paper_status` stays off-git.
+- **2026-09-30 (later):** Live-readiness audit found the daily risk gates were
+  dead in LIVE mode and the backtester produced zero trades. Gate 1 (live-path
+  hardening: LiveLedger, filling-mode selection, margin pre-flight, retries,
+  kill switch) and Gate 2 (backtest window/entry fix) implemented on
+  `arena/01a0f1c8-scalper`, fake-bridge tested. First honest backtest: PF 0.92,
+  −$58 over ~70 days — strategy needs offline work before any live flip.
 
 ## 4. Server-side patches NOT in git (baked into the container image)
 
@@ -121,10 +146,28 @@ Note: the patched image may still carry `set -ex` tracing in
   and session coverage.
 - [ ] Add signal skip-reason diagnostics: current `SIGNAL: null` entries do not
   distinguish session, ATR, EMA, or RSI conditions.
-- [ ] Fix backtest input-length mismatch (backtest supplies 201 bars while
-  strategy currently requires 202), then validate backtests before tuning.
-- [ ] Judge the paper book after 100+ trades across sessions; only then flip
-  `TRADING_MODE = "LIVE"` in `config.py` (+ restart service).
+- [x] Fix backtest input-length mismatch — **done 09-30 on
+  `arena/01a0f1c8-scalper`** (`WINDOW_BARS=202`, entry at signal-bar close,
+  manage from next bar). First results: PF 0.92 / −$58 over ~70 days.
+- [ ] **Merge + deploy the Gate 1+2 PR** (`arena/01a0f1c8-scalper`); after
+  deploy, confirm `live_ledger.json` stays empty in FORWARD_TEST (ledger only
+  polls in LIVE) and re-run `backtest.py` on the server's data as a smoke test.
+- [ ] **Strategy work (blocking for LIVE):** backtest is now honest and shows
+  a losing edge after spread. Next session: iterate offline first — candidates
+  are ATR multiples (2.0 SL / 5.0 TP may be too wide for M5 noise), BE trigger
+  (0.75R may scratch too many trades into spread losses — try 1.0R or none),
+  session window (08–16 UTC), H1 trend confirmation, Friday cutoff. Validate
+  each change in the backtester AND paper before trusting it.
+- [ ] Judge the paper book after 100+ trades across sessions **and** a
+  profitable backtest over ≥6 months; only then flip
+  `TRADING_MODE = "LIVE"` in `config.py` (+ restart service). Pre-agreed
+  launch criteria: expectancy > 0 after spread, PF > ~1.2, max DD affordable.
+- [ ] Live-mode verification on first LIVE run: confirm `LIVE_EXIT` events
+  land in `logs/trades.jsonl` when broker-side SL/TP fill, daily stats update,
+  and the loss gate actually halts entries; test the KILL_SWITCH file.
+- [ ] Wire `MAX_CONSECUTIVE_LOSSES` (defined in config.py, currently unused).
+- [ ] Backtester realism: model slippage (paper fills are zero-slippage ticks),
+  add swap for overnight holds, and compare backtest vs paper book trade-by-trade.
 - [ ] Consider: GOLD symbol naming (`config.SYMBOL="GOLD"` works today on
   XMGlobal; revisit if broker changes it).
 - [ ] After more paper data: experiment with H1 trend confirmation or tighter
@@ -149,6 +192,13 @@ docker logs mt5 --tail 60
 mt5env/bin/python wait_for_mt5.py --timeout 120
 docker compose up -d
 
+# kill switch (disable NEW entries only; open positions keep broker SL/TP)
+touch /root/scalper/logs/KILL_SWITCH      # stop new entries (logged once)
+rm    /root/scalper/logs/KILL_SWITCH      # resume
+
+# backtest (needs data/GOLD_M5.csv; run from repo root)
+mt5env/bin/python backtest.py
+
 # one-shot deploy (choose the intended production branch explicitly)
 cd /root/scalper && DEPLOY_BRANCH=main ./deploy.sh
 
@@ -169,14 +219,24 @@ cd /root/scalper && git fetch origin && git checkout main && git pull --ff-only 
 | `pickling is disabled` | rpyc client missing classic flags — fixed in `78fe7e8`; if it returns, something recreated the bridge without them |
 | `Market data temporarily unavailable` | tick/symbol issue (symbol missing, terminal not logged in) |
 | container `Restarting (1)` silently | upstream `set -e` bugs (§4) |
+| `Insufficient free margin ... order not sent` | margin pre-flight blocked the LIVE order (see `mt5_bridge._margin_ok`) |
+| `Transient fill failure retcode=... retrying` | requote/price-moved during LIVE entry; retried with a fresh tick |
+| `KILL_SWITCH detected` | `logs/KILL_SWITCH` exists → new entries disabled; remove file to resume |
+| `Live close detection: history_deals_get failed` | deal-history read hiccup in LIVE; next poll retries (no PnL lost) |
 
 ## 8. Session protocol
 
 1. Day-to-day strategy work on the session Arena branch (currently
-   `arena/01a0f1b0-scalper`); promote to `main` via PR, rebasing onto current
+   `arena/01a0f1c8-scalper`); promote to `main` via PR, rebasing onto current
    `main` when history diverges (squash merges).
 2. Test engine changes against the fake RPyC server pattern (venv with
    `rpyc pandas numpy`, a fake `MetaTrader5` module exposing
    `initialize/symbol_select/symbol_info_tick/copy_rates_from_pos` returning a
    real structured numpy array, `ThreadedServer(SlaveService, port=18812)`).
+   For order/close logic, a lightweight in-process fake is enough (no server):
+   a fake `mt5` object with `symbol_info/symbol_info_tick/account_info/
+   order_calc_margin/order_send/history_deals_get` + `DEAL_ENTRY_*`,
+   `ORDER_FILLING_*`, `TRADE_RETCODE_*` constants — see the 2026-09-30 Gate 1
+   verification. LiveLedger/open_trade take the bridge as an argument so they
+   are directly testable this way.
 3. Update §1, §3, §5 here; add long-form analysis to `docs/` if needed.
