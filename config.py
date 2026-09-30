@@ -46,9 +46,10 @@ SESSION_FILTER_ENABLED = True
 SESSION_START_HOUR_UTC = 7
 SESSION_END_HOUR_UTC = 17
 
-# RSI extremes (softer than original 28/72 for more quality pullbacks)
-RSI_BUY_LEVEL = 30
-RSI_SELL_LEVEL = 70
+# Paper-test a modest relaxation from 30/70 to increase signal frequency.
+# Compare trade quality and expectancy before considering any live use.
+RSI_BUY_LEVEL = 35
+RSI_SELL_LEVEL = 65
 
 # Evaluate EMA/RSI/ATR on the last *completed* M5 bar (not the forming one).
 # Combined with one-shot-per-bar in ScalpStrategy so the 15s live loop cannot
