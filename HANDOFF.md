@@ -6,12 +6,14 @@ code, parameters, or the server must update §1 (state), §3 (changelog) and
 
 ---
 
-## 1. Where things stand (as of 2026-09-30 11:15 UTC)
+## 1. Where things stand (as of 2026-09-30 22:00 UTC)
 
-> **Update (PR #8 deployed, verified 2026-09-30 11:06 UTC):** the PR #7
-> follow-up is **merged (`fc6f4fc`, PR #8 merged 11:04:30 UTC) and deployed +
-> verified on the server** — nothing is pending merge/deploy any more. Server
-> HEAD is `fc6f4fc` with `INDICATOR_FETCH_MARGIN=50`,
+> **Update (PR #8 deployed, verified 2026-09-30 11:06 UTC; PR #9 merged 11:32 UTC):**
+> the PR #7 follow-up is **merged (`fc6f4fc`, PR #8 merged 11:04:30 UTC) and
+> deployed + verified on the server** (recorded on `main` in PR #9, `108e773`) —
+> nothing is pending merge/deploy any more. Server
+> HEAD is `fc6f4fc` (or `108e773` after the docs-only PR #9 cron pull) with
+> `INDICATOR_FETCH_MARGIN=50`,
 > `INDICATOR_WINDOW_BARS=1000`; `backtest.py` reproduces **174 trades, PF 1.06,
 > +$52.80, max DD $99.62, exits 41 TP / 29 BE / 104 SL**; new `SIGNAL` lines in
 > `logs/trades.jsonl` carry `reason` (e.g.
@@ -25,6 +27,10 @@ code, parameters, or the server must update §1 (state), §3 (changelog) and
 > from the file's start (balance $151.26 at 11:06 still includes the old config;
 > see §5 for the counting command). Live spread is running **53–55 pts (~$0.54)**
 > vs the backtest's $0.47 mean — worth remembering when judging the paper book.
+> **Note on evening `Tick data unchanged for 20 cycles` warnings (~21:00–22:00 UTC):**
+> benign — spot gold (`GOLD` on XM / CME Globex) has its daily 1-hour rollover
+> break from **21:00 to 22:00 UTC** (05:00–06:00 Asia/KL) and is closed
+> **Fri 21:00 → Sun 22:00 UTC**; see §7.
 > `TRADING_MODE` stays `"FORWARD_TEST"` — the bootstrap CI spans zero
 > (P(net>0)≈60%), so **there is no validated edge**.
 
@@ -32,10 +38,11 @@ code, parameters, or the server must update §1 (state), §3 (changelog) and
   2026-09-30 10:19:58 UTC** (merge commit `40ec328`, branch
   `arena/01a0f1c8-scalper` → `main`), **PR #7 at 10:37:49 UTC** (`e12e845`,
   strategy iteration: indicator warm-up + spread measurement fixes,
-  `BE_TRIGGER_R` 1.5) and **PR #8 at 11:04:30 UTC** (`fc6f4fc`, the follow-up:
-  fetch margin + skip-reason diagnostics). Gate 1 (live-path hardening) and
-  Gate 2 (backtest fix) are on `main`; `main` and the session branch
-  (`arena/01a0f205-scalper`) are both at `fc6f4fc`.
+  `BE_TRIGGER_R` 1.5), **PR #8 at 11:04:30 UTC** (`fc6f4fc`, the follow-up:
+  fetch margin + skip-reason diagnostics), and **PR #9 at 11:32:35 UTC**
+  (`108e773`, HANDOFF verification record). Gate 1 (live-path hardening) and
+  Gate 2 (backtest fix) are on `main`; current session branch is
+  `arena/01a0f44f-scalper` (branched from `108e773`).
 - **Deploy cron confirmed and working (2026-09-30):**
   `*/15 * * * * DEPLOY_BRANCH=main /root/scalper/deploy.sh` — so `main` is the
   production target. **Verified end-to-end on `scalping`:** the server is at
@@ -116,14 +123,17 @@ deploy.sh: git pull --ff-only + systemctl restart only if HEAD moved
 ```
 
 Key config (`config.py`): `TRADING_MODE` ("FORWARD_TEST" default / "LIVE"),
-`SIM_START_BALANCE=200`, `BE_TRIGGER_R=0.75`, `RPC_TIMEOUT_SECONDS=30`,
-backoff caps, stale-tick thresholds, **SESSION_FILTER_***, **RSI_*_LEVEL**,
+`SIM_START_BALANCE=200`, `BE_TRIGGER_R=1.5`, `INDICATOR_WINDOW_BARS=1000`,
+`INDICATOR_FETCH_MARGIN=50`, `RPC_TIMEOUT_SECONDS=30`, backoff caps,
+stale-tick thresholds (`STALE_TICK_WARN_CYCLES=20`,
+`STALE_TICK_RECONNECT_CYCLES=120`), **SESSION_FILTER_***, **RSI_*_LEVEL**,
 **SIGNAL_ON_CLOSED_BAR**.
 
 ## 3. Changelog (what was done and why)
 
 | Date | Change | Why |
 |---|---|---|
+| 09-30 | **Stale-tick warning check & HANDOFF update**: documented `Tick data unchanged for 20 cycles` (`STALE_TICK_WARN_CYCLES=20`, 5 min) and `Tick data frozen for 120 cycles - forcing reconnect` (`STALE_TICK_RECONNECT_CYCLES=120`, 30 min) in §1/§7; synced §2 (`BE_TRIGGER_R=1.5`, `INDICATOR_WINDOW_BARS=1000`, `INDICATOR_FETCH_MARGIN=50`) and §5 (`deploy.sh` default branch already `main`) | The warning observed around 21:00–22:00 UTC is the normal daily 1-hour XAUUSD/CME maintenance break (21:00–22:00 UTC / 05:00–06:00 Asia/KL, plus weekends Fri 21:00 → Sun 22:00 UTC). No ticks arrive during the break; the bot warns at 5 min, does a clean self-healing reconnect at 30 min, and resumes automatically at 22:00 UTC. Session filter (07:00–17:00 UTC) and closed-bar one-shot guard already block entries during that window. |
 | 09-30 | **PR #7 follow-up — MERGED and DEPLOYED (`fc6f4fc`, PR #8 merged 11:04:30 UTC; verified on the server 11:06 UTC)**: `config.INDICATOR_FETCH_MARGIN = 50` (bridge fetches 1050 bars); `check_signal` slices to the last `INDICATOR_WINDOW_BARS`; `strategy.last_skip_reason` (`insufficient_bars:N<1000`, `session:hour=H`, `atr_low:x<0.50`, `no_setup:rsi=…`, `duplicate_bar`) logged as `reason` on `SIGNAL` events; parity test checks window+50 (real and poisoned margin bars) gives the same signal; `.gitignore` covers `.env.*` (except `.env.example`); `deploy.sh` recorded as 100755 | The server probe returned exactly 1000 bars vs a `>= 1000` guard: zero headroom, one missing bar would silence every signal as a bare `signal: null`. Slicing keeps live identical to the backtest (174 trades / PF 1.06 / +$52.80 / 41 TP / 29 BE / 104 SL unchanged). `.env.paper_status` was not ignored (server-local secret). The deploy.sh mode-only diff on the server blocked the first post-merge deploy. **Post-deploy verification (11:06 UTC):** server HEAD `fc6f4fc` with `INDICATOR_FETCH_MARGIN=50` / `INDICATOR_WINDOW_BARS=1000`; backtest reproduces 174 / PF 1.06 / +$52.80 / max DD $99.62; new `SIGNAL` lines carry `reason` (e.g. `no_setup:rsi=42.6(prev 43.1),close>ema200`) and **no `insufficient_bars`** — the margin fixed the headroom problem; bot restarted 11:06:21 UTC in FORWARD_TEST with no traceback; server `git status` clean and `deploy.sh` `-rwxr-xr-x`. |
 | 09-30 | **PR #6 merged to `main`** (merge commit `40ec328`, 10:19:58 UTC); deploy cron confirmed as `*/15 * * * * DEPLOY_BRANCH=main /root/scalper/deploy.sh` | Gate 1+2 live-path hardening + backtest fix are now the production branch; hands-off deploy should carry `main` to the server within 15 min. **Confirmed on the server 11:06 UTC** (HEAD `fc6f4fc` includes it) — the §6 "Post-PR#6 verification" block is now covered by the PR #8 deploy check. |
 | 09-30 | **Gate 1: live-path hardening** (`live_ledger.py` + `run.py` + `mt5_bridge.py`) | Previously `update_daily_pnl` was only called by paper.py, so in LIVE the daily-loss/max-trades gates could never fire (exits happen broker-side). LiveLedger polls `history_deals_get` for OUT deals (magic-matched), records profit+swap+commission via the same gates, dedup/persisted in `logs/live_ledger.json`. Also: filling mode auto-selected from `symbol_info.filling_mode` (was hard-coded IOC → `INVALID_FILL` risk on XM), pre-flight margin check, requote/price-off retries (3 attempts, fresh tick each), `logs/KILL_SWITCH` file disables new entries. All verified against the fake-bridge pattern (FOK/IOC/RETURN selection, retry, margin block, ledger dedup + restart persistence) |
@@ -140,6 +150,19 @@ backoff caps, stale-tick thresholds, **SESSION_FILTER_***, **RSI_*_LEVEL**,
 
 ### Daily review notes
 
+- **2026-09-30 (22:00 UTC / 2026-10-01 06:00 Asia/KL):** Checked the log
+  warning `Tick data unchanged for 20 cycles - possible stale feed (market
+  closed or terminal frozen)`. This is **benign and expected**: `run.py` checks
+  `tick.time_msc` every 15s (`CHECK_INTERVAL_SECONDS=15`) and warns at 20
+  cycles (5 min, `STALE_TICK_WARN_CYCLES=20`), then forces a clean bridge
+  reconnect at 120 cycles (30 min, `STALE_TICK_RECONNECT_CYCLES=120`). Spot
+  gold (`GOLD` on XM / CME Globex) closes daily from **21:00 to 22:00 UTC**
+  (05:00–06:00 Asia/KL) for the NY rollover break and on weekends (**Fri 21:00
+  → Sun 22:00 UTC**). During that break no new ticks arrive, the session filter
+  (`07:00–17:00 UTC`) + closed-bar guard block any entries anyway, and
+  `stale_tick_cycles` resets to 0 automatically on the first tick after 22:00
+  UTC. Added both stale-tick signatures to §7 and cleaned up two stale notes in
+  §2 (`BE_TRIGGER_R=1.5`) and §5 (`deploy.sh` default branch already `main`).
 - **2026-09-30 (11:15):** PR #8 (`fc6f4fc`, the PR #7 follow-up) merged to
   `main` at 11:04:30 UTC and **auto-deployed to `scalping` via the 15-min cron**;
   verified on the server at 11:06 UTC (HEAD `fc6f4fc`, backtest 174 trades /
@@ -211,9 +234,9 @@ Note: the patched image may still carry `set -ex` tracing in
 - [ ] File upstream issues for the two `lucas-campagna/mt5linux` bugs.
 - [x] Verify the server deploy cron targets the intended branch — **done
   2026-09-30**: `*/15 * * * * DEPLOY_BRANCH=main /root/scalper/deploy.sh`.
-  `main` is the production target. (`deploy.sh`'s bare default still names the
-  old `arena/01a0a475-scalper` branch, but the cron passes `DEPLOY_BRANCH=main`
-  explicitly; consider changing the script default to `main` anyway.)
+  `main` is the production target, and `deploy.sh`'s fallback default
+  (`BRANCH="${DEPLOY_BRANCH:-main}"`) was also updated to `main` in PR #7
+  (`22ddba9`).
 - [ ] Restore or re-apply stashed `paper_status_daily.sh` edits from
   `/root/paper_status_daily.sh.backup` if still wanted. Status cron is
   confirmed (01:15 UTC daily + 01:00 UTC Mon–Fri, server-only
@@ -354,6 +377,8 @@ cd /root/scalper && git fetch origin && git checkout main && git pull --ff-only 
 | `[Errno 104] Connection reset by peer` | docker-proxy flapping while container restarts; benign during boot |
 | `pickling is disabled` | rpyc client missing classic flags — fixed in `78fe7e8`; if it returns, something recreated the bridge without them |
 | `Market data temporarily unavailable` | tick/symbol issue (symbol missing, terminal not logged in) |
+| `Tick data unchanged for 20 cycles - possible stale feed (market closed or terminal frozen)` | **Benign outside trading hours:** 20 loops × 15s = 5 min with unchanged `tick.time_msc`. Expected every weekday during the daily gold maintenance/rollover break (**21:00–22:00 UTC** / 05:00–06:00 Asia/KL) and all weekend (**Fri 21:00 → Sun 22:00 UTC**). Self-clears on the first new tick at reopen; session filter (`07:00–17:00 UTC`) + closed-bar guard block entries outside hours anyway. Only investigate if it fires persistently during active London/NY hours (`07:00–17:00 UTC`) on a weekday. |
+| `Tick data frozen for 120 cycles - forcing reconnect` (+ 3× `Loop error` → reconnect) | **Benign during market close / rollover:** 120 loops × 15s = 30 min with unchanged `tick.time_msc`. The watchdog forces a clean MT5 bridge reconnect (`reconnect_count` increments by 1; expect ~1 reconnect during the daily 21:00–22:00 UTC break and ~1 every 30 min over the weekend). Self-heals when quotes resume. |
 | container `Restarting (1)` silently | upstream `set -e` bugs (§4) |
 | `Insufficient free margin ... order not sent` | margin pre-flight blocked the LIVE order (see `mt5_bridge._margin_ok`) |
 | `Transient fill failure retcode=... retrying` | requote/price-moved during LIVE entry; retried with a fresh tick |
@@ -363,7 +388,7 @@ cd /root/scalper && git fetch origin && git checkout main && git pull --ff-only 
 ## 8. Session protocol
 
 1. Day-to-day strategy work on the session Arena branch (currently
-   `arena/01a0f1c8-scalper`); promote to `main` via PR, rebasing onto current
+   `arena/01a0f44f-scalper`); promote to `main` via PR, rebasing onto current
    `main` when history diverges (squash merges).
 2. Test engine changes against the fake RPyC server pattern (venv with
    `rpyc pandas numpy`, a fake `MetaTrader5` module exposing
