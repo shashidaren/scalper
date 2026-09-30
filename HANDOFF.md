@@ -6,33 +6,47 @@ code, parameters, or the server must update §1 (state), §3 (changelog) and
 
 ---
 
-## 1. Where things stand (as of 2026-09-30 11:45 UTC)
+## 1. Where things stand (as of 2026-09-30 11:15 UTC)
 
-> **Update (PR #7 follow-up, 2026-09-30):** PR #7 (`e12e845`) is merged and
-> deployed+verified on the server (10:43:53 UTC): `BE_TRIGGER_R=1.5`,
-> `INDICATOR_WINDOW_BARS=1000`. **The paper book's config changed at that
-> timestamp** and `logs/paper_account.json` carries across restarts, so count
-> the "100+ paper trades" criterion from 10:43:53 UTC, not from the file's
-> start. A small follow-up PR (fetch margin + skip reasons, see §3) is
-> **pending merge/deploy**; verify it with the §6 "Post-follow-up verification"
-> block. `TRADING_MODE` stays `"FORWARD_TEST"` — no validated edge (CI spans 0).
+> **Update (PR #8 deployed, verified 2026-09-30 11:06 UTC):** the PR #7
+> follow-up is **merged (`fc6f4fc`, PR #8 merged 11:04:30 UTC) and deployed +
+> verified on the server** — nothing is pending merge/deploy any more. Server
+> HEAD is `fc6f4fc` with `INDICATOR_FETCH_MARGIN=50`,
+> `INDICATOR_WINDOW_BARS=1000`; `backtest.py` reproduces **174 trades, PF 1.06,
+> +$52.80, max DD $99.62, exits 41 TP / 29 BE / 104 SL**; new `SIGNAL` lines in
+> `logs/trades.jsonl` carry `reason` (e.g.
+> `no_setup:rsi=42.6(prev 43.1),close>ema200`) with **no `insufficient_bars`
+> seen**; the bot restarted clean at 11:06:21 UTC in **FORWARD_TEST (paper)**,
+> no traceback. Server `git status` is clean and `deploy.sh` is `-rwxr-xr-x`
+> (the mode-only diff that blocked the first deploy is fixed);
+> `.env.paper_status` is now git-ignored. **The paper book's config changed at
+> 10:43:53 UTC** (the PR #7 deploy) and `logs/paper_account.json` carries across
+> restarts, so count the "100+ paper trades" criterion **from 10:43:53 UTC**, not
+> from the file's start (balance $151.26 at 11:06 still includes the old config;
+> see §5 for the counting command). Live spread is running **53–55 pts (~$0.54)**
+> vs the backtest's $0.47 mean — worth remembering when judging the paper book.
+> `TRADING_MODE` stays `"FORWARD_TEST"` — the bootstrap CI spans zero
+> (P(net>0)≈60%), so **there is no validated edge**.
 
 - **Repo/branch:** `shashidaren/scalper`; **PR #6 merged to `main` at
   2026-09-30 10:19:58 UTC** (merge commit `40ec328`, branch
-  `arena/01a0f1c8-scalper` → `main`). Gate 1 (live-path hardening) and Gate 2
-  (backtest fix) are therefore on `main`; `main` and the session branch are at
-  the same commit right now.
-- **Deploy cron confirmed (2026-09-30):**
+  `arena/01a0f1c8-scalper` → `main`), **PR #7 at 10:37:49 UTC** (`e12e845`,
+  strategy iteration: indicator warm-up + spread measurement fixes,
+  `BE_TRIGGER_R` 1.5) and **PR #8 at 11:04:30 UTC** (`fc6f4fc`, the follow-up:
+  fetch margin + skip-reason diagnostics). Gate 1 (live-path hardening) and
+  Gate 2 (backtest fix) are on `main`; `main` and the session branch
+  (`arena/01a0f205-scalper`) are both at `fc6f4fc`.
+- **Deploy cron confirmed and working (2026-09-30):**
   `*/15 * * * * DEPLOY_BRANCH=main /root/scalper/deploy.sh` — so `main` is the
-  production target and the merge should have auto-deployed within 15 min of
-  the merge. **Not yet verified from the server side** (see §6
-  "Post-PR#6 verification"): the 2026-09-30 11:00 UTC session had no SSH
-  access, so the checks below must be run on `scalping` and reported back.
-  Expected: `git log` shows `40ec328`, `live_ledger.py` present,
-  `journalctl -u scalper-bot` banner shows the new HEAD, and
-  `mt5env/bin/python backtest.py` prints **201 trades** (was 0 before Gate 2).
-  (After PR #7 is merged+deployed the expected smoke test becomes 174 trades /
-  PF 1.06 — see §6.)
+  production target. **Verified end-to-end on `scalping`:** the server is at
+  `fc6f4fc` (PR #8 merge, 11:04:30 UTC), i.e. PR #6 (`40ec328`) → PR #7
+  (`e12e845`) → PR #8 all auto-deployed via cron without intervention, and the
+  bot restarted at 11:06:21 UTC. `git status` on the server is clean.
+  Backtest smoke test on the server prints **174 trades / PF 1.06 / +$52.80**
+  (was 0 before Gate 2, 201/0.92 on the old defaults). `live_ledger.py` is
+  present. (`logs/live_ledger.json` staying absent in FORWARD_TEST is by design
+  — LiveLedger is LIVE-only — but was not re-checked in this pass; it is covered
+  by the first-LIVE-run item in §5.)
 - **Status script:** runs from cron on the server at **01:15 UTC daily** and
   **01:00 UTC Mon–Fri** (double-run on weekdays by design/legacy), at
   `/root/scalper/scripts/paper_status_daily.sh` — **server-only, not in git**.
@@ -52,9 +66,9 @@ code, parameters, or the server must update §1 (state), §3 (changelog) and
   the daily loss / max-trades gates work in LIVE mode; filling mode is now
   auto-selected from `symbol_info.filling_mode` (FOK→IOC→RETURN fallback);
   margin pre-flight check + transient-fill retries; KILL_SWITCH file gate.
-- **Server** (`scalping`), last **confirmed** deploy 2026-09-30 09:36 UTC to
-  `4a21a33`; PR #6 (`40ec328`) should have auto-deployed from cron within
-  15 min of the 10:19:58 UTC merge — **verify, do not assume** (§6).
+- **Server** (`scalping`), **confirmed** at HEAD `fc6f4fc` as of
+  2026-09-30 11:06 UTC (PRs #6/#7/#8 all auto-deployed via cron; working tree
+  clean; `deploy.sh` mode `-rwxr-xr-x` correct). Bot restarted 11:06:21 UTC.
   - `scalper-bot.service` is active in **FORWARD_TEST (paper)** mode; no real
     orders are sent.
   - **Confirmed on server:** `RSI_BUY_LEVEL=35`, `RSI_SELL_LEVEL=65`,
@@ -70,13 +84,17 @@ code, parameters, or the server must update §1 (state), §3 (changelog) and
     `*/15 * * * * DEPLOY_BRANCH=main /root/scalper/deploy.sh` → `main` is the
     production branch and hands-off deploys are expected to work.
 - **Strategy:** v7 closed-bar signals + one-shot per bar, session 07:00–17:00
-  UTC, RSI 35/65, ATR 2.0 SL / 5.0 TP. **Changed 2026-09-30 (pending deploy):**
-  `BE_TRIGGER_R` 0.75 → **1.5**, and the indicator window is now pinned to
-  `INDICATOR_WINDOW_BARS = 1000` so the EMA200 is converged and the live path
-  matches the backtester (it was 250 live vs 202 backtest, i.e. two different
-  indicators). Active on the server until deployed: `4a21a33` (BE 0.75,
-  250-bar window).
-- **Paper book:** inspect on server with `python paper.py` after deploy.
+  UTC, RSI 35/65, ATR 2.0 SL / 5.0 TP. **Changed 2026-09-30 and now live on
+  the server:** `BE_TRIGGER_R` 0.75 → **1.5**, the indicator window is pinned
+  to `INDICATOR_WINDOW_BARS = 1000` so the EMA200 is converged and the live
+  path matches the backtester (it was 250 live vs 202 backtest, i.e. two
+  different indicators), plus `INDICATOR_FETCH_MARGIN = 50` for headroom
+  (the server probe was returning exactly 1000 bars against a `>= 1000`
+  guard). Verified active at `fc6f4fc` on 2026-09-30 11:06 UTC.
+- **Paper book:** inspect on server with `python paper.py`; balance $151.26 at
+  11:06 UTC. **The book's config changed at 10:43:53 UTC** and the JSON carries
+  across restarts — count the "100+ paper trades" criterion from that
+  timestamp (command in §5), not from the file's start.
 
 ## 2. Architecture
 
@@ -106,8 +124,8 @@ backoff caps, stale-tick thresholds, **SESSION_FILTER_***, **RSI_*_LEVEL**,
 
 | Date | Change | Why |
 |---|---|---|
-| 09-30 | **PR #7 follow-up**: `config.INDICATOR_FETCH_MARGIN = 50` (bridge fetches 1050 bars); `check_signal` slices to the last `INDICATOR_WINDOW_BARS`; `strategy.last_skip_reason` (`insufficient_bars:N<1000`, `session:hour=H`, `atr_low:x<0.50`, `no_setup:rsi=…`, `duplicate_bar`) logged as `reason` on `SIGNAL` events; parity test checks window+50 (real and poisoned margin bars) gives the same signal; `.gitignore` covers `.env.*` (except `.env.example`); `deploy.sh` recorded as 100755 | The server probe returned exactly 1000 bars vs a `>= 1000` guard: zero headroom, one missing bar would silence every signal as a bare `signal: null`. Slicing keeps live identical to the backtest (174 trades / PF 1.06 / +$52.80 / 41 TP / 29 BE / 104 SL unchanged). `.env.paper_status` was not ignored (server-local secret). The deploy.sh mode-only diff on the server blocked the first post-merge deploy. |
-| 09-30 | **PR #6 merged to `main`** (merge commit `40ec328`, 10:19:58 UTC); deploy cron confirmed as `*/15 * * * * DEPLOY_BRANCH=main /root/scalper/deploy.sh` | Gate 1+2 live-path hardening + backtest fix are now the production branch; hands-off deploy should carry `main` to the server within 15 min. Server-side verification still outstanding (§6). |
+| 09-30 | **PR #7 follow-up — MERGED and DEPLOYED (`fc6f4fc`, PR #8 merged 11:04:30 UTC; verified on the server 11:06 UTC)**: `config.INDICATOR_FETCH_MARGIN = 50` (bridge fetches 1050 bars); `check_signal` slices to the last `INDICATOR_WINDOW_BARS`; `strategy.last_skip_reason` (`insufficient_bars:N<1000`, `session:hour=H`, `atr_low:x<0.50`, `no_setup:rsi=…`, `duplicate_bar`) logged as `reason` on `SIGNAL` events; parity test checks window+50 (real and poisoned margin bars) gives the same signal; `.gitignore` covers `.env.*` (except `.env.example`); `deploy.sh` recorded as 100755 | The server probe returned exactly 1000 bars vs a `>= 1000` guard: zero headroom, one missing bar would silence every signal as a bare `signal: null`. Slicing keeps live identical to the backtest (174 trades / PF 1.06 / +$52.80 / 41 TP / 29 BE / 104 SL unchanged). `.env.paper_status` was not ignored (server-local secret). The deploy.sh mode-only diff on the server blocked the first post-merge deploy. **Post-deploy verification (11:06 UTC):** server HEAD `fc6f4fc` with `INDICATOR_FETCH_MARGIN=50` / `INDICATOR_WINDOW_BARS=1000`; backtest reproduces 174 / PF 1.06 / +$52.80 / max DD $99.62; new `SIGNAL` lines carry `reason` (e.g. `no_setup:rsi=42.6(prev 43.1),close>ema200`) and **no `insufficient_bars`** — the margin fixed the headroom problem; bot restarted 11:06:21 UTC in FORWARD_TEST with no traceback; server `git status` clean and `deploy.sh` `-rwxr-xr-x`. |
+| 09-30 | **PR #6 merged to `main`** (merge commit `40ec328`, 10:19:58 UTC); deploy cron confirmed as `*/15 * * * * DEPLOY_BRANCH=main /root/scalper/deploy.sh` | Gate 1+2 live-path hardening + backtest fix are now the production branch; hands-off deploy should carry `main` to the server within 15 min. **Confirmed on the server 11:06 UTC** (HEAD `fc6f4fc` includes it) — the §6 "Post-PR#6 verification" block is now covered by the PR #8 deploy check. |
 | 09-30 | **Gate 1: live-path hardening** (`live_ledger.py` + `run.py` + `mt5_bridge.py`) | Previously `update_daily_pnl` was only called by paper.py, so in LIVE the daily-loss/max-trades gates could never fire (exits happen broker-side). LiveLedger polls `history_deals_get` for OUT deals (magic-matched), records profit+swap+commission via the same gates, dedup/persisted in `logs/live_ledger.json`. Also: filling mode auto-selected from `symbol_info.filling_mode` (was hard-coded IOC → `INVALID_FILL` risk on XM), pre-flight margin check, requote/price-off retries (3 attempts, fresh tick each), `logs/KILL_SWITCH` file disables new entries. All verified against the fake-bridge pattern (FOK/IOC/RETURN selection, retry, margin block, ledger dedup + restart persistence) |
 | 09-30 | **Gate 2: backtester fixed** (`backtest.py`) — was feeding 201 bars into the strategy's 202-bar guard → zero signals ever | Window then 202 bars (`WINDOW_BARS`, keep in sync with strategy guard — superseded by the next row, now `config.INDICATOR_WINDOW_BARS`); entry fill moved to the signal bar's close (mirrors live closed-bar timing) and trades are managed from the next bar. First honest run on 20k M5 bars: 201 trades, PF 0.92, WR 14.4%, −$58, max DD $93 (exits 29 TP / 96 BE / 76 SL). |
 | 09-30 | **Strategy iteration + measurement fixes** (offline, see `docs/strategy_iteration_2026-09-30.md`): `BE_TRIGGER_R` 0.75 → **1.5**; new `config.INDICATOR_WINDOW_BARS = 1000` shared by `strategy.py`, `MT5Bridge.get_rates` and `backtest.py`; backtester now prices the **per-bar spread from the data** (mean $0.47) instead of a flat $0.30; `research/strategy_sweep.py` added (verified to reproduce `backtest.py` exactly) | Two measurement bugs made the old numbers meaningless: (a) with `ewm(adjust=False)` on a 202/250-bar window the "EMA200" kept 13.5%/8.4% weight on its seed, so live and backtest were running *different* indicators, and every converged EMA length (30–300) loses — the filter has no edge; (b) the real spread is ~$0.47–0.51, not $0.30. Re-measured honestly the old config loses −$270 (PF 0.64, P(net>0)≈3%). One-variable sweeps show the 0.75R BE ratchet was the dominant killer (monotone 0.5R→off; 94/198 trades scratched at entry while 5R targets never survived); BE 1.5R is the conservative end of the plateau. Session 08–16 and H1-trend confirmation both made results *worse* (rejected); RSI 40/60 and TP changes were non-monotone noise (rejected). New config: +$52.80, PF 1.06, but P(net>0)≈60% → still no validated edge. |
@@ -122,6 +140,18 @@ backoff caps, stale-tick thresholds, **SESSION_FILTER_***, **RSI_*_LEVEL**,
 
 ### Daily review notes
 
+- **2026-09-30 (11:15):** PR #8 (`fc6f4fc`, the PR #7 follow-up) merged to
+  `main` at 11:04:30 UTC and **auto-deployed to `scalping` via the 15-min cron**;
+  verified on the server at 11:06 UTC (HEAD `fc6f4fc`, backtest 174 trades /
+  PF 1.06 / +$52.80, `reason` present on new `SIGNAL` lines, no
+  `insufficient_bars`, clean restart, clean `git status`, `deploy.sh` mode
+  correct). This also closes the outstanding PR #6 deploy question: the cron
+  chain PR #6 → #7 → #8 is proven to work hands-off. Live spread is running
+  53–55 pts (~$0.54) vs the backtest's $0.47 mean — a live cost the backtest
+  does not yet model. §5 "Post-follow-up verification" and the skip-reason
+  diagnostics item are checked off. **No strategy work this session** and none
+  should follow from it: the bootstrap CI still spans zero, so
+  `TRADING_MODE` stays `"FORWARD_TEST"`.
 - **2026-09-18:** Shipped v7 and deploy.sh. The clean promotion was subsequently
   merged to `main` (base commit `69d7478`). The old work-branch name in earlier
   notes and the deploy.sh default may be stale; verify the server's deploy
@@ -194,8 +224,11 @@ Note: the patched image may still carry `set -ex` tracing in
   30/70 baseline using trade count, net expectancy after spread, drawdown,
   and session coverage.
 - [x] Add signal skip-reason diagnostics — `strategy.last_skip_reason`, logged
-  as `reason` on `SIGNAL` events (PR #7 follow-up; needs server deploy to
-  appear in `logs/trades.jsonl`).
+  as `reason` on `SIGNAL` events. **Done and verified on the server
+  2026-09-30 11:06 UTC** (PR #8, `fc6f4fc`): new `SIGNAL` lines in
+  `logs/trades.jsonl` carry e.g. `no_setup:rsi=42.6(prev 43.1),close>ema200`,
+  and **no `insufficient_bars`** has been seen — the
+  `INDICATOR_FETCH_MARGIN = 50` headroom is doing its job.
 - [x] Fix backtest input-length mismatch — **done 09-30 on
   `arena/01a0f1c8-scalper`** (`WINDOW_BARS=202`, entry at signal-bar close,
   manage from next bar). First results: PF 0.92 / −$58 over ~70 days — later
@@ -203,13 +236,16 @@ Note: the patched image may still carry `set -ex` tracing in
   iteration row in §3 and `docs/strategy_iteration_2026-09-30.md`.
 - [x] **Merge the Gate 1+2 PR** — PR #6 merged to `main` 2026-09-30 10:19:58 UTC
   (`40ec328`).
-- [ ] **Confirm the deploy actually landed on the server** (may already have via
-  the 15-min cron — must be run on `scalping`; the 2026-09-30 11:00 UTC session
-  had no SSH access): run the §6 "Post-PR#6 verification" block —
-  `git log -1` shows `40ec328`, `live_ledger.py` present,
-  `journalctl -u scalper-bot` banner shows the new HEAD, and
-  `mt5env/bin/python backtest.py` prints **201 trades** (not 0). Also confirm
-  `logs/live_ledger.json` stays absent/empty in FORWARD_TEST.
+- [x] **Confirm the deploy actually landed on the server** — **done
+  2026-09-30 11:06 UTC** (was run on `scalping`). Server HEAD is `fc6f4fc`
+  (PR #8), so PR #6 (`40ec328`) and PR #7 (`e12e845`) are on the server too —
+  the `*/15 * * * * DEPLOY_BRANCH=main deploy.sh` cron carried all three
+  hands-off. `live_ledger.py` present, `journalctl -u scalper-bot` banner shows
+  the new HEAD with a clean restart (11:06:21 UTC, no traceback), and
+  `mt5env/bin/python backtest.py` prints **174 trades / PF 1.06 / +$52.80** (not
+  0, not 201 — 201/0.92 was the pre-strategy-iteration default). Only
+  `logs/live_ledger.json` was left unchecked (LIVE-only by design; it is part
+  of the first-LIVE-run verification below).
 - [~] **Strategy work (blocking for LIVE):** first iteration done 2026-09-30
   (`docs/strategy_iteration_2026-09-30.md`). Tested one variable at a time:
   **BE trigger → 1.5R (adopted)**, ATR multiples (only monotone via wider SL,
@@ -225,6 +261,12 @@ Note: the patched image may still carry `set -ex` tracing in
   profitable backtest over ≥6 months; only then flip
   `TRADING_MODE = "LIVE"` in `config.py` (+ restart service). Pre-agreed
   launch criteria: expectancy > 0 after spread, PF > ~1.2, max DD affordable.
+  **Count the 100+ trades from 2026-09-30 10:43:53 UTC** (the PR #7 deploy that
+  changed the book's config), not from the start of the file —
+  `logs/paper_account.json` carries across restarts and still contains the
+  pre-`BE_TRIGGER_R=1.5` book:
+  `grep -E 'SIM_(ENTRY|EXIT)' logs/trades.jsonl | awk -F'"' '$4 >= "2026-09-30 10:43:53"' | wc -l`
+  (divide by 2 for round trips). Balance was $151.26 at 11:06 UTC.
 - [ ] Live-mode verification on first LIVE run: confirm `LIVE_EXIT` events
   land in `logs/trades.jsonl` when broker-side SL/TP fill, daily stats update,
   and the loss gate actually halts entries; test the KILL_SWITCH file.
@@ -287,6 +329,8 @@ mt5env/bin/python backtest.py            # smoke test: expect Total Trades: 174,
 ls -l logs/live_ledger.json              # should be absent/empty in FORWARD_TEST
 
 # --- Post-follow-up verification (PR #7 follow-up: fetch margin + skip reasons) ---
+# ✅ RUN AND PASSED on `scalping` 2026-09-30 11:06 UTC, HEAD fc6f4fc (PR #8).
+#    Re-run only if the server HEAD moves away from fc6f4fc.
 cd /root/scalper
 git log -1 --format='%h %s'                                          # expect the follow-up merge
 grep -E '^INDICATOR_FETCH_MARGIN|^INDICATOR_WINDOW_BARS' config.py   # 50 / 1000
