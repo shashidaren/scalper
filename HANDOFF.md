@@ -6,7 +6,7 @@ code, parameters, or the server must update §1 (state), §3 (changelog) and
 
 ---
 
-## 1. Where things stand (as of 2026-09-30 11:00 UTC)
+## 1. Where things stand (as of 2026-09-30 11:45 UTC)
 
 - **Repo/branch:** `shashidaren/scalper`; **PR #6 merged to `main` at
   2026-09-30 10:19:58 UTC** (merge commit `40ec328`, branch
@@ -22,6 +22,8 @@ code, parameters, or the server must update §1 (state), §3 (changelog) and
   Expected: `git log` shows `40ec328`, `live_ledger.py` present,
   `journalctl -u scalper-bot` banner shows the new HEAD, and
   `mt5env/bin/python backtest.py` prints **201 trades** (was 0 before Gate 2).
+  (After PR #7 is merged+deployed the expected smoke test becomes 174 trades /
+  PF 1.06 — see §6.)
 - **Status script:** runs from cron on the server at **01:15 UTC daily** and
   **01:00 UTC Mon–Fri** (double-run on weekdays by design/legacy), at
   `/root/scalper/scripts/paper_status_daily.sh` — **server-only, not in git**.
