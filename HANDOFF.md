@@ -36,13 +36,13 @@ chmod +x /root/scalper/deploy.sh /root/scalper/scripts/paper_status_daily.sh
 0 1 * * 1-5 /root/scalper/scripts/paper_status_daily.sh >> /root/scalper/logs/paper_status.cron.log 2>&1
 ```
 
-GitHub publish is **proven** (2026-09-24T02:00:12Z). Token lives in `/root/scalper/.env.paper_status` (never commit). Script auto-sources that file.
+GitHub publish is **proven** (2026-09-24T02:00:12Z; weekday snaps 2026-09-29T17:05Z and 2026-09-30T01:00Z). Token lives in `/root/scalper/.env.paper_status` (never commit). Script auto-sources that file.
 
 Confirm: https://github.com/shashidaren/scalper/blob/status/paper/status/paper_latest.json
 
 ---
 
-## 1. Where things stand (as of 2026-09-29)
+## 1. Where things stand (as of 2026-09-30)
 
 - **Repo/branch:** `shashidaren/scalper`. Daily-review work lands on
   `arena/01a0a475-scalper` (server `deploy.sh` defaults here). `main` is behind
@@ -52,10 +52,11 @@ Confirm: https://github.com/shashidaren/scalper/blob/status/paper/status/paper_l
   - `scalper-dashboard.service` on port 8088 (reads log files only).
   - MT5 container via `docker-compose.yml` (`lprett-mt5linux-patched`, see §4).
   - **Deploy:** hands-off via `deploy.sh` + cron **confirmed installed** (`*/15 * * * * /root/scalper/deploy.sh`).
+  - **Paper-status cron:** weekday 17:05 UTC + 01:00 UTC **confirmed live** (snaps on 09-29 17:05Z and 09-30 01:00Z).
 - **Strategy version:** **v12.1** (RSI recovery band 45/55). `TRADING_MODE` = FORWARD_TEST.
-- **Paper book (chat paste 2026-09-29):** **$169.84 / 3 closed / 0W 3L / flat**.
-  Automated `status/paper` snap still stale (2026-09-24T02:00:12Z $200 / 0 closed).
-  Net −$30.16 from $200 start. Sample too small to retune; still 0 wins under v12.1.
+- **Paper book (`status/paper` 2026-09-30T01:00:01Z):** **$158.53 / 4 closed / 0W 4L / flat**.
+  Prior chat paste 2026-09-29: $169.84 / 3 closed / 0W 3L. One more loss (~$11.31) overnight.
+  Net −$41.47 from $200 start. Sample still too small to retune; 0 wins under v12.1.
   Prior v11 sample 0/13, $142.
 - **Daily automation:** `scalper-daily-review-9am-kl` @ 09:00 Asia/Kuala_Lumpur.
 
@@ -86,6 +87,7 @@ Key config (`config.py`): `TRADING_MODE` ("FORWARD_TEST" default / "LIVE"),
 
 | Date | Change | Why |
 |---|---|
+| 09-30 | Daily review — recorded paper book; no strategy/config change | v12.1 still 0W/4L ($158.53); paper-status cron confirmed |
 | 09-29 | Daily review — recorded paper book; no strategy/config change | v12.1 sample still tiny (0W/3L, $169.84); deploy cron confirmed |
 | 09-26 | Daily review — no strategy/config change | v12.1 still needs a paper sample; last book snapshot is stale (09-24) |
 | 09-25 | **v12.1**: RSI recovery band 40/60 → 45/55 | v12 produced zero paper fills; gold M5 often jumps >10 RSI on the cross bar |
@@ -105,25 +107,23 @@ Key config (`config.py`): `TRADING_MODE` ("FORWARD_TEST" default / "LIVE"),
 
 ### Daily review notes
 
+- **2026-09-30 (Wed 01:00 UTC / 09:00 Asia/KL):** Automated `status/paper`:
+  **$158.53 / 4 closed / 0W 4L / position null** (`ts` 2026-09-30T01:00:01Z).
+  vs 09-29 paste $169.84 / 3 / 0W 3L — one additional loss. Paper-status weekday
+  cron is **live** (17:05Z 09-29 + 01:00Z 09-30). No strategy change: n=4 under
+  v12.1 is still too small; losses never reaching +0.75R (BE) is the pattern to
+  watch. Risk gates (daily -$30, consec-loss=2) remain appropriate. Keep v12.1
+  through ≥20–30 closed trades. If still 0-win: first experiment is H1 trend
+  filter **or** drop EMA for pure RSI mean-reversion **or** cut TP from 5×ATR
+  (2.5R) toward 3×ATR — not LIVE. Structural note only: 2.5R TP on an RSI-bounce
+  entry is a mismatch if gold never pays that far after the cross.
 - **2026-09-29 (Tue afternoon Asia/KL):** Chat paste of `paper.py`:
   **$169.84 / 3 closed / 0W 3L / position null**. Auto-publish still stale
-  (09-24 $200 / 0). Deploy cron **is** installed (`*/15 deploy.sh`). Paper-status
-  weekday crons still not confirmed in crontab. No strategy change: n=3 is not
-  enough to retune RSI/session/RR; risk gates (daily -$30, consec-loss=2) look
-  like they fired as designed (~$30 drawdown). Next: keep v12.1 through ≥20–30
-  closed trades; if still 0-win, first experiment is H1 trend filter **or** drop
-  EMA and test pure RSI mean-reversion — not LIVE.
-- **2026-09-26 (Sat 01:00 UTC / 09:00 Asia/KL):** Reviewed strategy, config, engine,
-  paper path. **Paper status not available this run** (last `status/paper` snap is
-  2026-09-24T02:00:12Z: $200 / 0 closed / 0W 0L / flat). No code change — still
-  waiting for a non-zero paper sample under v12.1. Confirm paper-status cron is
-  installed so morning/evening snaps keep flowing. Next experiments only after
-  ≥20–30 closed trades under current params (then H1 trend filter or pure-RSI).
+  at review time (later 17:05Z snap landed). Deploy cron **is** installed.
+- **2026-09-26 (Sat 01:00 UTC / 09:00 Asia/KL):** **Paper status not available this run**.
 - **2026-09-25:** v12.1 recovery band widened 40/60 → 45/55 after zero fills.
 - **2026-09-24 (Thu 02:00 UTC):** Auto-publish **works**. Book **$200 / 0 closed /
-  0W 0L / flat**. PAT Contents write confirmed. Remaining: install weekday cron
-  so you never run the script by hand.
-- **2026-09-24 (Thu earlier):** Built publish path; jq/token/perms issues on server.
+  0W 0L / flat**.
 - **2026-09-23 (Wed PM):** v12 + paper reset $200 / 0 closed. Prior v11 0/13 $142.
 - **2026-09-22:** v11 consecutive-loss pause.
 - **2026-09-21:** v10 min ATR + SL-vs-spread.
@@ -142,7 +142,7 @@ container crash-loops after first restart. **TODO:** file upstream.
 ## 5. Open TODOs
 
 - [x] **One-time:** confirm deploy cron is installed (see §0). Confirmed 2026-09-29.
-- [ ] **One-time:** install `paper_status_daily.sh` weekday cron (17:05 UTC + 01:00 UTC).
+- [x] **One-time:** install `paper_status_daily.sh` weekday cron (17:05 UTC + 01:00 UTC). Confirmed by snaps 2026-09-29T17:05Z and 2026-09-30T01:00Z.
 - [x] Fine-grained PAT + `.env.paper_status` — first publish 2026-09-24T02:00:12Z.
 - [ ] **Rotate MT5 + VNC passwords** (were in plain text). Update `.env` after XM change.
 - [ ] Revert container `main.sh` `set -ex` → `set -e` if log noise bothers you.
@@ -152,7 +152,7 @@ container crash-loops after first restart. **TODO:** file upstream.
 - [ ] Judge paper book after **100+ trades under a single version**; only then consider LIVE.
 - [ ] Optional: GOLD symbol if broker renames it.
 - [x] Tighter session 08–16 UTC (v12).
-- [ ] After v12.1 sample: H1 trend filter **or** test pure RSI mean-reversion (no EMA).
+- [ ] After v12.1 sample (≥20–30 closed): H1 trend filter **or** test pure RSI mean-reversion (no EMA) **or** shorter TP (3×ATR).
 - [x] Friday early-close (v8).
 - [x] Weekend flat (v9).
 - [x] Spread-aware min ATR + SL-vs-spread (v10).
