@@ -4,10 +4,15 @@ import config
 from mt5_bridge import MT5Bridge
 from strategy import ScalpStrategy
 from paper import PaperAccount
+from live_ledger import LiveLedger
 from logger import (
-    log_system, log_trade, get_today_stats,
+    LOG_DIR, log_system, log_trade, get_today_stats,
     update_connection_status, update_live_status
 )
+
+# Emergency stop: create this file to disable NEW entries without killing the
+# service (open positions keep their broker-side SL/TP). Remove it to resume.
+KILL_SWITCH_FILE = LOG_DIR / "KILL_SWITCH"
 
 
 def backoff_delay(failures):
@@ -23,12 +28,14 @@ def main():
     strategy = ScalpStrategy()
 
     paper = None
+    ledger = None
     if config.TRADING_MODE == "FORWARD_TEST":
         paper = PaperAccount()
         log_system("INFO",
             f"TRADING MODE: FORWARD_TEST (paper) - simulated balance ${paper.balance:.2f}, "
             f"NO real orders will be sent")
     else:
+        ledger = LiveLedger()
         log_system("INFO", "TRADING MODE: LIVE - real orders WILL be sent")
 
     consecutive_errors = 0
@@ -39,6 +46,7 @@ def main():
     missing_data_count = 0
     stale_tick_cycles = 0
     last_tick_msc = None
+    kill_switch_active = False
 
     try:
         while True:
@@ -148,6 +156,9 @@ def main():
                 # --- Paper exit resolution (real ticks, simulated fills) ---
                 if paper is not None:
                     paper.on_tick(tick.bid, tick.ask)
+                elif ledger is not None:
+                    # LIVE: detect broker-side closes so daily risk gates apply.
+                    ledger.poll(bridge)
 
                 uptime = 0
                 if connected_since:
@@ -227,6 +238,22 @@ def main():
                 # Spread filter
                 if spread_points > config.MAX_SPREAD_POINTS:
                     log_trade("SKIP", {"reason": "high_spread", "spread": spread_points})
+                    time.sleep(config.CHECK_INTERVAL_SECONDS)
+                    continue
+
+                # Kill switch: disable NEW entries without stopping the engine.
+                # Open positions keep their broker-side SL/TP. Log once per
+                # state change so the trades log isn't spammed every 15s.
+                kill_active = KILL_SWITCH_FILE.exists()
+                if kill_active != kill_switch_active:
+                    kill_switch_active = kill_active
+                    if kill_active:
+                        log_system("WARNING",
+                            f"KILL_SWITCH detected ({KILL_SWITCH_FILE}) - new entries disabled; "
+                            f"open positions keep broker-side SL/TP. Remove the file to resume.")
+                    else:
+                        log_system("INFO", "KILL_SWITCH removed - new entries re-enabled.")
+                if kill_active:
                     time.sleep(config.CHECK_INTERVAL_SECONDS)
                     continue
 
