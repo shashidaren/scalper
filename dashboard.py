@@ -8,7 +8,8 @@ Never opens its own MT5 / RPyC connection.
 import json
 import traceback
 from pathlib import Path
-from datetime import datetime, timezone
+from collections import Counter
+from datetime import datetime, timezone, timedelta
 
 from fastapi import FastAPI, Request
 from fastapi.responses import HTMLResponse
@@ -22,8 +23,9 @@ TRADES_FILE = LOG_DIR / "trades.jsonl"
 SYSTEM_FILE = LOG_DIR / "system.jsonl"
 PAPER_FILE = LOG_DIR / "paper_account.json"
 CONTRACT_SIZE = 100.0
+KL = timezone(timedelta(hours=8))
 
-app = FastAPI(title="Gold Scalper Dashboard", version="1.4.1")
+app = FastAPI(title="Gold Scalper Dashboard", version="1.5.0")
 templates = Jinja2Templates(directory=str(BASE_DIR / "templates"))
 
 
@@ -55,8 +57,8 @@ def _heartbeat_system(entry: dict) -> bool:
     return msg.startswith("SIM:") or "SimEquity:" in msg or msg.startswith("Balance:")
 
 
-def read_trade_events(limit: int = 30) -> list:
-    raw = read_jsonl(TRADES_FILE, limit=400)
+def read_trade_events(limit: int = 40) -> list:
+    raw = read_jsonl(TRADES_FILE, limit=800)
     out = [e for e in raw if not _idle_signal(e)]
     return out[:limit]
 
@@ -87,24 +89,100 @@ def get_paper_book() -> dict:
         return default
 
 
+def _fmt_countdown(delta: timedelta) -> str:
+    if delta.total_seconds() <= 0:
+        return "now"
+    total = int(delta.total_seconds())
+    h, rem = divmod(total, 3600)
+    m, s = divmod(rem, 60)
+    if h:
+        return f"{h}h {m}m"
+    if m:
+        return f"{m}m {s}s"
+    return f"{s}s"
+
+
+def next_session_open(when: datetime) -> datetime:
+    start = int(getattr(config, "SESSION_START_HOUR_UTC", 8))
+    candidate = when.replace(hour=start, minute=0, second=0, microsecond=0)
+    if when >= candidate:
+        candidate = candidate + timedelta(days=1)
+    while candidate.weekday() >= 5:
+        candidate = candidate + timedelta(days=1)
+    return candidate
+
+
 def session_state(when=None):
     when = when or datetime.now(timezone.utc)
+    start = int(getattr(config, "SESSION_START_HOUR_UTC", 8))
+    end = int(getattr(config, "SESSION_END_HOUR_UTC", 16))
+    window = f"{start:02d}–{end:02d} UTC"
+    reason = None
+    inside = True
+
     if getattr(config, "WEEKEND_FLAT_ENABLED", False) and when.weekday() >= 5:
-        return False, "weekend flat"
-    if getattr(config, "FRIDAY_CUTOFF_ENABLED", False):
+        inside, reason = False, "weekend flat"
+    elif getattr(config, "FRIDAY_CUTOFF_ENABLED", False):
         cutoff = getattr(config, "FRIDAY_CUTOFF_HOUR_UTC", 16)
         if when.weekday() == 4 and when.hour >= cutoff:
-            return False, f"Friday cutoff (>={cutoff}:00 UTC)"
-    if not getattr(config, "SESSION_FILTER_ENABLED", False):
-        return True, "filter off"
-    start = getattr(config, "SESSION_START_HOUR_UTC", 8)
-    end = getattr(config, "SESSION_END_HOUR_UTC", 16)
-    inside = start <= when.hour < end
-    return inside, f"{start:02d}–{end:02d} UTC"
+            inside, reason = False, f"Friday cutoff (≥{cutoff}:00 UTC)"
+    if inside and getattr(config, "SESSION_FILTER_ENABLED", False):
+        inside = start <= when.hour < end
+        if not inside:
+            reason = "outside London/NY window"
+    elif inside and not getattr(config, "SESSION_FILTER_ENABLED", False):
+        reason = "filter off"
+
+    nxt = None if inside else next_session_open(when)
+    until_close = None
+    if inside:
+        close_at = when.replace(hour=end, minute=0, second=0, microsecond=0)
+        until_close = _fmt_countdown(close_at - when)
+
+    return {
+        "open": inside,
+        "reason": reason or window,
+        "window": window,
+        "utc_now": when.strftime("%Y-%m-%d %H:%M UTC"),
+        "kl_now": when.astimezone(KL).strftime("%Y-%m-%d %H:%M MYT"),
+        "next_open_utc": nxt.strftime("%Y-%m-%d %H:%M UTC") if nxt else None,
+        "next_open_kl": nxt.astimezone(KL).strftime("%Y-%m-%d %H:%M MYT") if nxt else None,
+        "countdown": _fmt_countdown(nxt - when) if nxt else None,
+        "until_close": until_close,
+        "label": window,
+    }
+
+
+def activity_digest(events: list) -> dict:
+    last_signal = last_skip = last_exit = last_entry = None
+    skip_reasons = Counter()
+    closed = []
+    for e in events:
+        ev = e.get("event")
+        if ev == "SIGNAL" and last_signal is None:
+            last_signal = e
+        elif ev == "SKIP":
+            r = str(e.get("reason") or e.get("message") or "unknown")
+            skip_reasons[r] += 1
+            if last_skip is None:
+                last_skip = e
+        elif ev in ("SIM_EXIT", "EXIT") and last_exit is None:
+            last_exit = e
+        elif ev in ("SIM_ENTRY", "ENTRY") and last_entry is None:
+            last_entry = e
+        if ev in ("SIM_EXIT", "EXIT"):
+            closed.append(e)
+    return {
+        "last_signal": last_signal,
+        "last_skip": last_skip,
+        "last_exit": last_exit,
+        "last_entry": last_entry,
+        "skip_reasons": skip_reasons.most_common(6),
+        "closed_trades": closed[:12],
+    }
 
 
 def enrich_positions(live: dict) -> None:
-    """Fill floating PnL for paper SIM rows that store profit=0."""
     bid = float(live.get("bid") or 0)
     ask = float(live.get("ask") or 0)
     for p in live.get("positions") or []:
@@ -129,9 +207,10 @@ async def index(request: Request):
         stats = get_today_stats()
         conn = get_connection_status()
         paper = get_paper_book()
-        recent_trades = read_trade_events(30)
+        recent_trades = read_trade_events(40)
         recent_system = read_system_events(25)
         enrich_positions(live)
+        digest = activity_digest(recent_trades)
 
         uptime_str = "—"
         try:
@@ -143,10 +222,28 @@ async def index(request: Request):
         except Exception:
             uptime_str = "—"
 
-        in_session, session_label = session_state()
+        sess = session_state()
         max_cl = int(getattr(config, "MAX_CONSECUTIVE_LOSSES", 0) or 0)
         consec = int(stats.get("consecutive_losses") or 0)
         paused = max_cl > 0 and consec >= max_cl
+        start_bal = float(getattr(config, "SIM_START_BALANCE", 200.0))
+        paper_bal = paper.get("balance")
+        paper_pnl = None
+        if paper_bal is not None:
+            try:
+                paper_pnl = round(float(paper_bal) - start_bal, 2)
+            except Exception:
+                paper_pnl = None
+
+        idle_why = None
+        if paused:
+            idle_why = f"Consecutive-loss pause ({consec} ≥ {max_cl}). No new entries until next calendar day."
+        elif not sess["open"]:
+            idle_why = (
+                f"Off hours — {sess['reason']}. Window {sess['window']}. "
+                f"Next open in {sess['countdown']} ({sess['next_open_utc']} / {sess['next_open_kl']}). "
+                "Open trades still manage to SL/TP/BE."
+            )
 
         return templates.TemplateResponse(
             request=request,
@@ -156,12 +253,17 @@ async def index(request: Request):
                 "stats": stats,
                 "conn": conn,
                 "paper": paper,
+                "paper_pnl": paper_pnl,
+                "start_bal": start_bal,
                 "uptime_str": uptime_str,
                 "trades": recent_trades,
                 "system_logs": recent_system,
-                "in_session": in_session,
-                "session_label": session_label,
+                "sess": sess,
+                "in_session": sess["open"],
+                "session_label": sess["window"],
                 "paused": paused,
+                "idle_why": idle_why,
+                "digest": digest,
                 "config": {
                     "symbol": getattr(config, "SYMBOL", "GOLD"),
                     "mode": getattr(config, "TRADING_MODE", "FORWARD_TEST"),
@@ -170,14 +272,14 @@ async def index(request: Request):
                     "max_daily_loss": getattr(config, "MAX_DAILY_LOSS", 30),
                     "max_trades": getattr(config, "MAX_TRADES_PER_DAY", 15),
                     "max_consec": max_cl,
-                    "session": session_label,
+                    "session": sess["window"],
                     "rsi_buy": getattr(config, "RSI_BUY_LEVEL", 30),
                     "rsi_sell": getattr(config, "RSI_SELL_LEVEL", 70),
-                    "rsi_buy_max": getattr(config, "RSI_BUY_MAX", 40),
-                    "rsi_sell_min": getattr(config, "RSI_SELL_MIN", 60),
+                    "rsi_buy_max": getattr(config, "RSI_BUY_MAX", 45),
+                    "rsi_sell_min": getattr(config, "RSI_SELL_MIN", 55),
                     "min_atr": getattr(config, "MIN_ATR", 0.8),
                     "min_sl_spread": getattr(config, "MIN_SL_SPREAD_MULT", 3),
-                    "strategy": "v12",
+                    "strategy": "v12.1",
                 },
                 "now": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
             }
@@ -203,14 +305,16 @@ async def api_status():
     try:
         live = get_live_status()
         enrich_positions(live)
-        in_session, session_label = session_state()
+        sess = session_state()
+        trades = read_trade_events(20)
         return {
             "live": live,
             "stats": get_today_stats(),
             "paper": get_paper_book(),
             "connection": get_connection_status(),
-            "session": {"open": in_session, "label": session_label},
-            "trades": read_trade_events(20),
+            "session": sess,
+            "digest": activity_digest(trades),
+            "trades": trades,
             "system": read_system_events(15),
             "timestamp": datetime.now().isoformat()
         }
