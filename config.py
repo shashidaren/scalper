@@ -79,3 +79,10 @@ SIGNAL_ON_CLOSED_BAR = True
 # Consumers: strategy.check_signal (guard), MT5Bridge.get_rates (fetch count),
 # backtest.run_backtest (window).
 INDICATOR_WINDOW_BARS = 1000
+
+# Extra bars MT5Bridge.get_rates requests on top of INDICATOR_WINDOW_BARS.
+# strategy.check_signal requires >= INDICATOR_WINDOW_BARS bars and then slices
+# to exactly that many, so the margin gives headroom (one missing/partial bar
+# from the broker would otherwise silence every signal) without changing the
+# indicator values.
+INDICATOR_FETCH_MARGIN = 50

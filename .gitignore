@@ -27,3 +27,5 @@ logs/
 .env
 *.env
 credentials*
+.env.*
+!.env.example

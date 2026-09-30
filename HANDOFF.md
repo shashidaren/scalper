@@ -8,6 +8,15 @@ code, parameters, or the server must update §1 (state), §3 (changelog) and
 
 ## 1. Where things stand (as of 2026-09-30 11:45 UTC)
 
+> **Update (PR #7 follow-up, 2026-09-30):** PR #7 (`e12e845`) is merged and
+> deployed+verified on the server (10:43:53 UTC): `BE_TRIGGER_R=1.5`,
+> `INDICATOR_WINDOW_BARS=1000`. **The paper book's config changed at that
+> timestamp** and `logs/paper_account.json` carries across restarts, so count
+> the "100+ paper trades" criterion from 10:43:53 UTC, not from the file's
+> start. A small follow-up PR (fetch margin + skip reasons, see §3) is
+> **pending merge/deploy**; verify it with the §6 "Post-follow-up verification"
+> block. `TRADING_MODE` stays `"FORWARD_TEST"` — no validated edge (CI spans 0).
+
 - **Repo/branch:** `shashidaren/scalper`; **PR #6 merged to `main` at
   2026-09-30 10:19:58 UTC** (merge commit `40ec328`, branch
   `arena/01a0f1c8-scalper` → `main`). Gate 1 (live-path hardening) and Gate 2
@@ -97,6 +106,7 @@ backoff caps, stale-tick thresholds, **SESSION_FILTER_***, **RSI_*_LEVEL**,
 
 | Date | Change | Why |
 |---|---|---|
+| 09-30 | **PR #7 follow-up**: `config.INDICATOR_FETCH_MARGIN = 50` (bridge fetches 1050 bars); `check_signal` slices to the last `INDICATOR_WINDOW_BARS`; `strategy.last_skip_reason` (`insufficient_bars:N<1000`, `session:hour=H`, `atr_low:x<0.50`, `no_setup:rsi=…`, `duplicate_bar`) logged as `reason` on `SIGNAL` events; parity test checks window+50 (real and poisoned margin bars) gives the same signal; `.gitignore` covers `.env.*` (except `.env.example`); `deploy.sh` recorded as 100755 | The server probe returned exactly 1000 bars vs a `>= 1000` guard: zero headroom, one missing bar would silence every signal as a bare `signal: null`. Slicing keeps live identical to the backtest (174 trades / PF 1.06 / +$52.80 / 41 TP / 29 BE / 104 SL unchanged). `.env.paper_status` was not ignored (server-local secret). The deploy.sh mode-only diff on the server blocked the first post-merge deploy. |
 | 09-30 | **PR #6 merged to `main`** (merge commit `40ec328`, 10:19:58 UTC); deploy cron confirmed as `*/15 * * * * DEPLOY_BRANCH=main /root/scalper/deploy.sh` | Gate 1+2 live-path hardening + backtest fix are now the production branch; hands-off deploy should carry `main` to the server within 15 min. Server-side verification still outstanding (§6). |
 | 09-30 | **Gate 1: live-path hardening** (`live_ledger.py` + `run.py` + `mt5_bridge.py`) | Previously `update_daily_pnl` was only called by paper.py, so in LIVE the daily-loss/max-trades gates could never fire (exits happen broker-side). LiveLedger polls `history_deals_get` for OUT deals (magic-matched), records profit+swap+commission via the same gates, dedup/persisted in `logs/live_ledger.json`. Also: filling mode auto-selected from `symbol_info.filling_mode` (was hard-coded IOC → `INVALID_FILL` risk on XM), pre-flight margin check, requote/price-off retries (3 attempts, fresh tick each), `logs/KILL_SWITCH` file disables new entries. All verified against the fake-bridge pattern (FOK/IOC/RETURN selection, retry, margin block, ledger dedup + restart persistence) |
 | 09-30 | **Gate 2: backtester fixed** (`backtest.py`) — was feeding 201 bars into the strategy's 202-bar guard → zero signals ever | Window then 202 bars (`WINDOW_BARS`, keep in sync with strategy guard — superseded by the next row, now `config.INDICATOR_WINDOW_BARS`); entry fill moved to the signal bar's close (mirrors live closed-bar timing) and trades are managed from the next bar. First honest run on 20k M5 bars: 201 trades, PF 0.92, WR 14.4%, −$58, max DD $93 (exits 29 TP / 96 BE / 76 SL). |
@@ -183,8 +193,9 @@ Note: the patched image may still carry `set -ex` tracing in
 - [ ] Paper-test RSI 35/65 (deployed 09:36 UTC as `4a21a33`); compare with the
   30/70 baseline using trade count, net expectancy after spread, drawdown,
   and session coverage.
-- [ ] Add signal skip-reason diagnostics: current `SIGNAL: null` entries do not
-  distinguish session, ATR, EMA, or RSI conditions.
+- [x] Add signal skip-reason diagnostics — `strategy.last_skip_reason`, logged
+  as `reason` on `SIGNAL` events (PR #7 follow-up; needs server deploy to
+  appear in `logs/trades.jsonl`).
 - [x] Fix backtest input-length mismatch — **done 09-30 on
   `arena/01a0f1c8-scalper`** (`WINDOW_BARS=202`, entry at signal-bar close,
   manage from next bar). First results: PF 0.92 / −$58 over ~70 days — later
@@ -274,6 +285,14 @@ mt5env/bin/python backtest.py            # smoke test: expect Total Trades: 174,
                                          # (0 trades before Gate 2; 201/0.92 on the old defaults;
                                          #  output now prints spread source, window and TP/BE/SL exits)
 ls -l logs/live_ledger.json              # should be absent/empty in FORWARD_TEST
+
+# --- Post-follow-up verification (PR #7 follow-up: fetch margin + skip reasons) ---
+cd /root/scalper
+git log -1 --format='%h %s'                                          # expect the follow-up merge
+grep -E '^INDICATOR_FETCH_MARGIN|^INDICATOR_WINDOW_BARS' config.py   # 50 / 1000
+mt5env/bin/python backtest.py                                        # expect 174 / PF 1.06 / +$52.80
+grep SIGNAL logs/trades.jsonl | tail -3                              # new entries carry "reason"
+journalctl -u scalper-bot -n 20 --no-pager
 
 # hands-off deploy cron (every 15 min; only restarts when commits land)
 # crontab -e  → set DEPLOY_BRANCH to the intended production branch:

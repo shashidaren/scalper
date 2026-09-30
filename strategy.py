@@ -7,6 +7,9 @@ class ScalpStrategy:
         # Last closed-bar timestamp we already emitted a BUY/SELL for.
         # Prevents the 15s live loop from re-entering on the same RSI cross.
         self._last_fired_bar_ts = None
+        # Why the most recent check_signal() returned no trade (None when it
+        # returned a BUY/SELL). Diagnostic only - never affects the signal.
+        self.last_skip_reason = None
 
     def _in_session(self, when=None):
         """Return True if current (or given) UTC hour is inside the allowed session."""
@@ -23,11 +26,22 @@ class ScalpStrategy:
         # count, otherwise the EMA200 warm-up differs between live and backtest
         # (see config.INDICATOR_WINDOW_BARS).
         min_bars = getattr(config, "INDICATOR_WINDOW_BARS", 202)
+        self.last_skip_reason = None
         if rates is None or len(rates) < min_bars:
+            n = 0 if rates is None else len(rates)
+            self.last_skip_reason = f"insufficient_bars:{n}<{min_bars}"
             return None, 0, 0
+
+        # The bridge fetches window + INDICATOR_FETCH_MARGIN bars so a missing
+        # bar cannot trip the guard above. Indicators must still see exactly
+        # the last `min_bars` bars, otherwise the EMA200 seed weight (and thus
+        # the signal) would differ from the backtester.
+        rates = rates[-min_bars:]
 
         # Session filter (live uses now; backtest can pass bar time)
         if not self._in_session(when):
+            now = when or datetime.now(timezone.utc)
+            self.last_skip_reason = f"session:hour={now.hour}"
             return None, 0, 0
 
         df = pd.DataFrame(rates)
@@ -72,6 +86,7 @@ class ScalpStrategy:
 
         # Minimum volatility filter ($0.50)
         if current_atr < 0.50:
+            self.last_skip_reason = f"atr_low:{current_atr:.2f}<0.50"
             return None, 0, 0
 
         # Dynamic SL & TP based on market volatility (still ~1:2.5 RR)
@@ -90,11 +105,16 @@ class ScalpStrategy:
             signal = "SELL"
 
         if signal is None:
+            self.last_skip_reason = (
+                f"no_setup:rsi={rsi_curr:.1f}(prev {rsi_prev:.1f}),"
+                f"close{'>' if current_close > current_ema else '<='}ema200"
+            )
             return None, 0, 0
 
         # One-shot per closed bar: same RSI cross must not re-fire every 15s
         # (or after a quick scratch) while that bar is still the latest complete one.
         if bar_ts is not None and bar_ts == self._last_fired_bar_ts:
+            self.last_skip_reason = "duplicate_bar"
             return None, 0, 0
         if bar_ts is not None:
             self._last_fired_bar_ts = bar_ts
