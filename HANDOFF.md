@@ -6,28 +6,31 @@ code, parameters, or the server must update §1 (state), §3 (changelog) and
 
 ---
 
-## 1. Where things stand (as of 2026-09-30)
+## 1. Where things stand (as of 2026-09-30 09:36 UTC)
 
-- **Repo/branch:** `shashidaren/scalper`; v7 is merged to `main` (base commit
-  `69d7478`). Current Arena changes are on `arena/01a0f19c-scalper` until
-  separately promoted.
-- **Server** (`scalping`), last checked 2026-09-30:
+- **Repo/branch:** `shashidaren/scalper`; PR #4 merged to `main` (merge commit
+  `4a21a33`, 2026-09-30 09:31 UTC) — RSI 35/65 paper-test is now on `main`.
+  Current session branch is `arena/01a0f1b0-scalper`.
+- **Server** (`scalping`), deployed 2026-09-30 09:36 UTC:
   - `scalper-bot.service` is active in **FORWARD_TEST (paper)** mode; no real
-    orders are sent. Service start reported as 02:45 UTC.
-  - Server clock is UTC. Server checkout reported `fe258ff`; `MAX_SPREAD_POINTS`
-    is 80. The recent trades-log tail contains repeated `SIGNAL` events with
-    `signal: null`, not high-spread skips.
+    orders are sent. Server now runs `main` at `4a21a33` (PR #4 deploy).
+  - **Confirmed on server:** `RSI_BUY_LEVEL=35`, `RSI_SELL_LEVEL=65`,
+    `MAX_SPREAD_POINTS=80`. Server clock is UTC.
+  - Pre-deploy trades-log tail showed repeated `SIGNAL` events with
+    `signal: null`, not high-spread skips (baseline before RSI 35/65).
   - `scalper-dashboard.service` on port 8088 (reads files only).
   - MT5 container managed by `docker-compose.yml`, image
     `lprett-mt5linux-patched` (see §4), ports 18812/5901/8080,
     restart `unless-stopped`.
   - **Deploy:** `deploy.sh` pulls its configured branch and restarts the bot
-    only when HEAD changes. Verify its target branch on the server before
-    relying on the deploy cron.
+    only when HEAD changes. The 09:36 UTC deploy to `4a21a33` succeeded; still
+    verify the cron's target branch before relying on hands-off deploys.
+  - **Status script:** local `paper_status_daily.sh` edits were stashed for
+    the deploy; backup at `/root/paper_status_daily.sh.backup`. Keep
+    `.env.paper_status` private — never commit it.
 - **Strategy:** v7 closed-bar signals + one-shot per bar, session 07:00–17:00
-  UTC, now testing RSI 35/65 instead of 30/70 to modestly increase signals.
-  This parameter change is for paper testing only and is not yet confirmed
-  active on the server.
+  UTC, paper-testing RSI 35/65 instead of 30/70 to modestly increase signals.
+  **Confirmed active on the server** since the 09:36 UTC deploy of `4a21a33`.
 - **Paper book:** inspect on server with `python paper.py` after deploy.
 
 ## 2. Architecture
@@ -55,6 +58,8 @@ backoff caps, stale-tick thresholds, **SESSION_FILTER_***, **RSI_*_LEVEL**,
 
 | Date | Change | Why |
 |---|---|---|
+| 09-30 | **PR #4 merged + deployed (`4a21a33`, 09:36 UTC); confirmed RSI 35/65, `MAX_SPREAD_POINTS=80` on server** | RSI paper-test now on `main` and active in FORWARD_TEST; baseline for trade-count/quality comparison |
+| 09-30 | **Stashed `paper_status_daily.sh` edits; backup at `/root/paper_status_daily.sh.backup`; `.env.paper_status` kept private** | Keep deploy clean (`git pull --ff-only`) without losing local status-script work or leaking secrets |
 | 09-30 | **Paper-test RSI 35/65** (from 30/70) | Modest, controlled relaxation after recent UTC-session logs showed repeated null signals; compare trade count and quality before further changes |
 | 09-18 | **Conflict resolve:** new branch `resolve/v6-v7-deploy` on top of `main` (squash from PR #1 had diverged `HANDOFF.md` / `config.py`) | PR #2 was dirty; clean history so main can take v6+v7 + deploy without conflict markers |
 | 09-18 | **`deploy.sh`** + HANDOFF cron notes | Hands-off server updates after daily-review pushes |
@@ -68,6 +73,11 @@ backoff caps, stale-tick thresholds, **SESSION_FILTER_***, **RSI_*_LEVEL**,
   merged to `main` (base commit `69d7478`). The old work-branch name in earlier
   notes and the deploy.sh default may be stale; verify the server's deploy
   target before relying on the cron.
+- **2026-09-30:** PR #4 ("Paper-test more frequent RSI thresholds") merged to
+  `main` at `4a21a33` (09:31 UTC) and deployed to `scalping` at 09:36 UTC.
+  Verified RSI 35/65 and `MAX_SPREAD_POINTS=80` in the server checkout. Local
+  `paper_status_daily.sh` edits were stashed with a backup at
+  `/root/paper_status_daily.sh.backup`; `.env.paper_status` stays off-git.
 
 ## 4. Server-side patches NOT in git (baked into the container image)
 
@@ -100,10 +110,15 @@ Note: the patched image may still carry `set -ex` tracing in
 - [ ] Verify the server deploy cron targets the intended branch. The current
   `deploy.sh` default names the old `arena/01a0a475-scalper` branch; use
   `DEPLOY_BRANCH=main` only if `main` is the intended production target.
-- [ ] Verify deploy/status cron timezone and that the status script exists on
-  the server.
-- [ ] Deploy and paper-test RSI 35/65; compare with the 30/70 baseline using
-  trade count, net expectancy after spread, drawdown, and session coverage.
+  (09:36 UTC deploy to `main@4a21a33` succeeded; still confirm the cron env
+  matches.)
+- [ ] Restore or re-apply stashed `paper_status_daily.sh` edits from
+  `/root/paper_status_daily.sh.backup` if still wanted; verify deploy/status
+  cron timezone and that the status script exists on the server. Keep
+  `.env.paper_status` private — never commit it.
+- [ ] Paper-test RSI 35/65 (deployed 09:36 UTC as `4a21a33`); compare with the
+  30/70 baseline using trade count, net expectancy after spread, drawdown,
+  and session coverage.
 - [ ] Add signal skip-reason diagnostics: current `SIGNAL: null` entries do not
   distinguish session, ATR, EMA, or RSI conditions.
 - [ ] Fix backtest input-length mismatch (backtest supplies 201 bars while
@@ -157,8 +172,9 @@ cd /root/scalper && git fetch origin && git checkout main && git pull --ff-only 
 
 ## 8. Session protocol
 
-1. Day-to-day strategy work on `arena/01a0a475-scalper`; promote to `main` via a
-   branch based on current `main` when history diverges (squash merges).
+1. Day-to-day strategy work on the session Arena branch (currently
+   `arena/01a0f1b0-scalper`); promote to `main` via PR, rebasing onto current
+   `main` when history diverges (squash merges).
 2. Test engine changes against the fake RPyC server pattern (venv with
    `rpyc pandas numpy`, a fake `MetaTrader5` module exposing
    `initialize/symbol_select/symbol_info_tick/copy_rates_from_pos` returning a
