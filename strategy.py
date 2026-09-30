@@ -74,8 +74,8 @@ class ScalpStrategy:
         sl_dist = current_atr * 2.0
         tp_dist = current_atr * 5.0
 
-        buy_level = getattr(config, "RSI_BUY_LEVEL", 30)
-        sell_level = getattr(config, "RSI_SELL_LEVEL", 70)
+        buy_level = getattr(config, "RSI_BUY_LEVEL", 35)
+        sell_level = getattr(config, "RSI_SELL_LEVEL", 65)
 
         signal = None
         # BUY: Uptrend + RSI bounce from oversold

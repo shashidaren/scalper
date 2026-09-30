@@ -6,27 +6,29 @@ code, parameters, or the server must update §1 (state), §3 (changelog) and
 
 ---
 
-## 1. Where things stand (as of 2026-09-18)
+## 1. Where things stand (as of 2026-09-30)
 
-- **Repo/branch:** `shashidaren/scalper`. Strategy work lives on
-  `arena/01a0a475-scalper`; clean promote branch is `resolve/v6-v7-deploy`
-  (rebased onto `main` to avoid the squash-merge conflict from PR #1).
-- **Server** (`scalping`):
-  - `scalper-bot.service` active, running **FORWARD_TEST (paper)** mode with a
-    $200 simulated balance on real GOLD ticks. No real orders are sent.
+- **Repo/branch:** `shashidaren/scalper`; v7 is merged to `main` (base commit
+  `69d7478`). Current Arena changes are on `arena/01a0f19c-scalper` until
+  separately promoted.
+- **Server** (`scalping`), last checked 2026-09-30:
+  - `scalper-bot.service` is active in **FORWARD_TEST (paper)** mode; no real
+    orders are sent. Service start reported as 02:45 UTC.
+  - Server clock is UTC. Server checkout reported `fe258ff`; `MAX_SPREAD_POINTS`
+    is 80. The recent trades-log tail contains repeated `SIGNAL` events with
+    `signal: null`, not high-spread skips.
   - `scalper-dashboard.service` on port 8088 (reads files only).
   - MT5 container managed by `docker-compose.yml`, image
     `lprett-mt5linux-patched` (see §4), ports 18812/5901/8080,
     restart `unless-stopped`.
-  - **Deploy:** `deploy.sh` pulls the tracked branch and restarts the bot only
-    when HEAD changes. Wire a cron (see §6) so daily-review pushes apply
-    without a manual pull.
-- **Strategy version:** v7 (closed-bar signals + one-shot per bar, on top of
-  v6 London/NY session + RSI 30/70). Still paper-only.
+  - **Deploy:** `deploy.sh` pulls its configured branch and restarts the bot
+    only when HEAD changes. Verify its target branch on the server before
+    relying on the deploy cron.
+- **Strategy:** v7 closed-bar signals + one-shot per bar, session 07:00–17:00
+  UTC, now testing RSI 35/65 instead of 30/70 to modestly increase signals.
+  This parameter change is for paper testing only and is not yet confirmed
+  active on the server.
 - **Paper book:** inspect on server with `python paper.py` after deploy.
-- **Daily automation:** `scalper-daily-review-9am-kl` runs every day 09:00
-  Asia/Kuala_Lumpur, reviews code/HANDOFF, may push small improvements to the
-  work branch.
 
 ## 2. Architecture
 
@@ -53,6 +55,7 @@ backoff caps, stale-tick thresholds, **SESSION_FILTER_***, **RSI_*_LEVEL**,
 
 | Date | Change | Why |
 |---|---|---|
+| 09-30 | **Paper-test RSI 35/65** (from 30/70) | Modest, controlled relaxation after recent UTC-session logs showed repeated null signals; compare trade count and quality before further changes |
 | 09-18 | **Conflict resolve:** new branch `resolve/v6-v7-deploy` on top of `main` (squash from PR #1 had diverged `HANDOFF.md` / `config.py`) | PR #2 was dirty; clean history so main can take v6+v7 + deploy without conflict markers |
 | 09-18 | **`deploy.sh`** + HANDOFF cron notes | Hands-off server updates after daily-review pushes |
 | 09-18 | **v7 strategy**: evaluate EMA/RSI/ATR on last *completed* M5 bar (`SIGNAL_ON_CLOSED_BAR`); one-shot per bar timestamp | Forming-bar RSI flicker + same-bar re-entry after quick exits |
@@ -61,7 +64,10 @@ backoff caps, stale-tick thresholds, **SESSION_FILTER_***, **RSI_*_LEVEL**,
 
 ### Daily review notes
 
-- **2026-09-18:** Shipped v7, deploy.sh, opened PR #2 (conflicted vs squash). Resolved via `resolve/v6-v7-deploy`. Server already pulled work branch; keep `deploy.sh` cron on work branch until main is merged and you opt into `DEPLOY_BRANCH=main`.
+- **2026-09-18:** Shipped v7 and deploy.sh. The clean promotion was subsequently
+  merged to `main` (base commit `69d7478`). The old work-branch name in earlier
+  notes and the deploy.sh default may be stale; verify the server's deploy
+  target before relying on the cron.
 
 ## 4. Server-side patches NOT in git (baked into the container image)
 
@@ -91,10 +97,17 @@ Note: the patched image may still carry `set -ex` tracing in
   plain text. Change at XM, re-login via noVNC (`:8080`), update `.env`.
 - [ ] Revert `set -ex` → `set -e` in the container's `main.sh` (see §4 note).
 - [ ] File upstream issues for the two `lucas-campagna/mt5linux` bugs.
-- [ ] Merge clean PR (`resolve/v6-v7-deploy` → `main`); close conflicted PR #2.
-- [ ] After merge: optionally set `DEPLOY_BRANCH=main` on the server (or keep
-  tracking the work branch if daily review still pushes there).
-- [ ] Install deploy cron once (see §6).
+- [ ] Verify the server deploy cron targets the intended branch. The current
+  `deploy.sh` default names the old `arena/01a0a475-scalper` branch; use
+  `DEPLOY_BRANCH=main` only if `main` is the intended production target.
+- [ ] Verify deploy/status cron timezone and that the status script exists on
+  the server.
+- [ ] Deploy and paper-test RSI 35/65; compare with the 30/70 baseline using
+  trade count, net expectancy after spread, drawdown, and session coverage.
+- [ ] Add signal skip-reason diagnostics: current `SIGNAL: null` entries do not
+  distinguish session, ATR, EMA, or RSI conditions.
+- [ ] Fix backtest input-length mismatch (backtest supplies 201 bars while
+  strategy currently requires 202), then validate backtests before tuning.
 - [ ] Judge the paper book after 100+ trades across sessions; only then flip
   `TRADING_MODE = "LIVE"` in `config.py` (+ restart service).
 - [ ] Consider: GOLD symbol naming (`config.SYMBOL="GOLD"` works today on
@@ -121,18 +134,15 @@ docker logs mt5 --tail 60
 mt5env/bin/python wait_for_mt5.py --timeout 120
 docker compose up -d
 
-# one-shot deploy (work branch — what daily review pushes to)
-cd /root/scalper && chmod +x deploy.sh && ./deploy.sh
+# one-shot deploy (choose the intended production branch explicitly)
+cd /root/scalper && DEPLOY_BRANCH=main ./deploy.sh
 
 # hands-off deploy cron (every 15 min; only restarts when commits land)
-# crontab -e  →
-# */15 * * * * /root/scalper/deploy.sh >> /root/scalper/logs/deploy.cron.log 2>&1
-#
-# After merging to main, either keep work branch as deploy target or:
-#   DEPLOY_BRANCH=main /root/scalper/deploy.sh
+# crontab -e  → set DEPLOY_BRANCH to the intended production branch:
+# */15 * * * * DEPLOY_BRANCH=main /root/scalper/deploy.sh >> /root/scalper/logs/deploy.cron.log 2>&1
 
-# manual deploy (legacy)
-cd /root/scalper && git fetch && git checkout arena/01a0a475-scalper && git pull && systemctl restart scalper-bot
+# manual deploy (if main is the intended production branch)
+cd /root/scalper && git fetch origin && git checkout main && git pull --ff-only origin main && systemctl restart scalper-bot
 ```
 
 ## 7. Failure signatures (what each error means)
