@@ -6,8 +6,33 @@ code, parameters, or the server must update §1 (state), §3 (changelog) and
 
 ---
 
-## 1. Where things stand (as of 2026-09-30 22:00 UTC)
+## 1. Where things stand (as of 2026-10-01 00:00 UTC)
 
+> **Update (2026-10-01, this session, branch `arena/01a0f74a-scalper`, not yet
+> merged/deployed):** user feedback that the bot was "hardly taking any
+> trades." Re-swept `research/strategy_sweep.py` and adopted **RSI 40/60**
+> (was 35/65) **+ session 07:00–20:00 UTC** (was 07:00–17:00, end only;
+> start unchanged) in `config.py`. Backtest: **255 trades over the same
+> ~101-day window (was 174, +47%), net +$456.58 (was +$52.80), PF 1.32
+> (was 1.06), max DD $108.65 (was $99.62), exits 72 TP / 43 BE / 140 SL**,
+> profitable in every calendar month and both halves of the data, bootstrap
+> (10k resamples) **P(net>0)=0.96 (was 0.60 — the old config's CI spanned
+> zero)**. Also fixed a floating-point precision bug in
+> `research/strategy_sweep.py`'s fast replay (`_rolling_mean` cumsum →
+> `pandas.Series.rolling`) that `research/parity_test.py` caught the moment a
+> real bar's RSI landed exactly on the new 60 threshold; `backtest.py`/live
+> were never affected, and the parity test now passes with 0 mismatches on
+> the new config. Full writeup: `docs/strategy_iteration_2026-10-01.md`.
+> **This is a backtested frequency/quality improvement, not a validated live
+> edge** — `TRADING_MODE` stays `"FORWARD_TEST"`, and the §5 launch criteria
+> (100+ paper trades, PF sustained > ~1.2, affordable max DD) now need to be
+> re-counted **from whenever this config reaches the paper book** (i.e. from
+> the deploy timestamp once this PR merges and the cron pulls it — see the
+> counting command in §5, update the cutoff timestamp once known). **Not yet
+> merged to `main` or deployed to the server** as of this note — the server
+> is still running the 2026-09-30 RSI 35/65 / session 07–17 config
+> (`fc6f4fc`/`108e773`) until this PR lands and the 15-min cron picks it up.
+>
 > **Update (PR #8 deployed, verified 2026-09-30 11:06 UTC; PR #9 merged 11:32 UTC):**
 > the PR #7 follow-up is **merged (`fc6f4fc`, PR #8 merged 11:04:30 UTC) and
 > deployed + verified on the server** (recorded on `main` in PR #9, `108e773`) —
@@ -39,10 +64,13 @@ code, parameters, or the server must update §1 (state), §3 (changelog) and
   `arena/01a0f1c8-scalper` → `main`), **PR #7 at 10:37:49 UTC** (`e12e845`,
   strategy iteration: indicator warm-up + spread measurement fixes,
   `BE_TRIGGER_R` 1.5), **PR #8 at 11:04:30 UTC** (`fc6f4fc`, the follow-up:
-  fetch margin + skip-reason diagnostics), and **PR #9 at 11:32:35 UTC**
-  (`108e773`, HANDOFF verification record). Gate 1 (live-path hardening) and
-  Gate 2 (backtest fix) are on `main`; current session branch is
-  `arena/01a0f44f-scalper` (branched from `108e773`).
+  fetch margin + skip-reason diagnostics), **PR #9 at 11:32:35 UTC**
+  (`108e773`, HANDOFF verification record), and **PR #10 at 22:03:53 UTC**
+  (stale-tick-warning HANDOFF note). Gate 1 (live-path hardening) and Gate 2
+  (backtest fix) are on `main`; `main` HEAD is `77ac98c` (the PR #10 merge
+  commit). Current session branch is `arena/01a0f74a-scalper` (branched from
+  `77ac98c`) — this session's work (RSI 40/60, session 07-20 UTC) will be
+  **PR #11** once opened.
 - **Deploy cron confirmed and working (2026-09-30):**
   `*/15 * * * * DEPLOY_BRANCH=main /root/scalper/deploy.sh` — so `main` is the
   production target. **Verified end-to-end on `scalping`:** the server is at
@@ -90,14 +118,18 @@ code, parameters, or the server must update §1 (state), §3 (changelog) and
     only when HEAD changes. **Cron confirmed as**
     `*/15 * * * * DEPLOY_BRANCH=main /root/scalper/deploy.sh` → `main` is the
     production branch and hands-off deploys are expected to work.
-- **Strategy:** v7 closed-bar signals + one-shot per bar, session 07:00–17:00
-  UTC, RSI 35/65, ATR 2.0 SL / 5.0 TP. **Changed 2026-09-30 and now live on
-  the server:** `BE_TRIGGER_R` 0.75 → **1.5**, the indicator window is pinned
-  to `INDICATOR_WINDOW_BARS = 1000` so the EMA200 is converged and the live
-  path matches the backtester (it was 250 live vs 202 backtest, i.e. two
-  different indicators), plus `INDICATOR_FETCH_MARGIN = 50` for headroom
-  (the server probe was returning exactly 1000 bars against a `>= 1000`
-  guard). Verified active at `fc6f4fc` on 2026-09-30 11:06 UTC.
+- **Strategy:** v7 closed-bar signals + one-shot per bar, session 07:00–20:00
+  UTC (end widened from 17:00 **2026-10-01, this session, not yet deployed**
+  — server is still 07:00–17:00), RSI 40/60 (widened from 35/65 **2026-10-01,
+  this session, not yet deployed** — server is still 35/65), ATR 2.0 SL /
+  5.0 TP. **Changed 2026-09-30 and live on the server:** `BE_TRIGGER_R` 0.75
+  → **1.5**, the indicator window is pinned to `INDICATOR_WINDOW_BARS = 1000`
+  so the EMA200 is converged and the live path matches the backtester (it was
+  250 live vs 202 backtest, i.e. two different indicators), plus
+  `INDICATOR_FETCH_MARGIN = 50` for headroom (the server probe was returning
+  exactly 1000 bars against a `>= 1000` guard). Verified active at `fc6f4fc`
+  on 2026-09-30 11:06 UTC. The RSI/session widening is local-only until this
+  session's PR merges and the cron deploys it — see the §1 banner.
 - **Paper book:** inspect on server with `python paper.py`; balance $151.26 at
   11:06 UTC. **The book's config changed at 10:43:53 UTC** and the JSON carries
   across restarts — count the "100+ paper trades" criterion from that
@@ -133,6 +165,7 @@ stale-tick thresholds (`STALE_TICK_WARN_CYCLES=20`,
 
 | Date | Change | Why |
 |---|---|---|
+| 10-01 | **Trade-frequency tuning (this session, `arena/01a0f74a-scalper`, local only — not yet merged/deployed)**: `RSI_BUY_LEVEL` 35→40, `RSI_SELL_LEVEL` 65→60, `SESSION_END_HOUR_UTC` 17→20 in `config.py`; fixed a float-precision bug in `research/strategy_sweep.py`'s `_rolling_mean` (cumsum → `pandas.rolling`, see `docs/strategy_iteration_2026-10-01.md`) | User reported the bot was "hardly taking any trades" (174 trades over ~101 backtest days, one-at-a-time, 10h session). Swept RSI thresholds and the session window one variable at a time; the combination gives 255 trades (+47%), net +$456.58 (was +$52.80), PF 1.32 (was 1.06), bootstrap P(net>0)=0.96 (was 0.60 — old config's CI spanned zero), profitable every month and both halves of the data. More trades *and* a better backtested edge, not a trade-off between them. Still `FORWARD_TEST` only — no validated live edge yet. |
 | 09-30 | **Stale-tick warning check & HANDOFF update**: documented `Tick data unchanged for 20 cycles` (`STALE_TICK_WARN_CYCLES=20`, 5 min) and `Tick data frozen for 120 cycles - forcing reconnect` (`STALE_TICK_RECONNECT_CYCLES=120`, 30 min) in §1/§7; synced §2 (`BE_TRIGGER_R=1.5`, `INDICATOR_WINDOW_BARS=1000`, `INDICATOR_FETCH_MARGIN=50`) and §5 (`deploy.sh` default branch already `main`) | The warning observed around 21:00–22:00 UTC is the normal daily 1-hour XAUUSD/CME maintenance break (21:00–22:00 UTC / 05:00–06:00 Asia/KL, plus weekends Fri 21:00 → Sun 22:00 UTC). No ticks arrive during the break; the bot warns at 5 min, does a clean self-healing reconnect at 30 min, and resumes automatically at 22:00 UTC. Session filter (07:00–17:00 UTC) and closed-bar one-shot guard already block entries during that window. |
 | 09-30 | **PR #7 follow-up — MERGED and DEPLOYED (`fc6f4fc`, PR #8 merged 11:04:30 UTC; verified on the server 11:06 UTC)**: `config.INDICATOR_FETCH_MARGIN = 50` (bridge fetches 1050 bars); `check_signal` slices to the last `INDICATOR_WINDOW_BARS`; `strategy.last_skip_reason` (`insufficient_bars:N<1000`, `session:hour=H`, `atr_low:x<0.50`, `no_setup:rsi=…`, `duplicate_bar`) logged as `reason` on `SIGNAL` events; parity test checks window+50 (real and poisoned margin bars) gives the same signal; `.gitignore` covers `.env.*` (except `.env.example`); `deploy.sh` recorded as 100755 | The server probe returned exactly 1000 bars vs a `>= 1000` guard: zero headroom, one missing bar would silence every signal as a bare `signal: null`. Slicing keeps live identical to the backtest (174 trades / PF 1.06 / +$52.80 / 41 TP / 29 BE / 104 SL unchanged). `.env.paper_status` was not ignored (server-local secret). The deploy.sh mode-only diff on the server blocked the first post-merge deploy. **Post-deploy verification (11:06 UTC):** server HEAD `fc6f4fc` with `INDICATOR_FETCH_MARGIN=50` / `INDICATOR_WINDOW_BARS=1000`; backtest reproduces 174 / PF 1.06 / +$52.80 / max DD $99.62; new `SIGNAL` lines carry `reason` (e.g. `no_setup:rsi=42.6(prev 43.1),close>ema200`) and **no `insufficient_bars`** — the margin fixed the headroom problem; bot restarted 11:06:21 UTC in FORWARD_TEST with no traceback; server `git status` clean and `deploy.sh` `-rwxr-xr-x`. |
 | 09-30 | **PR #6 merged to `main`** (merge commit `40ec328`, 10:19:58 UTC); deploy cron confirmed as `*/15 * * * * DEPLOY_BRANCH=main /root/scalper/deploy.sh` | Gate 1+2 live-path hardening + backtest fix are now the production branch; hands-off deploy should carry `main` to the server within 15 min. **Confirmed on the server 11:06 UTC** (HEAD `fc6f4fc` includes it) — the §6 "Post-PR#6 verification" block is now covered by the PR #8 deploy check. |
@@ -150,6 +183,25 @@ stale-tick thresholds (`STALE_TICK_WARN_CYCLES=20`,
 
 ### Daily review notes
 
+- **2026-10-01:** User reported the bot was "hardly taking any trades."
+  Investigated with `research/strategy_sweep.py` (one-variable-at-a-time
+  sweeps + bootstrap, same discipline as the 2026-09-30 iteration): the old
+  config (RSI 35/65, session 07–17 UTC) only fires 174 trades over ~101
+  backtest days, one at a time. Found a combination that increases frequency
+  *and* improves the backtested edge rather than trading one off against the
+  other: **RSI 40/60 + session 07–20 UTC** → 255 trades (+47%), net +$456.58
+  (was +$52.80), PF 1.32 (was 1.06), bootstrap P(net>0)=0.96 (was 0.60).
+  Checked robustness: a fine RSI scan (36/64…44/56) is a smooth hump, not a
+  fluky single point; profitable in every calendar month and both halves of
+  the data; ATR floor (0.30–0.60) never binds on this dataset so it wasn't
+  the bottleneck. Also fixed a float-precision bug in the sweep tool's
+  `_rolling_mean` that `research/parity_test.py` caught at exactly this new
+  threshold (cumsum rolling mean vs. `strategy.py`'s windowed pandas rolling
+  mean disagreed by ~1e-11 at one bar whose RSI tied 60.000...) — switched to
+  `pandas.Series.rolling`, parity test now passes clean. Changed
+  `config.py` only; **not yet merged or deployed** — see the §1 banner and
+  `docs/strategy_iteration_2026-10-01.md`. `TRADING_MODE` stays
+  `"FORWARD_TEST"`: this is a better backtest, not a validated live edge.
 - **2026-09-30 (22:00 UTC / 2026-10-01 06:00 Asia/KL):** Checked the log
   warning `Tick data unchanged for 20 cycles - possible stale feed (market
   closed or terminal frozen)`. This is **benign and expected**: `run.py` checks
@@ -273,23 +325,35 @@ Note: the patched image may still carry `set -ex` tracing in
   (`docs/strategy_iteration_2026-09-30.md`). Tested one variable at a time:
   **BE trigger → 1.5R (adopted)**, ATR multiples (only monotone via wider SL,
   never positive alone — not adopted), **session 08–16 UTC (rejected: worse)**,
-  **H1 trend confirmation (rejected: clearly worse)**, RSI 40/60 (rejected:
-  non-monotone), TP multiples (rejected: noise). Also fixed the indicator
-  warm-up and the spread assumption. **Still open:** the new config is only
-  *not reliably losing* (P(net>0)≈60%) — no validated edge. Next: re-test the
-  BE ladder on more data/another regime, model slippage + swap, and compare
-  backtest vs paper book trade-by-trade. Remaining untested candidates: Friday
-  cutoff, tighter ATR/volatility filters, exit-time limit.
+  **H1 trend confirmation (rejected: clearly worse)**, RSI 40/60 (rejected
+  at the time: non-monotone *under the old 07-17 session* — superseded
+  2026-10-01, see below), TP multiples (rejected: noise). Also fixed the
+  indicator warm-up and the spread assumption. **Still open:** even after the
+  2026-10-01 frequency/quality improvement (PF 1.32, P(net>0)≈0.96 on the
+  2026-10-01 config), this is still only a backtest — no *validated live*
+  edge yet. Next: re-test on more data/another regime, model slippage +
+  swap, and compare backtest vs paper book trade-by-trade. Remaining
+  untested candidates: Friday cutoff, tighter ATR/volatility filters,
+  exit-time limit.
+- [ ] **Merge + deploy this session's RSI/session change**
+  (`arena/01a0f74a-scalper`, `config.py`: RSI 40/60, session 07-20 UTC) and
+  verify on the server the same way PR #8 was verified: confirm HEAD moved,
+  `backtest.py` prints 255 trades / PF 1.32 / +$456.58 / max DD $108.65,
+  `research/parity_test.py` passes, bot restarts clean in FORWARD_TEST.
+  Record the deploy timestamp here once done — it becomes the new cutoff for
+  the "100+ paper trades" count below.
 - [ ] Judge the paper book after 100+ trades across sessions **and** a
   profitable backtest over ≥6 months; only then flip
   `TRADING_MODE = "LIVE"` in `config.py` (+ restart service). Pre-agreed
   launch criteria: expectancy > 0 after spread, PF > ~1.2, max DD affordable.
-  **Count the 100+ trades from 2026-09-30 10:43:53 UTC** (the PR #7 deploy that
-  changed the book's config), not from the start of the file —
-  `logs/paper_account.json` carries across restarts and still contains the
-  pre-`BE_TRIGGER_R=1.5` book:
+  **Count the 100+ trades from whenever the 2026-10-01 RSI 40/60 / session
+  07-20 config is deployed** (not yet — see the TODO above), since the paper
+  book's config is changing again and `logs/paper_account.json` carries
+  across restarts. Until that deploy, the old (35/65, 07-17) book is still
+  what's running, countable from 2026-09-30 10:43:53 UTC (the PR #7 deploy):
   `grep -E 'SIM_(ENTRY|EXIT)' logs/trades.jsonl | awk -F'"' '$4 >= "2026-09-30 10:43:53"' | wc -l`
-  (divide by 2 for round trips). Balance was $151.26 at 11:06 UTC.
+  (divide by 2 for round trips). Balance was $151.26 at 11:06 UTC (last check
+  before this session).
 - [ ] Live-mode verification on first LIVE run: confirm `LIVE_EXIT` events
   land in `logs/trades.jsonl` when broker-side SL/TP fill, daily stats update,
   and the loss gate actually halts entries; test the KILL_SWITCH file.

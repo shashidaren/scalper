@@ -117,11 +117,17 @@ def _windowed_ema_last(close: np.ndarray, span: int, n: int) -> np.ndarray:
 
 
 def _rolling_mean(x: np.ndarray, period: int) -> np.ndarray:
-    out = np.full(len(x), np.nan)
-    if len(x) >= period:
-        c = np.cumsum(np.insert(np.nan_to_num(x, nan=0.0), 0, 0.0))
-        out[period - 1:] = (c[period:] - c[:-period]) / period
-    return out
+    # Plain cumsum-based rolling mean accumulates floating-point error over a
+    # long series (tens of thousands of bars) and can disagree with
+    # strategy.py's freshly-windowed `pandas.Series.rolling(period).mean()`
+    # by ~1e-11 at a given bar - usually invisible, but on 2026-10-01 it
+    # flipped a signal at a bar where RSI was an exact tie with the new
+    # RSI_SELL_LEVEL=60 threshold (research/parity_test.py caught it). Use
+    # pandas' rolling mean (not cumsum) so this replay is bit-identical to
+    # the live/backtest path at window boundaries, not just "close enough".
+    if len(x) < period:
+        return np.full(len(x), np.nan)
+    return pd.Series(x).rolling(period).mean().to_numpy()
 
 
 def compute_indicators(df: pd.DataFrame, p: Params):
