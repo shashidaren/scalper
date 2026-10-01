@@ -6,10 +6,63 @@ code, parameters, or the server must update §1 (state), §3 (changelog) and
 
 ---
 
-## 1. Where things stand (as of 2026-10-01 00:00 UTC)
+## 1. Where things stand (as of 2026-10-01 13:15 UTC)
 
-> **Update (2026-10-01, this session, branch `arena/01a0f74a-scalper`, not yet
-> merged/deployed):** user feedback that the bot was "hardly taking any
+> **Update (2026-10-01, this session, branch `arena/01a0f77d-scalper`):**
+> followed up on PR #11 (`7635fad`, merged to `main` 2026-10-01 12:00:13 UTC
+> and verified on the server: 255 trades / PF 1.32 / +$456.58 / max DD $108.65)
+> to address three review items — full writeup in
+> `docs/oos_and_execution_fidelity_2026-10-01.md`:
+> 1. **Out-of-sample (OOS) & walk-forward validation (`research/strategy_sweep.py --oos`, `fetch_data.py`):**
+>    - The MT5 RPyC bridge (`localhost:18812`) runs on `scalping` and is not
+>      reachable from the Arena sandbox, so `fetch_data.py` was upgraded with
+>      `--bars`, `--start-pos`, and `--out` to pull pre-June-2026 (`--start-pos 20000`)
+>      or 60k-bar (~300-day) OOS files directly on the server (commands in §5/§6).
+>    - Corrected an earlier note in `docs/strategy_iteration_2026-09-30.md`:
+>      `data/GOLD_M5.csv` is **not** a single +19% bull regime — start-to-end
+>      gold moves `4,506.57 → 4,387.55` (**−2.64%**) across four distinct
+>      monthly regimes: **June −11.00% sell-off** (`4,503 → 4,007`, low `3,942`),
+>      **July +0.80% range**, **August +9.01% breakout rally** (high `4,697`),
+>      and **Sept 1–11 −1.38% pullback**.
+>    - Under a strict 50/50 chronological split (**TRAIN** `2026-06-08..2026-07-27`
+>      bear+range vs **Cold OOS** `2026-07-27..2026-09-11` rally+pullback),
+>      tuning on TRAIN alone (both one-variable-at-a-time and across a 60-config
+>      `BE × RSI × Session` grid) selects the exact adopted config
+>      (`BE=1.5R, RSI=40/60, session=07–20 UTC`, #1 of 60 on TRAIN: **131 trades,
+>      +$286.06, PF 1.37, P(net>0)=0.919**). Evaluated **cold on OOS**, it
+>      delivers **124 trades, +$170.52, PF 1.27, WR 27.4%, avgR +0.10, max DD
+>      $108.65, P(net>0)=0.838** (and on the `Aug–Sep` bull regime OOS slice:
+>      **101 trades, +$172.72, PF 1.33, P(net>0)=0.858**, with both BUY and SELL
+>      profitable in both halves).
+>    - **Honest caveats:** OOS expectancy shrinks 37% from TRAIN (`+$2.18/tr` →
+>      `+$1.38/tr`); 4-fold walk-forward shows a 3.5-week flat/drawdown quarter
+>      in `Q3 (2026-07-27..2026-08-19)` (`70 trades, +$5.81, PF 1.02, max DD
+>      $108.65, P(net>0)=0.510`); the 124-trade OOS half's 95% bootstrap CI
+>      `[−$159.1, +$524.9]` still spans zero; and because `GOLD_M5.csv` was
+>      previously inspected in PR #7/#11, this split is retrospective until
+>      re-run on a fresh server pull (`--start-pos 20000`).
+> 2. **Paper-mode exit fidelity (`config.POSITION_CHECK_INTERVAL_SECONDS = 1`, `run.poll_paper_position`, `research/paper_exit_test.py`):**
+>    - While `paper.has_position()` is `True`, `run.py` now polls
+>      `bridge.get_live_tick(retries=1)` every **1s** instead of sleeping a
+>      blind 15s, resolving intra-window SL/BE/TP wicks immediately while
+>      keeping 0 extra bridge calls when flat and leaving `stale_tick_cycles`
+>      anchored to the 15s outer loop. M1 vs M5 overlap replay
+>      (`2026-08-24..2026-09-11`) shows coarse close-only sampling inflates PF
+>      to `1.55–2.33` whereas M1 wick resolution (`PF 1.31, +$81.69, 13 TP /
+>      10 BE / 25 SL`) converges closely to `backtest.py` (`PF 1.35, +$89.43,
+>      13 TP / 11 BE / 24 SL`).
+> 3. **Reduced redundant MT5 bridge fetches (`MT5Bridge.get_rates(tick=tick)`, `ScalpStrategy` indicator cache):**
+>    - `MT5Bridge.get_rates()` caches the 1,050-bar window by closed-bar
+>      timestamp (0 RPyC calls mid-bar when `tick.time` is inside the forming
+>      M5 bucket; 2-bar probe fallback when `tick` is omitted), and
+>      `ScalpStrategy.check_signal()` caches the closed-bar indicator tuple.
+>      Verified by `research/parity_test.py`: **20× reduction in full 1,050-bar
+>      fetches** (60 instead of 1,200 across 60 M5 bars × 20 cycles), reacts on
+>      cycle 0 of every new bar, **0 signal mismatches**.
+>    - `TRADING_MODE` stays `"FORWARD_TEST"`.
+>
+> **Update (2026-10-01, PR #11 merged `7635fad` at 12:00:13 UTC, verified on
+> server):** user feedback that the bot was "hardly taking any
 > trades." Re-swept `research/strategy_sweep.py` and adopted **RSI 40/60**
 > (was 35/65) **+ session 07:00–20:00 UTC** (was 07:00–17:00, end only;
 > start unchanged) in `config.py`. Backtest: **255 trades over the same
@@ -26,12 +79,7 @@ code, parameters, or the server must update §1 (state), §3 (changelog) and
 > **This is a backtested frequency/quality improvement, not a validated live
 > edge** — `TRADING_MODE` stays `"FORWARD_TEST"`, and the §5 launch criteria
 > (100+ paper trades, PF sustained > ~1.2, affordable max DD) now need to be
-> re-counted **from whenever this config reaches the paper book** (i.e. from
-> the deploy timestamp once this PR merges and the cron pulls it — see the
-> counting command in §5, update the cutoff timestamp once known). **Not yet
-> merged to `main` or deployed to the server** as of this note — the server
-> is still running the 2026-09-30 RSI 35/65 / session 07–17 config
-> (`fc6f4fc`/`108e773`) until this PR lands and the 15-min cron picks it up.
+> re-counted **from whenever this config reaches the paper book**.
 >
 > **Update (PR #8 deployed, verified 2026-09-30 11:06 UTC; PR #9 merged 11:32 UTC):**
 > the PR #7 follow-up is **merged (`fc6f4fc`, PR #8 merged 11:04:30 UTC) and
@@ -65,12 +113,13 @@ code, parameters, or the server must update §1 (state), §3 (changelog) and
   strategy iteration: indicator warm-up + spread measurement fixes,
   `BE_TRIGGER_R` 1.5), **PR #8 at 11:04:30 UTC** (`fc6f4fc`, the follow-up:
   fetch margin + skip-reason diagnostics), **PR #9 at 11:32:35 UTC**
-  (`108e773`, HANDOFF verification record), and **PR #10 at 22:03:53 UTC**
-  (stale-tick-warning HANDOFF note). Gate 1 (live-path hardening) and Gate 2
-  (backtest fix) are on `main`; `main` HEAD is `77ac98c` (the PR #10 merge
-  commit). Current session branch is `arena/01a0f74a-scalper` (branched from
-  `77ac98c`) — this session's work (RSI 40/60, session 07-20 UTC) will be
-  **PR #11** once opened.
+  (`108e773`, HANDOFF verification record), **PR #10 at 22:03:53 UTC**
+  (stale-tick-warning HANDOFF note), and **PR #11 on 2026-10-01 12:00:13 UTC**
+  (`7635fad`, RSI 40/60 + session 07-20 UTC). Gate 1 (live-path hardening) and
+  Gate 2 (backtest fix) are on `main`; `main` HEAD is `7635fad` (the PR #11
+  merge commit). Current session branch is `arena/01a0f77d-scalper` (branched
+  from `7635fad`) — this session's work (OOS validation, 1s paper-exit polling,
+  closed-bar rate caching) will be **PR #12** once opened.
 - **Deploy cron confirmed and working (2026-09-30):**
   `*/15 * * * * DEPLOY_BRANCH=main /root/scalper/deploy.sh` — so `main` is the
   production target. **Verified end-to-end on `scalping`:** the server is at
@@ -156,7 +205,8 @@ deploy.sh: git pull --ff-only + systemctl restart only if HEAD moved
 
 Key config (`config.py`): `TRADING_MODE` ("FORWARD_TEST" default / "LIVE"),
 `SIM_START_BALANCE=200`, `BE_TRIGGER_R=1.5`, `INDICATOR_WINDOW_BARS=1000`,
-`INDICATOR_FETCH_MARGIN=50`, `RPC_TIMEOUT_SECONDS=30`, backoff caps,
+`INDICATOR_FETCH_MARGIN=50`, `CHECK_INTERVAL_SECONDS=15`,
+`POSITION_CHECK_INTERVAL_SECONDS=1`, `RPC_TIMEOUT_SECONDS=30`, backoff caps,
 stale-tick thresholds (`STALE_TICK_WARN_CYCLES=20`,
 `STALE_TICK_RECONNECT_CYCLES=120`), **SESSION_FILTER_***, **RSI_*_LEVEL**,
 **SIGNAL_ON_CLOSED_BAR**.
@@ -165,7 +215,8 @@ stale-tick thresholds (`STALE_TICK_WARN_CYCLES=20`,
 
 | Date | Change | Why |
 |---|---|---|
-| 10-01 | **Trade-frequency tuning (this session, `arena/01a0f74a-scalper`, local only — not yet merged/deployed)**: `RSI_BUY_LEVEL` 35→40, `RSI_SELL_LEVEL` 65→60, `SESSION_END_HOUR_UTC` 17→20 in `config.py`; fixed a float-precision bug in `research/strategy_sweep.py`'s `_rolling_mean` (cumsum → `pandas.rolling`, see `docs/strategy_iteration_2026-10-01.md`) | User reported the bot was "hardly taking any trades" (174 trades over ~101 backtest days, one-at-a-time, 10h session). Swept RSI thresholds and the session window one variable at a time; the combination gives 255 trades (+47%), net +$456.58 (was +$52.80), PF 1.32 (was 1.06), bootstrap P(net>0)=0.96 (was 0.60 — old config's CI spanned zero), profitable every month and both halves of the data. More trades *and* a better backtested edge, not a trade-off between them. Still `FORWARD_TEST` only — no validated live edge yet. |
+| 10-01 | **OOS validation, 1s paper-exit polling & closed-bar rate caching (`arena/01a0f77d-scalper`, PR #12)**: added `--oos` to `research/strategy_sweep.py` and `--bars`/`--start-pos`/`--out` to `fetch_data.py`; added `POSITION_CHECK_INTERVAL_SECONDS=1` (`config.py`), `poll_paper_position` (`run.py`), and `research/paper_exit_test.py`; cached closed-bar rates in `MT5Bridge.get_rates()` and closed-bar indicators in `ScalpStrategy.check_signal()`, verified in `research/parity_test.py`; documented in `docs/oos_and_execution_fidelity_2026-10-01.md` | Follow-up review after PR #11 flagged three gaps: (1) all tuned thresholds were evaluated on the full `GOLD_M5.csv` sample — chronological 50/50 and regime (`Jun–Jul` Bear/Range vs `Aug–Sep` Bull/Pullback) splits show train-only selection still picks `BE 1.5R, RSI 40/60, 07–20 UTC` (#1 of 60 on H1) and holds up cold on OOS (`+$170.52`, PF 1.27, `P(net>0)=0.838`; regime OOS PF 1.33, `P(net>0)=0.858`), though expectancy shrinks 37%, Q3 is flat (`+$5.81`, PF 1.02), and the 124-trade OOS CI still spans zero; (2) 15s snapshot polling in paper mode could miss fast wicks through SL/BE/TP — 1s polling while `paper.has_position()` closes that gap with 0 extra load when flat; (3) `get_rates()` was pulling 1,050 bars every 15s — caching by closed-bar timestamp cuts full RPyC fetches 20× with 0 signal/timing drift. Still `FORWARD_TEST`. |
+| 10-01 | **Trade-frequency tuning (PR #11, `7635fad`, merged & verified on server)**: `RSI_BUY_LEVEL` 35→40, `RSI_SELL_LEVEL` 65→60, `SESSION_END_HOUR_UTC` 17→20 in `config.py`; fixed a float-precision bug in `research/strategy_sweep.py`'s `_rolling_mean` (cumsum → `pandas.rolling`, see `docs/strategy_iteration_2026-10-01.md`) | User reported the bot was "hardly taking any trades" (174 trades over ~101 backtest days, one-at-a-time, 10h session). Swept RSI thresholds and the session window one variable at a time; the combination gives 255 trades (+47%), net +$456.58 (was +$52.80), PF 1.32 (was 1.06), bootstrap P(net>0)=0.96 (was 0.60 — old config's CI spanned zero), profitable every month and both halves of the data. More trades *and* a better backtested edge, not a trade-off between them. Still `FORWARD_TEST` only — no validated live edge yet. |
 | 09-30 | **Stale-tick warning check & HANDOFF update**: documented `Tick data unchanged for 20 cycles` (`STALE_TICK_WARN_CYCLES=20`, 5 min) and `Tick data frozen for 120 cycles - forcing reconnect` (`STALE_TICK_RECONNECT_CYCLES=120`, 30 min) in §1/§7; synced §2 (`BE_TRIGGER_R=1.5`, `INDICATOR_WINDOW_BARS=1000`, `INDICATOR_FETCH_MARGIN=50`) and §5 (`deploy.sh` default branch already `main`) | The warning observed around 21:00–22:00 UTC is the normal daily 1-hour XAUUSD/CME maintenance break (21:00–22:00 UTC / 05:00–06:00 Asia/KL, plus weekends Fri 21:00 → Sun 22:00 UTC). No ticks arrive during the break; the bot warns at 5 min, does a clean self-healing reconnect at 30 min, and resumes automatically at 22:00 UTC. Session filter (07:00–17:00 UTC) and closed-bar one-shot guard already block entries during that window. |
 | 09-30 | **PR #7 follow-up — MERGED and DEPLOYED (`fc6f4fc`, PR #8 merged 11:04:30 UTC; verified on the server 11:06 UTC)**: `config.INDICATOR_FETCH_MARGIN = 50` (bridge fetches 1050 bars); `check_signal` slices to the last `INDICATOR_WINDOW_BARS`; `strategy.last_skip_reason` (`insufficient_bars:N<1000`, `session:hour=H`, `atr_low:x<0.50`, `no_setup:rsi=…`, `duplicate_bar`) logged as `reason` on `SIGNAL` events; parity test checks window+50 (real and poisoned margin bars) gives the same signal; `.gitignore` covers `.env.*` (except `.env.example`); `deploy.sh` recorded as 100755 | The server probe returned exactly 1000 bars vs a `>= 1000` guard: zero headroom, one missing bar would silence every signal as a bare `signal: null`. Slicing keeps live identical to the backtest (174 trades / PF 1.06 / +$52.80 / 41 TP / 29 BE / 104 SL unchanged). `.env.paper_status` was not ignored (server-local secret). The deploy.sh mode-only diff on the server blocked the first post-merge deploy. **Post-deploy verification (11:06 UTC):** server HEAD `fc6f4fc` with `INDICATOR_FETCH_MARGIN=50` / `INDICATOR_WINDOW_BARS=1000`; backtest reproduces 174 / PF 1.06 / +$52.80 / max DD $99.62; new `SIGNAL` lines carry `reason` (e.g. `no_setup:rsi=42.6(prev 43.1),close>ema200`) and **no `insufficient_bars`** — the margin fixed the headroom problem; bot restarted 11:06:21 UTC in FORWARD_TEST with no traceback; server `git status` clean and `deploy.sh` `-rwxr-xr-x`. |
 | 09-30 | **PR #6 merged to `main`** (merge commit `40ec328`, 10:19:58 UTC); deploy cron confirmed as `*/15 * * * * DEPLOY_BRANCH=main /root/scalper/deploy.sh` | Gate 1+2 live-path hardening + backtest fix are now the production branch; hands-off deploy should carry `main` to the server within 15 min. **Confirmed on the server 11:06 UTC** (HEAD `fc6f4fc` includes it) — the §6 "Post-PR#6 verification" block is now covered by the PR #8 deploy check. |
@@ -183,6 +234,29 @@ stale-tick thresholds (`STALE_TICK_WARN_CYCLES=20`,
 
 ### Daily review notes
 
+- **2026-10-01 (follow-up, `arena/01a0f77d-scalper`):** Worked through the
+  three post-PR #11 review items (`docs/oos_and_execution_fidelity_2026-10-01.md`):
+  (1) **OOS validation:** added `research/strategy_sweep.py --oos` and
+  `fetch_data.py --bars/--start-pos/--out`. Showed `data/GOLD_M5.csv` spans
+  four regimes (June −11.0% sell-off, July +0.8% range, Aug +9.0% rally, Sept
+  −1.4% pullback; overall −2.64%, correcting the earlier "+19% single bull
+  regime" note). Under both a 50/50 chronological split and a `Jun–Jul` vs
+  `Aug–Sep` regime split, train-only selection still picks `BE 1.5R, RSI 40/60,
+  session 07–20` (#1 of 60 grid configs on H1: +$286.06, PF 1.37) and stays
+  profitable cold on OOS (+$170.52, PF 1.27, P(net>0)=0.838 on H2; +$172.72,
+  PF 1.33, P(net>0)=0.858 on `Aug–Sep`, with both BUY and SELL positive in
+  both halves). However, OOS expectancy shrinks 37% ($2.18 → $1.38/tr), Q3
+  (`2026-07-27..2026-08-19`) is flat (+$5.81 over 70 trades, PF 1.02, max DD
+  $108.65), the 124-trade OOS CI `[−$159, +$525]` spans zero, and a truly
+  untouched pre-June-2026 pull (`fetch_data.py --start-pos 20000`) must run on
+  `scalping` where the MT5 bridge lives.
+  (2) **Paper-mode exit fidelity:** added `POSITION_CHECK_INTERVAL_SECONDS=1`
+  and `run.poll_paper_position` so open paper positions poll ticks every 1s
+  (0 extra bridge load when flat), verified by `research/paper_exit_test.py`.
+  (3) **Bridge rate caching:** `MT5Bridge.get_rates(tick=tick)` and
+  `ScalpStrategy.check_signal()` now cache by closed-bar timestamp, cutting
+  full 1,050-bar RPyC fetches 20× with 0 signal/timing mismatches in
+  `research/parity_test.py`. `TRADING_MODE` stays `"FORWARD_TEST"`.
 - **2026-10-01:** User reported the bot was "hardly taking any trades."
   Investigated with `research/strategy_sweep.py` (one-variable-at-a-time
   sweeps + bootstrap, same discipline as the 2026-09-30 iteration): the old
@@ -328,20 +402,34 @@ Note: the patched image may still carry `set -ex` tracing in
   **H1 trend confirmation (rejected: clearly worse)**, RSI 40/60 (rejected
   at the time: non-monotone *under the old 07-17 session* — superseded
   2026-10-01, see below), TP multiples (rejected: noise). Also fixed the
-  indicator warm-up and the spread assumption. **Still open:** even after the
-  2026-10-01 frequency/quality improvement (PF 1.32, P(net>0)≈0.96 on the
-  2026-10-01 config), this is still only a backtest — no *validated live*
-  edge yet. Next: re-test on more data/another regime, model slippage +
-  swap, and compare backtest vs paper book trade-by-trade. Remaining
-  untested candidates: Friday cutoff, tighter ATR/volatility filters,
-  exit-time limit.
-- [ ] **Merge + deploy this session's RSI/session change**
-  (`arena/01a0f74a-scalper`, `config.py`: RSI 40/60, session 07-20 UTC) and
-  verify on the server the same way PR #8 was verified: confirm HEAD moved,
-  `backtest.py` prints 255 trades / PF 1.32 / +$456.58 / max DD $108.65,
-  `research/parity_test.py` passes, bot restarts clean in FORWARD_TEST.
-  Record the deploy timestamp here once done — it becomes the new cutoff for
-  the "100+ paper trades" count below.
+  indicator warm-up and the spread assumption. **2026-10-01 OOS check
+  (`docs/oos_and_execution_fidelity_2026-10-01.md`):** retrospective 50/50 and
+  regime (`Jun–Jul` Bear/Range vs `Aug–Sep` Bull/Pullback) splits confirm
+  train-only tuning selects `BE 1.5R, RSI 40/60, session 07–20` (#1 of 60 on
+  H1) and stays positive cold on H2 (+$170.52, PF 1.27, P(net>0)=0.838) and on
+  `Aug–Sep` (+$172.72, PF 1.33, P(net>0)=0.858), but expectancy shrinks 37%,
+  Q3 (`2026-07-27..2026-08-19`) is flat (+$5.81, PF 1.02), and a single
+  ~120-trade OOS slice's 95% CI still spans zero. **Still open:** run a
+  strictly untouched pre-June-2026 / 60k-bar OOS pull on the `scalping` server
+  (where the MT5 bridge is reachable — see TODO below), model slippage + swap,
+  and compare backtest vs paper book trade-by-trade. Remaining untested
+  candidates: Friday cutoff, tighter ATR/volatility filters, exit-time limit.
+- [x] **Merge + deploy PR #11 RSI/session change** (`7635fad`, merged
+  2026-10-01 12:00:13 UTC; `config.py`: RSI 40/60, session 07-20 UTC) —
+  verified on the server: 255 trades / PF 1.32 / +$456.58 / max DD $108.65.
+- [ ] **Run untouched historical OOS pull on `scalping` (requires MT5 bridge)**
+  and verify PR #12 deploy (1s paper-exit polling + 20× bridge rate caching):
+  ```bash
+  cd /root/scalper
+  mt5env/bin/python research/parity_test.py
+  mt5env/bin/python research/paper_exit_test.py
+  mt5env/bin/python fetch_data.py --bars 20000 --start-pos 20000 --out data/GOLD_M5_pre_jun.csv
+  mt5env/bin/python research/strategy_sweep.py --csv data/GOLD_M5_pre_jun.csv --detail --bootstrap 10000
+  mt5env/bin/python fetch_data.py --bars 60000 --out data/GOLD_M5_60k.csv
+  mt5env/bin/python research/strategy_sweep.py --csv data/GOLD_M5_60k.csv --oos
+  ```
+  Re-run periodically (e.g. monthly) as fresh live history accumulates so the
+  post-`2026-09-11` window also serves as a growing prospective OOS sample.
 - [ ] Judge the paper book after 100+ trades across sessions **and** a
   profitable backtest over ≥6 months; only then flip
   `TRADING_MODE = "LIVE"` in `config.py` (+ restart service). Pre-agreed
@@ -394,8 +482,10 @@ mt5env/bin/python backtest.py
 # strategy iteration: fast sweeps, verified against backtest.py
 #   --warmup defaults to config.INDICATOR_WINDOW_BARS; --sweep names:
 #   warmup|ema|be|sl|tp|session|rsi|h1|spread|honest|combo
-mt5env/bin/python research/parity_test.py                      # live vs backtest signals (2s)
+mt5env/bin/python research/parity_test.py                      # live vs backtest signals + 20x bridge cache check (2s)
+mt5env/bin/python research/paper_exit_test.py                  # fake-bridge 1s paper-exit wick tests + M1/M5 comparison
 mt5env/bin/python research/strategy_sweep.py --verify          # equivalence check (do this first)
+mt5env/bin/python research/strategy_sweep.py --oos             # chronological 50/50 + regime OOS split + 4-fold walk-forward
 mt5env/bin/python research/strategy_sweep.py --sweep be
 mt5env/bin/python research/strategy_sweep.py --detail --set be_trigger_r=1.5
 mt5env/bin/python research/strategy_sweep.py --bootstrap 5000 --set be_trigger_r=1.5

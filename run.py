@@ -22,6 +22,54 @@ def backoff_delay(failures):
     return int(min(delay, max_delay))
 
 
+def poll_paper_position(bridge, paper, total_seconds=None, interval_seconds=None,
+                        sleep_fn=time.sleep):
+    """While a paper position is open, poll live ticks at a tighter cadence
+    (`POSITION_CHECK_INTERVAL_SECONDS`, default 1s) instead of sleeping blindly
+    for the full `CHECK_INTERVAL_SECONDS` (15s).
+
+    When flat (`paper is None` or `not paper.has_position()`), this simply
+    sleeps `total_seconds` once with zero extra MT5 bridge calls.
+    Returns the close-info dict if the position closed during the window,
+    else None.
+    """
+    if total_seconds is None:
+        total_seconds = float(getattr(config, "CHECK_INTERVAL_SECONDS", 15))
+    if interval_seconds is None:
+        interval_seconds = float(getattr(config, "POSITION_CHECK_INTERVAL_SECONDS", 1))
+
+    if (paper is None or not paper.has_position()
+            or interval_seconds <= 0 or interval_seconds >= total_seconds):
+        sleep_fn(total_seconds)
+        return None
+
+    remaining = float(total_seconds)
+    last_msc = None
+    while remaining > 0 and paper.has_position():
+        step = min(float(interval_seconds), remaining)
+        sleep_fn(step)
+        remaining -= step
+        if not paper.has_position():
+            break
+        try:
+            tick = bridge.get_live_tick(retries=1)
+        except Exception:
+            tick = None
+        if not tick:
+            continue
+        msc = getattr(tick, "time_msc", None)
+        if msc is not None and last_msc is not None and msc == last_msc:
+            continue
+        last_msc = msc
+        closed = paper.on_tick(tick.bid, tick.ask)
+        if closed is not None:
+            log_system("INFO",
+                f"[PAPER] Fast-poll exit ({closed['reason']}): "
+                f"PnL ${closed['profit']:+.2f} | Balance ${closed['balance']:.2f}")
+            return closed
+    return None
+
+
 def main():
     log_system("INFO", "=== Scalper Engine Started ===")
     bridge = None
@@ -235,12 +283,6 @@ def main():
                     f"Uptime: {uptime}s | Reconnects: {reconnect_count}"
                 )
 
-                # Spread filter
-                if spread_points > config.MAX_SPREAD_POINTS:
-                    log_trade("SKIP", {"reason": "high_spread", "spread": spread_points})
-                    time.sleep(config.CHECK_INTERVAL_SECONDS)
-                    continue
-
                 # Kill switch: disable NEW entries without stopping the engine.
                 # Open positions keep their broker-side SL/TP. Log once per
                 # state change so the trades log isn't spammed every 15s.
@@ -253,18 +295,25 @@ def main():
                             f"open positions keep broker-side SL/TP. Remove the file to resume.")
                     else:
                         log_system("INFO", "KILL_SWITCH removed - new entries re-enabled.")
-                if kill_active:
-                    time.sleep(config.CHECK_INTERVAL_SECONDS)
-                    continue
 
                 # Already in a trade? (real or simulated)
                 if bridge.has_open_position() or (paper is not None and paper.has_position()):
                     log_system("INFO", "Active position exists – waiting...")
+                    poll_paper_position(bridge, paper)
+                    continue
+
+                if kill_active:
                     time.sleep(config.CHECK_INTERVAL_SECONDS)
                     continue
 
-                # Strategy evaluation
-                rates = bridge.get_rates()  # -> window + fetch margin
+                # Spread filter
+                if spread_points > config.MAX_SPREAD_POINTS:
+                    log_trade("SKIP", {"reason": "high_spread", "spread": spread_points})
+                    time.sleep(config.CHECK_INTERVAL_SECONDS)
+                    continue
+
+                # Strategy evaluation (rates cached per closed bar)
+                rates = bridge.get_rates(tick=tick)  # -> window + fetch margin
                 signal, sl_dist, tp_dist = strategy.check_signal(rates)
 
                 log_trade("SIGNAL", {
@@ -311,7 +360,7 @@ def main():
                             log_trade("ENTRY_FAILED", {"reason": comment})
 
                 consecutive_errors = 0
-                time.sleep(config.CHECK_INTERVAL_SECONDS)
+                poll_paper_position(bridge, paper)
 
             except Exception as e:
                 consecutive_errors += 1
