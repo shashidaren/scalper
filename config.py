@@ -52,16 +52,26 @@ STALE_TICK_RECONNECT_CYCLES = 120  # Force reconnect after N loops with an uncha
 
 # --- Strategy filters (v7) ---
 # Session filter: only take signals during higher-liquidity hours (UTC).
-# London open ~07:00, NY open ~13:00; we allow 07:00–17:00 UTC to cover
-# London + London-NY overlap and early NY. Asian session is skipped.
+# London open ~07:00, NY open ~13:00. Widened 17:00 -> 20:00 on 2026-10-01
+# (research/strategy_sweep.py --sweep session, 20k M5 bars) after the paper
+# book was found to be taking very few trades: 07-17 alone gave 174 trades
+# over ~101 days (~2.5/day); 07-20 keeps the full NY afternoon in play and
+# gives 216 trades (+24%) with a *better* PF (1.14 vs 1.06) and lower max DD.
+# Still skips the 21:00-22:00 UTC daily rollover break and the Asian session.
 SESSION_FILTER_ENABLED = True
 SESSION_START_HOUR_UTC = 7
-SESSION_END_HOUR_UTC = 17
+SESSION_END_HOUR_UTC = 20
 
-# Paper-test a modest relaxation from 30/70 to increase signal frequency.
-# Compare trade quality and expectancy before considering any live use.
-RSI_BUY_LEVEL = 35
-RSI_SELL_LEVEL = 65
+# Widened 35/65 -> 40/60 on 2026-10-01 for the same reason (too few trades).
+# Offline sweep (research/strategy_sweep.py --sweep rsi, 20k M5 bars) found a
+# stable hump around 40/60 (36..44 all positive/PF>1.1, not a knife-edge):
+# combined with the 07-20 session this is 255 trades over ~101 days (was 174,
+# +47%), net +$456.58 (was +$52.80), PF 1.32 (was 1.06), max DD $108.65 (was
+# $99.62), positive in every calendar month and both halves of the data, and
+# a 10k-resample bootstrap P(net>0)=0.96 (was 0.60 — the old config's CI
+# spanned zero). See docs/strategy_iteration_2026-10-01.md.
+RSI_BUY_LEVEL = 40
+RSI_SELL_LEVEL = 60
 
 # Evaluate EMA/RSI/ATR on the last *completed* M5 bar (not the forming one).
 # Combined with one-shot-per-bar in ScalpStrategy so the 15s live loop cannot

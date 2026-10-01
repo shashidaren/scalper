@@ -6,6 +6,30 @@ An experimental algorithmic trading and backtesting framework for **GOLD / XAUUS
 
 ## Changelog
 
+### 2026-10-01 – Trade-frequency tuning (RSI 40/60, session 07–20 UTC)
+
+- User feedback: the bot was taking very few trades (174 over ~101 days of
+  backtest, ~2.5/day in a 10h session). Re-swept RSI thresholds and the
+  session window with `research/strategy_sweep.py`; **RSI 40/60 combined with
+  widening the session end from 17:00 to 20:00 UTC** (still before the daily
+  21:00–22:00 UTC rollover break) gives **255 trades (+47%), net +$456.58
+  (was +$52.80), PF 1.32 (was 1.06), bootstrap P(net>0)=0.96 (was 0.60,
+  i.e. the old config's CI spanned zero)** — more trades *and* a better
+  backtested edge, profitable in every calendar month and both halves of the
+  data. Full analysis: `docs/strategy_iteration_2026-10-01.md`.
+- Note: RSI 40/60 alone was tested and rejected on 2026-09-30 (flagged
+  "non-monotone") under the *old* session window; the 2026-10-01 fine-grained
+  re-scan (36/64 … 44/56) shows a smooth, non-fragile hump around 40/60 once
+  combined with the wider session, not a one-off fluke.
+- Fixed a floating-point precision bug in `research/strategy_sweep.py`'s fast
+  replay engine (`_rolling_mean` now uses `pandas.Series.rolling` instead of
+  a cumsum, which could disagree with the live `strategy.py` path by ~1e-11
+  at a bar whose RSI exactly ties a threshold). `backtest.py`/live were never
+  affected; `research/parity_test.py` now passes with 0 mismatches.
+- Still in `TRADING_MODE="FORWARD_TEST"` — this is a backtested frequency/
+  quality improvement, not a validated live edge; the launch criteria in
+  `HANDOFF.md` §5 are unchanged.
+
 ### 2026-09-30 – Strategy iteration + honest backtest measurement
 
 - **Breakeven ratchet moved from +0.75R to +1.5R** (`BE_TRIGGER_R`): with a 5R
