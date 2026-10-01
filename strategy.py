@@ -10,6 +10,23 @@ class ScalpStrategy:
         # Why the most recent check_signal() returned no trade (None when it
         # returned a BUY/SELL). Diagnostic only - never affects the signal.
         self.last_skip_reason = None
+        # Cached closed-bar indicator values keyed by the closed bar's
+        # timestamp + window boundary prices so repeated 15s calls inside the
+        # same 5m bar do not rebuild a 1000-row DataFrame 20 times.
+        self._cached_eval_key = None
+        self._cached_eval_vals = None
+        self.indicator_computations = 0
+        self.indicator_cache_hits = 0
+
+    @staticmethod
+    def _extract_bar_field(bar, key):
+        try:
+            val = bar[key]
+            if hasattr(val, "item"):
+                val = val.item()
+            return val
+        except Exception:
+            return None
 
     def _in_session(self, when=None):
         """Return True if current (or given) UTC hour is inside the allowed session."""
@@ -44,45 +61,64 @@ class ScalpStrategy:
             self.last_skip_reason = f"session:hour={now.hour}"
             return None, 0, 0
 
-        df = pd.DataFrame(rates)
-
-        # 1. Trend Filter: 200 EMA
-        df['ema200'] = df['close'].ewm(span=200, adjust=False).mean()
-
-        # 2. RSI (14)
-        delta = df['close'].diff()
-        gain = (delta.where(delta > 0, 0)).rolling(window=14).mean()
-        loss = (-delta.where(delta < 0, 0)).rolling(window=14).mean()
-        rs = gain / loss
-        df['rsi'] = 100 - (100 / (1 + rs))
-
-        # 3. ATR (14) Volatility
-        high_low = df['high'] - df['low']
-        high_cp = (df['high'] - df['close'].shift()).abs()
-        low_cp = (df['low'] - df['close'].shift()).abs()
-        tr = pd.concat([high_low, high_cp, low_cp], axis=1).max(axis=1)
-        df['atr'] = tr.rolling(14).mean()
-
         # Prefer last *completed* bar so live (forming M5 candle) matches backtest
         # and does not flicker as the current bar's RSI wiggles through the level.
         use_closed = getattr(config, "SIGNAL_ON_CLOSED_BAR", True)
-        idx = -2 if use_closed and len(df) >= 3 else -1
+        idx = -2 if use_closed and len(rates) >= 3 else -1
         prev_idx = idx - 1
 
-        current_close = df['close'].iloc[idx]
-        current_ema = df['ema200'].iloc[idx]
-        current_atr = df['atr'].iloc[idx]
-        rsi_curr = df['rsi'].iloc[idx]
-        rsi_prev = df['rsi'].iloc[prev_idx]
+        bar_ts = self._extract_bar_field(rates[idx], "time")
+        eval_key = None
+        if use_closed and bar_ts is not None:
+            eval_key = (
+                bar_ts,
+                len(rates),
+                self._extract_bar_field(rates[0], "close"),
+                self._extract_bar_field(rates[idx], "close"),
+            )
 
-        bar_ts = None
-        if 'time' in df.columns:
-            try:
-                bar_ts = df['time'].iloc[idx]
-                if hasattr(bar_ts, "item"):
-                    bar_ts = bar_ts.item()
-            except Exception:
-                bar_ts = None
+        if eval_key is not None and eval_key == self._cached_eval_key and self._cached_eval_vals is not None:
+            current_close, current_ema, current_atr, rsi_curr, rsi_prev = self._cached_eval_vals
+            self.indicator_cache_hits += 1
+        else:
+            df = pd.DataFrame(rates)
+
+            # 1. Trend Filter: 200 EMA
+            df['ema200'] = df['close'].ewm(span=200, adjust=False).mean()
+
+            # 2. RSI (14)
+            delta = df['close'].diff()
+            gain = (delta.where(delta > 0, 0)).rolling(window=14).mean()
+            loss = (-delta.where(delta < 0, 0)).rolling(window=14).mean()
+            rs = gain / loss
+            df['rsi'] = 100 - (100 / (1 + rs))
+
+            # 3. ATR (14) Volatility
+            high_low = df['high'] - df['low']
+            high_cp = (df['high'] - df['close'].shift()).abs()
+            low_cp = (df['low'] - df['close'].shift()).abs()
+            tr = pd.concat([high_low, high_cp, low_cp], axis=1).max(axis=1)
+            df['atr'] = tr.rolling(14).mean()
+
+            current_close = df['close'].iloc[idx]
+            current_ema = df['ema200'].iloc[idx]
+            current_atr = df['atr'].iloc[idx]
+            rsi_curr = df['rsi'].iloc[idx]
+            rsi_prev = df['rsi'].iloc[prev_idx]
+            self.indicator_computations += 1
+
+            if bar_ts is None and 'time' in df.columns:
+                try:
+                    bar_ts = df['time'].iloc[idx]
+                    if hasattr(bar_ts, "item"):
+                        bar_ts = bar_ts.item()
+                except Exception:
+                    bar_ts = None
+            if eval_key is not None:
+                self._cached_eval_key = eval_key
+                self._cached_eval_vals = (
+                    current_close, current_ema, current_atr, rsi_curr, rsi_prev
+                )
 
         # Minimum volatility filter ($0.50)
         if current_atr < 0.50:

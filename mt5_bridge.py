@@ -54,6 +54,12 @@ class MT5Bridge:
         self.conn = None
         self.mt5 = None
         self._closed = False
+        self._cached_rates = None
+        self._cached_count = None
+        self._cached_closed_bar_ts = None
+        self._cached_forming_bar_ts = None
+        self.rates_full_fetches = 0
+        self.rates_cache_hits = 0
 
         # 1) Classified TCP pre-check so errors are actionable.
         ok, err = probe_bridge(timeout=getattr(config, "CONNECT_TIMEOUT_SECONDS", 10))
@@ -114,35 +120,122 @@ class MT5Bridge:
     def get_account_info(self):
         return self.mt5.account_info()
 
-    def get_live_tick(self):
-        for _ in range(5):
+    def get_live_tick(self, retries=5):
+        for _ in range(max(int(retries), 1)):
             tick = self.mt5.symbol_info_tick(config.SYMBOL)
             if tick and tick.bid > 0 and tick.ask > 0:
                 return tick
-            time.sleep(0.5)
+            if retries > 1:
+                time.sleep(0.5)
         return None
 
     def get_symbol_info(self):
         return self.mt5.symbol_info(config.SYMBOL)
 
-    def get_rates(self, count=None):
+    @staticmethod
+    def _bar_time(bar):
+        try:
+            t = bar["time"]
+            if hasattr(t, "item"):
+                t = t.item()
+            try:
+                return int(t)
+            except Exception:
+                return t
+        except Exception:
+            return None
+
+    def invalidate_rates_cache(self):
+        """Clear cached rate window (e.g. on reconnect or manual reset)."""
+        self._cached_rates = None
+        self._cached_count = None
+        self._cached_closed_bar_ts = None
+        self._cached_forming_bar_ts = None
+
+    def get_rates(self, count=None, tick=None, force=False):
         # Default to the shared indicator window (+ a small safety margin) so
         # the live signal sees the same warm-up as the backtester; the strategy
         # slices back to INDICATOR_WINDOW_BARS (see config.INDICATOR_FETCH_MARGIN).
+        default_count = (getattr(config, "INDICATOR_WINDOW_BARS", 250)
+                         + getattr(config, "INDICATOR_FETCH_MARGIN", 0))
+        use_cache = (count is None and not force
+                     and getattr(config, "SIGNAL_ON_CLOSED_BAR", True))
         if count is None:
-            count = (getattr(config, "INDICATOR_WINDOW_BARS", 250)
-                     + getattr(config, "INDICATOR_FETCH_MARGIN", 0))
+            count = default_count
+
         tf_map = {
             "M1": self.mt5.TIMEFRAME_M1,
             "M5": self.mt5.TIMEFRAME_M5,
             "M15": self.mt5.TIMEFRAME_M15,
-            "H1": self.mt5.TIMEFRAME_H1
+            "H1": self.mt5.TIMEFRAME_H1,
         }
+        tf_sec_map = {"M1": 60, "M5": 300, "M15": 900, "H1": 3600}
         tf = tf_map.get(config.TIMEFRAME, self.mt5.TIMEFRAME_M5)
+        tf_sec = tf_sec_map.get(config.TIMEFRAME, 300)
+
+        cached_rates = getattr(self, "_cached_rates", None)
+        cached_closed_ts = getattr(self, "_cached_closed_bar_ts", None)
+        cached_forming_ts = getattr(self, "_cached_forming_bar_ts", None)
+
+        if (use_cache
+                and cached_rates is not None
+                and getattr(self, "_cached_count", None) == count
+                and len(cached_rates) >= count
+                and cached_closed_ts is not None):
+            # 1) Fast path: if caller supplied the live tick, derive whether
+            #    the current forming bar is still open directly from tick.time.
+            #    Inside [forming_ts, forming_ts + tf_sec) -> 0 RPyC calls.
+            #    Once tick.time reaches forming_ts + tf_sec, a tick in the new
+            #    bar has arrived so the previous bar is closed -> refetch full
+            #    window directly without an extra probe RPC.
+            tick_sec = None
+            if tick is not None and isinstance(cached_forming_ts, int):
+                raw_t = getattr(tick, "time", None)
+                if not raw_t:
+                    msc = getattr(tick, "time_msc", None)
+                    if msc:
+                        raw_t = int(msc) // 1000
+                try:
+                    tick_sec = int(raw_t) if raw_t is not None else None
+                except Exception:
+                    tick_sec = None
+
+            if tick_sec is not None and isinstance(cached_forming_ts, int):
+                if cached_forming_ts <= tick_sec < cached_forming_ts + tf_sec:
+                    self.rates_cache_hits = getattr(self, "rates_cache_hits", 0) + 1
+                    return cached_rates
+            else:
+                # 2) No tick time supplied: do a lightweight 2-bar probe to
+                #    check whether the last completed bar timestamp
+                #    (`probe[-2]['time']`) advanced before pulling 1,050 bars.
+                try:
+                    raw_probe = self.mt5.copy_rates_from_pos(config.SYMBOL, tf, 0, 2)
+                    probe = rpyc.classic.obtain(raw_probe)
+                except Exception:
+                    probe = None
+                if probe is not None and len(probe) >= 2:
+                    closed_ts = self._bar_time(probe[-2])
+                    forming_ts = self._bar_time(probe[-1])
+                    if closed_ts is not None and closed_ts == cached_closed_ts:
+                        try:
+                            cached_rates[-1] = probe[-1]
+                        except Exception:
+                            pass
+                        self._cached_forming_bar_ts = forming_ts
+                        self.rates_cache_hits = getattr(self, "rates_cache_hits", 0) + 1
+                        return cached_rates
+
         raw_rates = self.mt5.copy_rates_from_pos(config.SYMBOL, tf, 0, count)
         # Pull the numpy array across as a local object (same pattern as
         # fetch_data.py); a raw netref would force per-element remote calls.
-        return rpyc.classic.obtain(raw_rates)
+        rates = rpyc.classic.obtain(raw_rates)
+        self.rates_full_fetches = getattr(self, "rates_full_fetches", 0) + 1
+        if use_cache and rates is not None and len(rates) >= 2:
+            self._cached_rates = rates
+            self._cached_count = count
+            self._cached_closed_bar_ts = self._bar_time(rates[-2])
+            self._cached_forming_bar_ts = self._bar_time(rates[-1])
+        return rates
 
     def has_open_position(self):
         positions = self.mt5.positions_get(symbol=config.SYMBOL)

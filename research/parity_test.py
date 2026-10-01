@@ -24,8 +24,116 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 import config  # noqa: E402
+from mt5_bridge import MT5Bridge  # noqa: E402
 from strategy import ScalpStrategy  # noqa: E402
 import strategy_sweep as sweep  # noqa: E402
+
+
+class _FakeTick:
+    def __init__(self, time_sec: int, bid: float = 4000.0, ask: float = 4000.45):
+        self.time = int(time_sec)
+        self.time_msc = int(time_sec) * 1000
+        self.bid = float(bid)
+        self.ask = float(ask)
+
+
+class _FakeMT5ForRates:
+    TIMEFRAME_M1 = 1
+    TIMEFRAME_M5 = 5
+    TIMEFRAME_M15 = 15
+    TIMEFRAME_H1 = 60
+
+    def __init__(self, struct_rates):
+        self._all_rates = struct_rates
+        self.end_idx = len(struct_rates)
+        self.calls = []  # list of requested counts
+
+    def copy_rates_from_pos(self, symbol, tf, start_pos, count):
+        self.calls.append(int(count))
+        end = self.end_idx - int(start_pos)
+        start = max(0, end - int(count))
+        return self._all_rates[start:end].copy()
+
+
+def _check_bridge_cache_parity(df: pd.DataFrame, replay_all: dict,
+                               window: int, margin: int) -> int:
+    """Verify MT5Bridge.get_rates() closed-bar caching across 15s loop cycles:
+      1) reacts on the very first 15s tick after a new bar closes (0 mismatches),
+      2) cuts full 1050-bar RPyC fetches by ~20x (1 per 5m bar instead of 20),
+      3) works both when `tick` is passed (0 RPyC calls mid-bar) and when
+         `tick` is omitted (2-bar probe mid-bar).
+    """
+    import numpy as np
+
+    full_count = window + margin
+    # Pick a 60-bar slice that includes several real firing signals
+    firing_indices = [i for i, s in replay_all.items() if s and i >= full_count + 10]
+    start_bar = firing_indices[0] - 5 if firing_indices else full_count
+    end_bar = min(len(df), start_bar + 60)
+    n_bars = end_bar - start_bar
+
+    dtype = [
+        ("time", "i8"), ("open", "f8"), ("high", "f8"),
+        ("low", "f8"), ("close", "f8"), ("tick_volume", "i8"), ("spread", "i8"),
+    ]
+    struct_rates = np.zeros(len(df), dtype=dtype)
+    struct_rates["time"] = df["time"].astype("datetime64[s]").astype("int64").to_numpy()
+    for col in ("open", "high", "low", "close"):
+        struct_rates[col] = df[col].to_numpy(float)
+    if "tick_volume" in df.columns:
+        struct_rates["tick_volume"] = df["tick_volume"].to_numpy(int)
+    if "spread" in df.columns:
+        struct_rates["spread"] = df["spread"].to_numpy(int)
+
+    for mode in ("with_tick", "probe_only"):
+        fake_mt5 = _FakeMT5ForRates(struct_rates)
+        bridge = MT5Bridge.__new__(MT5Bridge)
+        bridge.mt5 = fake_mt5
+        bridge.conn = None
+        bridge._closed = False
+        bridge.invalidate_rates_cache()
+        bridge.rates_full_fetches = 0
+        bridge.rates_cache_hits = 0
+
+        strat = ScalpStrategy()
+        cycles_per_bar = 20  # 20 x 15s = 300s (one M5 bar)
+
+        for bar_i in range(start_bar, end_bar):
+            fake_mt5.end_idx = bar_i + 1
+            forming_ts = int(struct_rates[bar_i]["time"])
+            bar_dt = df["time"].iloc[bar_i]
+            expected_sig = replay_all[bar_i]
+
+            for cycle in range(cycles_per_bar):
+                tick = _FakeTick(forming_ts + cycle * 15) if mode == "with_tick" else None
+                rates = bridge.get_rates(tick=tick)
+                sig, sl_d, tp_d = strat.check_signal(rates, when=bar_dt)
+
+                if cycle == 0:
+                    # Must react on the very first 15s cycle after the bar closes
+                    if sig != expected_sig:
+                        print(f"FAIL ({mode}): bar {bar_i} cycle 0 sig={sig} != expected={expected_sig}")
+                        return 1
+                else:
+                    # Subsequent cycles inside the same 5m bar must not re-fire
+                    if sig is not None:
+                        print(f"FAIL ({mode}): bar {bar_i} cycle {cycle} duplicate fire {sig}")
+                        return 1
+                    if expected_sig is not None and strat.last_skip_reason != "duplicate_bar":
+                        print(f"FAIL ({mode}): bar {bar_i} cycle {cycle} expected duplicate_bar, got {strat.last_skip_reason}")
+                        return 1
+
+        full_calls = sum(1 for c in fake_mt5.calls if c == full_count)
+        if full_calls != n_bars:
+            print(f"FAIL ({mode}): expected {n_bars} full fetches ({full_count} bars), got {full_calls}")
+            return 1
+        if mode == "with_tick" and len(fake_mt5.calls) != n_bars:
+            print(f"FAIL (with_tick): expected {n_bars} total RPyC calls, got {len(fake_mt5.calls)}")
+            return 1
+
+    print(f"bridge cache check: {n_bars} M5 bars x 20 (15s) cycles = {n_bars * 20} loops -> "
+          f"{n_bars} full ({full_count}-bar) fetches (20x reduction), 0 signal/timing mismatches")
+    return 0
 
 
 def main(csv_file: str | None = None, step: int = 137) -> int:
@@ -98,6 +206,10 @@ def main(csv_file: str | None = None, step: int = 137) -> int:
         for m in mismatches[:10]:
             print("   bar %d %s: live=%s replay=%s" % m)
         return 1
+
+    if _check_bridge_cache_parity(df, replay_all, window, margin) != 0:
+        return 1
+
     print("PASS: live check_signal and sweep replay agree on every sampled bar")
     return 0
 

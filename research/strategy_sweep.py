@@ -383,6 +383,114 @@ def _coerce(v: str):
     return v
 
 
+def run_slice(df_full: pd.DataFrame, p: Params, start_idx: int, end_idx: int,
+              label: str | None = None) -> dict:
+    """Run replay on `df_full.iloc[start_idx:end_idx]` while preserving the
+    `warmup_bars - 1` indicator history immediately preceding `start_idx`."""
+    w = p.warmup_bars
+    pre = max(0, start_idx - (w - 1))
+    sub = df_full.iloc[pre:end_idx].reset_index(drop=True)
+    p_run = replace(p, label=label or p.label)
+    return run("", p_run, df=sub)
+
+
+def _boot_ci(trades_list: list[dict], n: int = 10000, seed: int = 7):
+    pnl = np.array([t["pnl"] for t in trades_list], float)
+    if pnl.size == 0:
+        return 0.0, 0.0, 0.0
+    rng = np.random.default_rng(seed)
+    idx = rng.integers(0, pnl.size, size=(n, pnl.size))
+    nets = pnl[idx].sum(axis=1)
+    lo, hi = np.percentile(nets, [2.5, 97.5])
+    return float(lo), float(hi), float((nets > 0).mean())
+
+
+def oos_report(df: pd.DataFrame, base: Params, n_boot: int = 10000) -> list[str]:
+    """Chronological Train/Test (50/50 + Regime split + 4-fold walk-forward)
+    and train-only parameter selection check."""
+    out: list[str] = []
+    w = base.warmup_bars
+    start = w - 1
+    mid = start + (len(df) - start) // 2
+    aug1_matches = df.index[df["time"] >= "2026-08-01"]
+    aug1 = int(aug1_matches[0]) if len(aug1_matches) else mid
+
+    out.append("=== 1. Dataset & Calendar Regime Summary ===")
+    for m, g in df.groupby(df["time"].dt.to_period("M")):
+        chg = (g["close"].iloc[-1] / g["open"].iloc[0] - 1.0) * 100.0
+        out.append(
+            f"  {m}: bars={len(g):>5}  open={g['open'].iloc[0]:>7.2f}  "
+            f"close={g['close'].iloc[-1]:>7.2f} ({chg:+6.2f}%)  "
+            f"range=[{g['low'].min():.2f}, {g['high'].max():.2f}]"
+        )
+
+    p_new = replace(base, rsi_buy=40.0, rsi_sell=60.0,
+                    session_start=7, session_end=20, be_trigger_r=1.5,
+                    label="Adopted (40/60,07-20,BE1.5)")
+    p_sep30 = replace(p_new, rsi_buy=35.0, rsi_sell=65.0, session_end=17,
+                      label="Sep-30 (35/65,07-17,BE1.5)")
+    p_orig = replace(p_sep30, be_trigger_r=0.75,
+                     label="Orig v7 (35/65,07-17,BE.75)")
+
+    for split_lbl, s_idx in [
+        (f"50/50 Chronological Split (Train {str(df['time'].iloc[start])[:10]}..{str(df['time'].iloc[mid-1])[:10]} | "
+         f"OOS {str(df['time'].iloc[mid])[:10]}..{str(df['time'].iloc[-1])[:10]})", mid),
+        (f"Regime Split: Jun-Jul Bear/Range vs Aug-Sep Bull/Pullback (split {str(df['time'].iloc[aug1])[:10]})", aug1),
+    ]:
+        out.append(f"\n=== 2. {split_lbl} ===")
+        out.append(header() + f"   {'95% CI (' + str(n_boot) + ' boot)':<21} P(>0)")
+        for cfg in (p_orig, p_sep30, p_new):
+            for tag, a, b in (("TRAIN", start, s_idx), ("OOS", s_idx, len(df)), ("FULL", start, len(df))):
+                r = run_slice(df, cfg, a, b, f"{cfg.label[:20]} [{tag}]")
+                lo, hi, ppos = _boot_ci(r["trades_list"], n=n_boot)
+                out.append(f"{fmt(r)}   [{lo:+8.1f}, {hi:+8.1f}]  {ppos:.3f}")
+
+    out.append("\n=== 3. One-Variable-at-a-Time on TRAIN Only vs Cold OOS (50/50 split) ===")
+    out.append(f"{'lever / candidate':<24} | {'TR n':>5} {'TR net$':>8} {'TR PF':>6} {'TR P>0':>6} | "
+               f"{'OOS n':>5} {'OOS net$':>9} {'OOS PF':>6} {'OOS P>0':>7}")
+    for be in (0.50, 0.75, 1.00, 1.25, 1.50, None):
+        p = replace(p_orig, be_trigger_r=be)
+        tr = run_slice(df, p, start, mid)
+        te = run_slice(df, p, mid, len(df))
+        _, _, ptr = _boot_ci(tr["trades_list"], n=n_boot)
+        _, _, pte = _boot_ci(te["trades_list"], n=n_boot)
+        out.append(f"BE={str(be):<5} (35/65,07-17)   | {tr['trades']:>5} {tr['net']:>8.2f} {tr.get('pf',0):>6.2f} {ptr:>6.3f} | "
+                   f"{te['trades']:>5} {te['net']:>9.2f} {te.get('pf',0):>6.2f} {pte:>7.3f}")
+    out.append("-" * 86)
+    for rlo, rhi in ((30, 70), (35, 65), (38, 62), (40, 60), (42, 58), (45, 55)):
+        p = replace(p_sep30, rsi_buy=float(rlo), rsi_sell=float(rhi))
+        tr = run_slice(df, p, start, mid)
+        te = run_slice(df, p, mid, len(df))
+        _, _, ptr = _boot_ci(tr["trades_list"], n=n_boot)
+        _, _, pte = _boot_ci(te["trades_list"], n=n_boot)
+        out.append(f"RSI {rlo}/{rhi} (BE1.5,07-17)  | {tr['trades']:>5} {tr['net']:>8.2f} {tr.get('pf',0):>6.2f} {ptr:>6.3f} | "
+                   f"{te['trades']:>5} {te['net']:>9.2f} {te.get('pf',0):>6.2f} {pte:>7.3f}")
+    out.append("-" * 86)
+    for s0, s1 in ((7, 16), (7, 17), (7, 20), (8, 17), (8, 20), (13, 17)):
+        p = replace(p_new, session_start=s0, session_end=s1)
+        tr = run_slice(df, p, start, mid)
+        te = run_slice(df, p, mid, len(df))
+        _, _, ptr = _boot_ci(tr["trades_list"], n=n_boot)
+        _, _, pte = _boot_ci(te["trades_list"], n=n_boot)
+        out.append(f"Sess {s0:02d}-{s1:02d} (BE1.5,40/60) | {tr['trades']:>5} {tr['net']:>8.2f} {tr.get('pf',0):>6.2f} {ptr:>6.3f} | "
+                   f"{te['trades']:>5} {te['net']:>9.2f} {te.get('pf',0):>6.2f} {pte:>7.3f}")
+
+    out.append("\n=== 4. 4-Fold Chronological Walk-Forward (Adopted: RSI 40/60, 07-20, BE 1.5R) ===")
+    out.append(header() + f"   {'95% CI (' + str(n_boot) + ' boot)':<21} P(>0)   Gold Δ%")
+    playable = len(df) - start
+    fold = playable // 4
+    for k in range(4):
+        a = start + k * fold
+        b = start + (k + 1) * fold if k < 3 else len(df)
+        t0, t1 = str(df["time"].iloc[a])[:10], str(df["time"].iloc[b - 1])[:10]
+        g_chg = (df["close"].iloc[b - 1] / df["open"].iloc[a] - 1.0) * 100.0
+        rf = run_slice(df, p_new, a, b, f"Q{k+1} {t0}..{t1}")
+        lo, hi, ppos = _boot_ci(rf["trades_list"], n=n_boot)
+        out.append(f"{fmt(rf)}   [{lo:+8.1f}, {hi:+8.1f}]  {ppos:.3f}   {g_chg:+6.2f}%")
+
+    return out
+
+
 def breakdown(csv_file: str, df: pd.DataFrame, p: Params) -> list[str]:
     """Side / month / half-split stability of one parameter set."""
     base = run(csv_file, replace(p, label=p.label + " [all]"), df=df)
@@ -471,6 +579,8 @@ def main(argv=None):
                     help="bootstrap N resamples of the --set config's trade PnL")
     ap.add_argument("--detail", action="store_true",
                     help="print side/month/half breakdown for the --set config")
+    ap.add_argument("--oos", action="store_true",
+                    help="run chronological train/test OOS split, regime split, and 4-fold walk-forward")
     ap.add_argument("--set", action="append", default=[], metavar="K=V",
                     help="override a Params field for --detail (repeatable)")
     args = ap.parse_args(argv)
@@ -480,6 +590,12 @@ def main(argv=None):
         args.warmup = int(getattr(config, "INDICATOR_WINDOW_BARS", 202))
     print(f"Loaded {len(df)} bars: {df.time.min()} -> {df.time.max()} "
           f"(warm-up {args.warmup})\n")
+
+    if args.oos:
+        base = replace(params_from_config(), warmup_bars=args.warmup)
+        for line in oos_report(df, base, n_boot=args.bootstrap or 10000):
+            print(line)
+        return
 
     if args.verify:
         import backtest

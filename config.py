@@ -40,7 +40,8 @@ MAX_TRADES_PER_DAY = 15        # Hard cap on number of trades per day
 MAX_CONSECUTIVE_LOSSES = 4     # Optional pause after X losses in a row
 
 # Loop timing
-CHECK_INTERVAL_SECONDS = 15    # How often the live loop checks for signals
+CHECK_INTERVAL_SECONDS = 15    # How often the live loop checks for signals while flat
+POSITION_CHECK_INTERVAL_SECONDS = 1  # Faster tick poll (seconds) while a paper position is open
 RETRY_SLEEP_SECONDS = 10       # Sleep when connection problems occur
 
 # --- MT5 / RPyC connection robustness ---
