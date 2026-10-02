@@ -491,6 +491,127 @@ def oos_report(df: pd.DataFrame, base: Params, n_boot: int = 10000) -> list[str]
     return out
 
 
+def candidate_report(df: pd.DataFrame, base: Params, n_boot: int = 10000) -> list[str]:
+    """Re-test the exit/risk knobs that were last tuned under the *pre-PR#11*
+    config, on the loss-analysis candidates, with train-select -> cold-OOS.
+
+    `sweep_be`/`sweep_sl`/`sweep_tp` are in-sample: they rank configs on the
+    same 20k bars the adopted config was chosen from, so "BE off / SL 2.5 /
+    TP 6 all beat the baseline" is not by itself evidence. This applies the
+    discipline established for PR #12: pick on TRAIN (first half) only, then
+    read the OOS half cold, and report both plus the regime split and the
+    4-fold walk-forward for whatever survives.
+    """
+    out: list[str] = []
+    w = base.warmup_bars
+    start = w - 1
+    mid = start + (len(df) - start) // 2
+    n = len(df)
+
+    adopted = replace(base, rsi_buy=40.0, rsi_sell=60.0, session_start=7,
+                      session_end=20, be_trigger_r=1.5, sl_atr_mult=2.0,
+                      tp_atr_mult=5.0, atr_min=0.50, max_bars_in_trade=None,
+                      label="adopted")
+
+    # (value label, kwargs, is the currently adopted setting?)
+    levers: list[tuple[str, list[tuple[str, dict, bool]]]] = [
+        ("BE trigger (R)", [(str(b), dict(be_trigger_r=b), b == 1.5)
+                            for b in (0.75, 1.0, 1.25, 1.5, 2.0, None)]),
+        ("SL x ATR", [(str(m), dict(sl_atr_mult=m), m == 2.0)
+                      for m in (1.5, 2.0, 2.5, 3.0)]),
+        ("TP x ATR", [(str(m), dict(tp_atr_mult=m), m == 5.0)
+                      for m in (3.5, 4.0, 5.0, 6.0, 8.0)]),
+        ("time exit (bars)", [(str(m), dict(max_bars_in_trade=m), m is None)
+                              for m in (12, 24, 36, 48, 72, None)]),
+        ("ATR floor", [(str(m), dict(atr_min=m), m == 0.5)
+                       for m in (0.5, 2.5, 3.0, 3.5, 4.0)]),
+        ("session (UTC)", [(f"{s0:02d}-{s1:02d}",
+                            dict(session_start=s0, session_end=s1),
+                            (s0, s1) == (7, 20))
+                           for s0, s1 in ((7, 16), (7, 17), (7, 20), (8, 17),
+                                          (8, 20), (9, 20), (13, 17))]),
+    ]
+
+    def ev(p, a, b):
+        r = run_slice(df, p, a, b)
+        lo, hi, ppos = _boot_ci(r["trades_list"], n=n_boot)
+        return r, (lo, hi, ppos)
+
+    out.append("=== Candidate exits/risk: select on TRAIN, read OOS cold ===")
+    out.append(f"TRAIN {str(df['time'].iloc[start])[:10]}..{str(df['time'].iloc[mid-1])[:10]}"
+               f" | OOS {str(df['time'].iloc[mid])[:10]}..{str(df['time'].iloc[-1])[:10]}")
+    out.append(f"{'lever = value':<26} | {'TR n':>5} {'TR net$':>8} {'TR PF':>6} {'TR P>0':>6} | "
+               f"{'OOS n':>5} {'OOS net$':>9} {'OOS PF':>6} {'OOS P>0':>7} | verdict")
+    survivors: dict[str, dict] = {}
+    for lever, variants in levers:
+        base_tr, _ = ev(adopted, start, mid)
+        base_te, _ = ev(adopted, mid, n)
+        best_tr_net, best_tr_kw, best_tr_val = base_tr["net"], None, None
+        for val, kw, is_current in variants:
+            p = replace(adopted, **kw)
+            tr, _ = ev(p, start, mid)
+            te, (_lo, _hi, pte) = ev(p, mid, n)
+            # Train-side verdict only (what a tuner looking at H1 would conclude).
+            better_tr = tr["net"] > base_tr["net"] and tr["trades"] > 0
+            holds_oos = te["net"] > base_te["net"]
+            if is_current:
+                verdict = "<- current"
+            elif better_tr and holds_oos:
+                verdict = "TRAIN+ and OOS+ (survives)"
+                if tr["net"] > best_tr_net:
+                    best_tr_net, best_tr_kw, best_tr_val = tr["net"], kw, val
+            elif better_tr:
+                verdict = "TRAIN+ but OOS- (overfit)"
+            else:
+                verdict = "TRAIN-"
+            out.append(
+                f"{(lever + ' = ' + val)[:26]:<26} | {tr['trades']:>5} {tr['net']:>8.2f} "
+                f"{tr.get('pf', 0):>6.2f} {_boot_ci(tr['trades_list'], n=n_boot)[2]:>6.3f} | "
+                f"{te['trades']:>5} {te['net']:>9.2f} {te.get('pf', 0):>6.2f} {pte:>7.3f} | {verdict}")
+        if best_tr_kw is not None:
+            survivors[f"{lever}={best_tr_val}"] = best_tr_kw
+        out.append("-" * 108)
+
+    out.append(f"\nsurvivors (better than adopted on TRAIN *and* on cold OOS): "
+               f"{list(survivors) or 'none'}")
+
+    # Regime split + walk-forward for the adopted config vs each survivor combo.
+    aug1_matches = df.index[df["time"] >= "2026-08-01"]
+    aug1 = int(aug1_matches[0]) if len(aug1_matches) else mid
+    out.append("\n=== Regime split (Jun-Jul bear/range vs Aug-Sep bull/pullback) ===")
+    out.append(f"{'config':<26} | {'Jun-Jul n':>9} {'net$':>8} {'PF':>5} | "
+               f"{'Aug-Sep n':>9} {'net$':>8} {'PF':>5}")
+    combo_kw: dict = {}
+    for kw in survivors.values():
+        combo_kw.update(kw)
+    cands = [("adopted", {})]
+    cands += [(k, kw) for k, kw in survivors.items()]
+    if combo_kw:
+        cands.append(("ALL survivors combined", combo_kw))
+    for label, kw in cands:
+        p = replace(adopted, label=label, **kw)
+        a = run_slice(df, p, start, aug1)
+        b = run_slice(df, p, aug1, n)
+        out.append(f"{label[:26]:<26} | {a['trades']:>9} {a['net']:>8.2f} {a.get('pf',0):>5.2f} | "
+                   f"{b['trades']:>9} {b['net']:>8.2f} {b.get('pf',0):>5.2f}")
+
+    out.append("\n=== 4-fold walk-forward (does it hold quarter by quarter?) ===")
+    out.append(f"{'config':<26} | " + " | ".join(f"Q{k+1} net$/PF" for k in range(4)) + " | folds>0")
+    playable = n - start
+    fold = playable // 4
+    for label, kw in cands:
+        p = replace(adopted, label=label, **kw)
+        cells, pos = [], 0
+        for k in range(4):
+            a = start + k * fold
+            b = start + (k + 1) * fold if k < 3 else n
+            r = run_slice(df, p, a, b)
+            cells.append(f"{r['net']:+7.1f}/{r.get('pf',0):.2f}")
+            pos += 1 if r["net"] > 0 else 0
+        out.append(f"{label[:26]:<26} | " + " | ".join(cells) + f" | {pos}/4")
+    return out
+
+
 def breakdown(csv_file: str, df: pd.DataFrame, p: Params) -> list[str]:
     """Side / month / half-split stability of one parameter set."""
     base = run(csv_file, replace(p, label=p.label + " [all]"), df=df)
@@ -581,6 +702,9 @@ def main(argv=None):
                     help="print side/month/half breakdown for the --set config")
     ap.add_argument("--oos", action="store_true",
                     help="run chronological train/test OOS split, regime split, and 4-fold walk-forward")
+    ap.add_argument("--candidates", action="store_true",
+                    help="re-test exit/risk knobs (BE, SL, TP, time exit, ATR floor) "
+                         "under the ADOPTED config with train-select -> cold-OOS")
     ap.add_argument("--set", action="append", default=[], metavar="K=V",
                     help="override a Params field for --detail (repeatable)")
     args = ap.parse_args(argv)
@@ -590,6 +714,12 @@ def main(argv=None):
         args.warmup = int(getattr(config, "INDICATOR_WINDOW_BARS", 202))
     print(f"Loaded {len(df)} bars: {df.time.min()} -> {df.time.max()} "
           f"(warm-up {args.warmup})\n")
+
+    if args.candidates:
+        base = replace(params_from_config(), warmup_bars=args.warmup)
+        for line in candidate_report(df, base, n_boot=args.bootstrap or 10000):
+            print(line)
+        return
 
     if args.oos:
         base = replace(params_from_config(), warmup_bars=args.warmup)

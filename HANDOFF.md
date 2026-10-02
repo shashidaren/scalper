@@ -6,9 +6,55 @@ code, parameters, or the server must update §1 (state), §3 (changelog) and
 
 ---
 
-## 1. Where things stand (as of 2026-10-01 13:15 UTC)
+## 1. Where things stand (as of 2026-10-02)
 
-> **Update (2026-10-01, this session, branch `arena/01a0f77d-scalper`):**
+> **Update (2026-10-02, this session, branch `arena/01a0fd8e-scalper`):** loss
+> analysis of the adopted config — **decision: REMAIN, no parameter change** —
+> full writeup in `docs/loss_analysis_2026-10-02.md`. New tooling:
+> `research/loss_analysis.py` (per-trade loss anatomy) and
+> `research/strategy_sweep.py --candidates` (train-select → cold-OOS re-test of
+> the exit/risk knobs); both replay through the engine that `--verify` proves
+> identical to `backtest.py` (255 / +$456.58 / PF 1.32 / 72 TP, 43 BE, 140 SL)
+> and that `research/parity_test.py` proves identical to the live
+> `check_signal` (460 signals, 0 mismatches). **No change to `config.py`,
+> `strategy.py`, `run.py` or `backtest.py`; `TRADING_MODE` stays
+> `"FORWARD_TEST"`.**
+> 1. **The losses are structural, not a leak.** 98.7% of gross loss is full
+>    stop-outs (140 SL = −$1,388.93); the 43 BE scratches cost **$18.99 total**
+>    (spread only), so exit management has almost nothing left to give. Spread
+>    is **$112.24 = 6% of gross profit**, so costs are not the leak either. With
+>    a 1R stop / 2.5R target the structural break-even WR is **28.6%** and the
+>    book wins **28.2%** — it is profitable only because 43 losers scratch for
+>    spread. Median trade −$6.05; top-5 winners = 57% of net (top-10 = 104%).
+> 2. **Every "obvious fix" fails train-only validation.** The two biggest
+>    in-sample improvements available — **BE off (+$563.46)** and **SL 2.5×ATR
+>    (+$520.66)** — are both *worse* than the adopted config on TRAIN alone
+>    (+$250.11 / +$245.56 vs +$286.06); their full-file ranking was an OOS-half
+>    artefact. A time-based exit (12–72 bars) is worse at every length, and
+>    `ATR floor 4.0` / `BE 2.0R` are TRAIN+ but OOS− (overfit). Hour/weekday
+>    buckets (16–32 trades) are too thin to filter on.
+> 3. **Survivors are pre-registered, not adopted.** `TP 6.0×ATR` is the only
+>    lever that clears TRAIN, cold OOS, both regimes and 4/4 walk-forward folds
+>    (full sample 251 trades, +$538.06, PF 1.38, max DD $104.49, P(net>0)=0.968),
+>    and `TP 6.0 + ATR floor 3.0` is the only config whose 95% bootstrap CI
+>    excludes zero (228 trades, +$580.90, PF 1.44, max DD $98.98,
+>    CI [+$25.48, +$1,145.70], P(net>0)=0.980). Rejected for now: the gain is
+>    inside the noise (±$570 CI), `GOLD_M5.csv` has already been inspected in
+>    PR #7/#11/#12, both cost the trade frequency PR #11 was raised to fix, and
+>    changing config again would reset the §5 "100+ paper trades" clock a third
+>    time in three days.
+> 4. **Two §5 TODOs closed by measurement:** wiring `MAX_CONSECUTIVE_LOSSES=4`
+>    would **cost $31.49** (N=3 costs $184.34) — losing streaks are not followed
+>    by more losses — and "skip Friday after 16:00 UTC" is **backwards**: Friday
+>    ≥16:00 is **+$51.90 / 16 trades** while Friday's damage is 07:00 (−$36.74)
+>    and 13:00 (−$34.58). Also: `config.atr_min = 0.50` **never binds** (file ATR
+>    min 1.22, 0.0000 of bars below 0.50), and `backtest.py` does not model the
+>    live daily gates — replayed through them the same 255 trades net $438.48
+>    (**−$18.10**), so expect the paper book to read slightly below the ungated
+>    backtest.
+>
+> **Update (2026-10-01, branch `arena/01a0f77d-scalper`, merged as PR #12 at
+> 2026-10-01 13:16:53 UTC):**
 > followed up on PR #11 (`7635fad`, merged to `main` 2026-10-01 12:00:13 UTC
 > and verified on the server: 255 trades / PF 1.32 / +$456.58 / max DD $108.65)
 > to address three review items — full writeup in
@@ -116,10 +162,13 @@ code, parameters, or the server must update §1 (state), §3 (changelog) and
   (`108e773`, HANDOFF verification record), **PR #10 at 22:03:53 UTC**
   (stale-tick-warning HANDOFF note), and **PR #11 on 2026-10-01 12:00:13 UTC**
   (`7635fad`, RSI 40/60 + session 07-20 UTC). Gate 1 (live-path hardening) and
-  Gate 2 (backtest fix) are on `main`; `main` HEAD is `7635fad` (the PR #11
-  merge commit). Current session branch is `arena/01a0f77d-scalper` (branched
-  from `7635fad`) — this session's work (OOS validation, 1s paper-exit polling,
-  closed-bar rate caching) will be **PR #12** once opened.
+  Gate 2 (backtest fix) are on `main`. That session's work (OOS validation,
+  1s paper-exit polling, closed-bar rate caching) shipped as **PR #12**
+  (`arena/01a0f77d-scalper`, merged 2026-10-01 13:16:53 UTC, merge commit
+  `4eaf437` — confirmed via `gh pr list`). Current session branch is
+  **`arena/01a0fd8e-scalper`** (branched from `4eaf437`): the 2026-10-02 loss
+  analysis — research tooling + docs only, **no config/strategy change** — which
+  will be **PR #13** once opened.
 - **Deploy cron confirmed and working (2026-09-30):**
   `*/15 * * * * DEPLOY_BRANCH=main /root/scalper/deploy.sh` — so `main` is the
   production target. **Verified end-to-end on `scalping`:** the server is at
@@ -168,21 +217,33 @@ code, parameters, or the server must update §1 (state), §3 (changelog) and
     `*/15 * * * * DEPLOY_BRANCH=main /root/scalper/deploy.sh` → `main` is the
     production branch and hands-off deploys are expected to work.
 - **Strategy:** v7 closed-bar signals + one-shot per bar, session 07:00–20:00
-  UTC (end widened from 17:00 **2026-10-01, this session, not yet deployed**
-  — server is still 07:00–17:00), RSI 40/60 (widened from 35/65 **2026-10-01,
-  this session, not yet deployed** — server is still 35/65), ATR 2.0 SL /
-  5.0 TP. **Changed 2026-09-30 and live on the server:** `BE_TRIGGER_R` 0.75
+  UTC (end widened from 17:00 by **PR #11, merged 2026-10-01 12:01:18 UTC**),
+  RSI 40/60 (widened from 35/65 by the same PR), ATR 2.0 SL / 5.0 TP.
+  **Correction (2026-10-02):** earlier revisions of this bullet said the
+  RSI/session widening was "not yet deployed — server is still 35/65 / 07-17".
+  That is stale: `gh` confirms PR #11 merged at 12:01:18 UTC and the 15-min
+  deploy cron targets `main`, and the §5 PR #11 TODO is checked off as verified
+  on the server (255 trades / PF 1.32 / +$456.58 — the exact numbers
+  `backtest.py` reproduces from this tree, which carries RSI 40/60 and
+  `SESSION_END_HOUR_UTC = 20`). **Count the §5 "100+ paper trades" criterion
+  from the PR #11 deploy (~2026-10-01 12:15 UTC), not from a future deploy.**
+  **Changed 2026-09-30 and live on the server:** `BE_TRIGGER_R` 0.75
   → **1.5**, the indicator window is pinned to `INDICATOR_WINDOW_BARS = 1000`
   so the EMA200 is converged and the live path matches the backtester (it was
   250 live vs 202 backtest, i.e. two different indicators), plus
   `INDICATOR_FETCH_MARGIN = 50` for headroom (the server probe was returning
   exactly 1000 bars against a `>= 1000` guard). Verified active at `fc6f4fc`
-  on 2026-09-30 11:06 UTC. The RSI/session widening is local-only until this
-  session's PR merges and the cron deploys it — see the §1 banner.
+  on 2026-09-30 11:06 UTC.
+  **Re-tested 2026-10-02 and kept:** `BE_TRIGGER_R = 1.5` and the 2.0×ATR stop
+  both survive train-only selection; the in-sample sweep's better-looking
+  alternatives (BE off, SL 2.5×ATR) do not — see
+  `docs/loss_analysis_2026-10-02.md` §5. `atr_min = 0.50` **never binds** (file
+  ATR min 1.22) and is documented as dead rather than silently mis-tuned.
 - **Paper book:** inspect on server with `python paper.py`; balance $151.26 at
   11:06 UTC. **The book's config changed at 10:43:53 UTC** and the JSON carries
-  across restarts — count the "100+ paper trades" criterion from that
-  timestamp (command in §5), not from the file's start.
+  across restarts — but the config changed *again* with the PR #11 deploy
+  (~2026-10-01 12:15 UTC), so count the "100+ paper trades" criterion from
+  **there** (command in §5), not from the file's start or from 10:43:53.
 
 ## 2. Architecture
 
@@ -215,6 +276,7 @@ stale-tick thresholds (`STALE_TICK_WARN_CYCLES=20`,
 
 | Date | Change | Why |
 |---|---|---|
+| 10-02 | **Loss analysis → decision: REMAIN, no parameter change (`arena/01a0fd8e-scalper`)**: added `research/loss_analysis.py` (per-trade loss anatomy: exit-type P&L decomposition, spread-vs-edge split, streak/day clustering, live-gate replay, conditional expectancy by hour/weekday/side/month/ATR quartile, MFE-excursion and tail/concentration stats) and `research/strategy_sweep.py --candidates` (train-select → cold-OOS → regime → walk-forward re-test of BE/SL/TP/time-exit/ATR-floor/session under the *adopted* config). Written up in `docs/loss_analysis_2026-10-02.md`. **`config.py`/`strategy.py`/`run.py`/`backtest.py` untouched; still `FORWARD_TEST`.** | User asked whether to change the strategy or remain after 183 of 255 trades lost. The losses are structural: 98.7% of gross loss is full stop-outs (−$1,388.93) while the 43 BE scratches cost $18.99 in total, and spread is only $112.24 = 6% of gross profit — so neither exit management nor costs are the leak; with a 1R stop / 2.5R target the structural break-even WR is 28.6% vs 28.2% actual, i.e. a thin tail-driven edge (top-5 winners = 57% of net). Re-testing the knobs the honest way killed every "obvious fix": the two best in-sample options (BE off +$563.46, SL 2.5×ATR +$520.66) are both *worse* on TRAIN alone, time exits lose at every length, and ATR floor 4.0 / BE 2.0R are TRAIN+ but OOS−. Only `TP 6.0×ATR` clears TRAIN + cold OOS + both regimes + 4/4 walk-forward folds (251 trades, +$538.06, PF 1.38), with `TP 6.0 + ATR floor 3.0` the only config whose 95% CI excludes zero (+$580.90, PF 1.44, max DD $98.98, P(net>0)=0.980) — pre-registered for the untouched OOS pull rather than adopted, because the gain is inside a ±$570 CI, the dataset was already inspected in PR #7/#11/#12, both cost trade frequency, and a third config change in three days would reset the §5 100-trade paper clock. Also closed two §5 TODOs by measurement: `MAX_CONSECUTIVE_LOSSES=4` would cost $31.49 (N=3: $184.34), and "skip Friday after 16:00 UTC" is backwards (Friday ≥16:00 is +$51.90/16 trades; the damage is 07:00 and 13:00). |
 | 10-01 | **OOS validation, 1s paper-exit polling & closed-bar rate caching (`arena/01a0f77d-scalper`, PR #12)**: added `--oos` to `research/strategy_sweep.py` and `--bars`/`--start-pos`/`--out` to `fetch_data.py`; added `POSITION_CHECK_INTERVAL_SECONDS=1` (`config.py`), `poll_paper_position` (`run.py`), and `research/paper_exit_test.py`; cached closed-bar rates in `MT5Bridge.get_rates()` and closed-bar indicators in `ScalpStrategy.check_signal()`, verified in `research/parity_test.py`; documented in `docs/oos_and_execution_fidelity_2026-10-01.md` | Follow-up review after PR #11 flagged three gaps: (1) all tuned thresholds were evaluated on the full `GOLD_M5.csv` sample — chronological 50/50 and regime (`Jun–Jul` Bear/Range vs `Aug–Sep` Bull/Pullback) splits show train-only selection still picks `BE 1.5R, RSI 40/60, 07–20 UTC` (#1 of 60 on H1) and holds up cold on OOS (`+$170.52`, PF 1.27, `P(net>0)=0.838`; regime OOS PF 1.33, `P(net>0)=0.858`), though expectancy shrinks 37%, Q3 is flat (`+$5.81`, PF 1.02), and the 124-trade OOS CI still spans zero; (2) 15s snapshot polling in paper mode could miss fast wicks through SL/BE/TP — 1s polling while `paper.has_position()` closes that gap with 0 extra load when flat; (3) `get_rates()` was pulling 1,050 bars every 15s — caching by closed-bar timestamp cuts full RPyC fetches 20× with 0 signal/timing drift. Still `FORWARD_TEST`. |
 | 10-01 | **Trade-frequency tuning (PR #11, `7635fad`, merged & verified on server)**: `RSI_BUY_LEVEL` 35→40, `RSI_SELL_LEVEL` 65→60, `SESSION_END_HOUR_UTC` 17→20 in `config.py`; fixed a float-precision bug in `research/strategy_sweep.py`'s `_rolling_mean` (cumsum → `pandas.rolling`, see `docs/strategy_iteration_2026-10-01.md`) | User reported the bot was "hardly taking any trades" (174 trades over ~101 backtest days, one-at-a-time, 10h session). Swept RSI thresholds and the session window one variable at a time; the combination gives 255 trades (+47%), net +$456.58 (was +$52.80), PF 1.32 (was 1.06), bootstrap P(net>0)=0.96 (was 0.60 — old config's CI spanned zero), profitable every month and both halves of the data. More trades *and* a better backtested edge, not a trade-off between them. Still `FORWARD_TEST` only — no validated live edge yet. |
 | 09-30 | **Stale-tick warning check & HANDOFF update**: documented `Tick data unchanged for 20 cycles` (`STALE_TICK_WARN_CYCLES=20`, 5 min) and `Tick data frozen for 120 cycles - forcing reconnect` (`STALE_TICK_RECONNECT_CYCLES=120`, 30 min) in §1/§7; synced §2 (`BE_TRIGGER_R=1.5`, `INDICATOR_WINDOW_BARS=1000`, `INDICATOR_FETCH_MARGIN=50`) and §5 (`deploy.sh` default branch already `main`) | The warning observed around 21:00–22:00 UTC is the normal daily 1-hour XAUUSD/CME maintenance break (21:00–22:00 UTC / 05:00–06:00 Asia/KL, plus weekends Fri 21:00 → Sun 22:00 UTC). No ticks arrive during the break; the bot warns at 5 min, does a clean self-healing reconnect at 30 min, and resumes automatically at 22:00 UTC. Session filter (07:00–17:00 UTC) and closed-bar one-shot guard already block entries during that window. |
@@ -234,6 +296,35 @@ stale-tick thresholds (`STALE_TICK_WARN_CYCLES=20`,
 
 ### Daily review notes
 
+- **2026-10-02 (`arena/01a0fd8e-scalper`):** User asked to analyse the losses
+  and decide whether to change the strategy or remain. Built
+  `research/loss_analysis.py` + `research/strategy_sweep.py --candidates` on top
+  of the already-verified replay (`--verify` reproduces `backtest.py` exactly:
+  255 / +$456.58 / PF 1.32 / 72-43-140; `parity_test.py` PASS, 460 signals /
+  0 mismatches) and worked through the 183 losing trades
+  (`docs/loss_analysis_2026-10-02.md`). **Decision: remain, change nothing.**
+  The losses are the arithmetic of a 1R-stop / 2.5R-target book — 98.7% of gross
+  loss is full stop-outs, the 43 BE scratches cost $18.99 in total, spread is 6%
+  of gross profit, and the 28.2% WR sits just under the 28.6% structural
+  break-even, so the edge is a thin tail (top-5 winners = 57% of net) rather than
+  something broken. The valuable negative result: the in-sample sweeps are
+  *misleading* on this file — "remove the BE ratchet" (+$563.46) and "widen the
+  stop to 2.5×ATR" (+$520.66), the two biggest available in-sample gains, are
+  both worse than the adopted config on TRAIN alone, so tuning on the full file
+  would have adopted an OOS-half artefact. Surviving candidates (`TP 6.0×ATR`;
+  `TP 6.0 + ATR floor 3.0`; `session 08-20`) are pre-registered for the untouched
+  pre-June pull instead of being adopted now: the gain is inside a ±$570 CI, this
+  CSV has been inspected in three PRs already, both cost the trade frequency
+  PR #11 bought, and PR #11 only merged 2026-10-01 12:01:18 UTC so the paper book
+  has ~1 day of data under it — a third config change in three days would reset
+  the §5 100-trade clock for nothing. Two long-standing TODOs closed by
+  measurement: wiring `MAX_CONSECUTIVE_LOSSES=4` would cost $31.49 (streaks do
+  not predict more losses; N=3 costs $184.34), and the proposed "skip Friday
+  after 16:00 UTC" filter is backwards (Friday ≥16:00 is +$51.90 over 16 trades;
+  Friday's losses are 07:00 −$36.74 and 13:00 −$34.58). Also recorded:
+  `atr_min = 0.50` never binds (file ATR min 1.22, 0.0000 of bars below it), and
+  `backtest.py` ignores the live daily gates — replayed through them the same 255
+  trades net $438.48 (−$18.10), which is the expected paper-vs-backtest offset.
 - **2026-10-01 (follow-up, `arena/01a0f77d-scalper`):** Worked through the
   three post-PR #11 review items (`docs/oos_and_execution_fidelity_2026-10-01.md`):
   (1) **OOS validation:** added `research/strategy_sweep.py --oos` and
@@ -414,6 +505,13 @@ Note: the patched image may still carry `set -ex` tracing in
   (where the MT5 bridge is reachable — see TODO below), model slippage + swap,
   and compare backtest vs paper book trade-by-trade. Remaining untested
   candidates: Friday cutoff, tighter ATR/volatility filters, exit-time limit.
+  **2026-10-02 update (`docs/loss_analysis_2026-10-02.md`):** all three of those
+  candidates are now measured. The Friday cutoff is *backwards* (Friday ≥ 16:00 UTC
+  is +$51.90/16 trades), every exit-time limit 12–72 bars is worse on TRAIN, and
+  the ATR/volatility filter does have signal — but note `atr_min = 0.50` **never
+  binds** (file ATR min 1.22, 0.0000 of bars below 0.50), so "tightening" it means
+  moving it ~6× up to where the data actually starts (2.5–3.5), which costs
+  trade frequency. See the pre-registered-candidates TODO below.
 - [x] **Merge + deploy PR #11 RSI/session change** (`7635fad`, merged
   2026-10-01 12:00:13 UTC; `config.py`: RSI 40/60, session 07-20 UTC) —
   verified on the server: 255 trades / PF 1.32 / +$456.58 / max DD $108.65.
@@ -434,20 +532,58 @@ Note: the patched image may still carry `set -ex` tracing in
   profitable backtest over ≥6 months; only then flip
   `TRADING_MODE = "LIVE"` in `config.py` (+ restart service). Pre-agreed
   launch criteria: expectancy > 0 after spread, PF > ~1.2, max DD affordable.
-  **Count the 100+ trades from whenever the 2026-10-01 RSI 40/60 / session
-  07-20 config is deployed** (not yet — see the TODO above), since the paper
-  book's config is changing again and `logs/paper_account.json` carries
-  across restarts. Until that deploy, the old (35/65, 07-17) book is still
-  what's running, countable from 2026-09-30 10:43:53 UTC (the PR #7 deploy):
-  `grep -E 'SIM_(ENTRY|EXIT)' logs/trades.jsonl | awk -F'"' '$4 >= "2026-09-30 10:43:53"' | wc -l`
-  (divide by 2 for round trips). Balance was $151.26 at 11:06 UTC (last check
-  before this session).
+  **Count the 100+ trades from the PR #11 deploy (~2026-10-01 12:15 UTC)** —
+  `gh` confirms PR #11 merged at 2026-10-01 12:01:18 UTC and the 15-min cron
+  deploys `main`, so the 40/60 + 07-20 config is what the paper book has been
+  running since then (the older note here saying "not yet deployed" was stale).
+  `logs/paper_account.json` carries across restarts, so filter by timestamp:
+  `grep -E 'SIM_(ENTRY|EXIT)' logs/trades.jsonl | awk -F'"' '$4 >= "2026-10-01 12:15:00"' | wc -l`
+  (divide by 2 for round trips). Balance was $151.26 at 2026-09-30 11:06 UTC
+  (last check before the 2026-10-02 session; that figure still includes the old
+  35/65 config). **As of 2026-10-02 this sample is only ~1 day old — that, not
+  the backtest, is the binding constraint on any LIVE decision.**
+- [ ] **Pre-registered strategy candidates (do NOT adopt without fresh data).**
+  The 2026-10-02 loss analysis (`docs/loss_analysis_2026-10-02.md` §5,
+  `research/strategy_sweep.py --candidates`) found exactly one lever that
+  survives train-select → cold OOS → both regimes → 4/4 walk-forward folds, and
+  one combination whose 95% bootstrap CI excludes zero:
+  1. `TP` multiple 5.0 → **6.0** (251 trades, +$538.06, PF 1.38, max DD $104.49,
+     P(net>0)=0.968; repairs the weak quarters — Q3 +$45.6 vs +$5.8).
+  2. **TP 6.0 + `atr_min` 3.0** (228 trades, +$580.90, PF 1.44, max DD $98.98,
+     CI [+$25.48, +$1,145.70], P(net>0)=0.980) — note it cuts trades 255 → 228.
+  3. `SESSION_START_HOUR_UTC` 7 → **8** (08-20: TRAIN +$317.06, OOS +$223.36).
+  Re-run all three on the untouched pre-June-2026 pull **and** on post-2026-09-11
+  history; adopt only if still better there. Explicitly **rejected** (in-sample
+  gains that fail train-only selection): BE off, BE 2.0R, SL 2.5/3.0xATR, every
+  time-exit length, ATR floor 4.0, and session 09-20 (fails walk-forward Q3).
 - [ ] Live-mode verification on first LIVE run: confirm `LIVE_EXIT` events
   land in `logs/trades.jsonl` when broker-side SL/TP fill, daily stats update,
   and the loss gate actually halts entries; test the KILL_SWITCH file.
-- [ ] Wire `MAX_CONSECUTIVE_LOSSES` (defined in config.py, currently unused).
+- [x] Wire `MAX_CONSECUTIVE_LOSSES` (defined in config.py, currently unused) —
+  **measured and rejected 2026-10-02** (`research/loss_analysis.py`,
+  `docs/loss_analysis_2026-10-02.md` §3): pausing for the rest of the day after
+  N straight losses costs net **−$31.49 at N=4** (the config value), −$184.34 at
+  N=3, −$29.08 at N=5, −$21.98 at N=6. Losing streaks (58 runs, mean 3.16, max 10)
+  are *not* followed by more losses in this sample, so the pause only skips
+  trades that were net profitable. Leave the constant as documentation (or delete
+  it); do **not** wire it. Re-measure if a future dataset shows streak persistence.
+- [x] Optional next filter: skip new entries after 16:00 UTC on Friday —
+  **closed 2026-10-02, the data says the opposite**
+  (`docs/loss_analysis_2026-10-02.md` §6): Friday ≥16:00 UTC is **+$51.90 over
+  16 trades** (Fri 16:00 +$63.31, Fri 17:00 +$25.15), i.e. the profitable part of
+  the day. Friday's net −$66.17 comes from the morning/early afternoon
+  (Fri 07:00 −$36.74, Fri 13:00 −$34.58). Adopting the filter as written would
+  cut Friday's winners and keep its losers. Hour/weekday buckets are 16–32 trades
+  each — too thin to select on in any case.
 - [ ] Backtester realism: model slippage (paper fills are zero-slippage ticks),
   add swap for overnight holds, and compare backtest vs paper book trade-by-trade.
+  **Two measured gaps to fold in (2026-10-02, `docs/loss_analysis_2026-10-02.md`
+  §3):** `backtest.py` does not model the live `MAX_DAILY_LOSS` /
+  `MAX_TRADES_PER_DAY` gates — replaying the same 255 trades through them nets
+  **$438.48 instead of $456.58 (−$18.10)** and blocks 5 trades, so a paper-vs-
+  backtest comparison should expect roughly that offset before blaming the fills;
+  and spread is only **$112.24 = 6% of gross profit**, so slippage/swap modelling
+  has room to matter but costs are not the current leak.
 - [ ] Consider: GOLD symbol naming (`config.SYMBOL="GOLD"` works today on
   XMGlobal; revisit if broker changes it).
 - [ ] After more paper data: experiment with H1 trend confirmation or tighter
@@ -489,6 +625,14 @@ mt5env/bin/python research/strategy_sweep.py --oos             # chronological 5
 mt5env/bin/python research/strategy_sweep.py --sweep be
 mt5env/bin/python research/strategy_sweep.py --detail --set be_trigger_r=1.5
 mt5env/bin/python research/strategy_sweep.py --bootstrap 5000 --set be_trigger_r=1.5
+
+# loss analysis (2026-10-02): where the money actually goes, per trade
+mt5env/bin/python research/loss_analysis.py                    # exit/cost/streak/hour/ATR anatomy + gate replay
+mt5env/bin/python research/loss_analysis.py --json trades.json # + per-trade dump for ad-hoc slicing
+# candidate re-test under the ADOPTED config: select on TRAIN, read OOS cold,
+# then regime split + 4-fold walk-forward (use this, not --sweep, to decide)
+mt5env/bin/python research/strategy_sweep.py --candidates
+mt5env/bin/python research/strategy_sweep.py --detail --bootstrap 10000 --set tp_atr_mult=6.0
 
 # one-shot deploy (choose the intended production branch explicitly)
 cd /root/scalper && DEPLOY_BRANCH=main ./deploy.sh
@@ -542,8 +686,10 @@ cd /root/scalper && git fetch origin && git checkout main && git pull --ff-only 
 ## 8. Session protocol
 
 1. Day-to-day strategy work on the session Arena branch (currently
-   `arena/01a0f44f-scalper`); promote to `main` via PR, rebasing onto current
-   `main` when history diverges (squash merges).
+   `arena/01a0fd8e-scalper`; each Arena session gets its own, so verify with
+   `git branch --show-current` rather than trusting this line); promote to
+   `main` via PR, rebasing onto current `main` when history diverges (squash
+   merges).
 2. Test engine changes against the fake RPyC server pattern (venv with
    `rpyc pandas numpy`, a fake `MetaTrader5` module exposing
    `initialize/symbol_select/symbol_info_tick/copy_rates_from_pos` returning a
