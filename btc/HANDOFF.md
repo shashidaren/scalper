@@ -1,16 +1,59 @@
 # HANDOFF — Bitcoin (BTCUSD) Scalper
 
-> **Status 2026-10-03: PLUMBING BUILT AND VERIFIED LOCALLY. Nothing deployed,
-> nothing running on the server, no BTC data yet.** Gold's own regression
-> reproduces bit-for-bit after every shared-code change (§6). `TRADING_MODE` is
+> **Status 2026-10-03: plumbing is merged; BTC trading is not authorised.**
+> PR [#14](https://github.com/shashidaren/scalper/pull/14) merged into `main` as
+> `bfb1dff` at **2026-10-03 10:11:28 UTC**. The code was verified locally before
+> merge and gold's regression reproduced bit-for-bit (§6). `TRADING_MODE` remains
 > `"FORWARD_TEST"` in `btc/config.py`; every BTC parameter is an explicit
-> placeholder to be derived in Phase 1.
+> placeholder to be derived from BTC data in Phase 1.
+>
+> **Server status is deliberately unknown after the merge.** Before the merge,
+> no BTC unit had been installed or started and no BTC history had been pulled.
+> The existing `main` deploy cron makes the repository eligible to update, but
+> is not evidence that it did. Confirm the server checklist in §0 before making
+> any deployment claim or starting a BTC service.
 >
 > Read `HANDOFF.md` (gold) first: this file assumes its conventions (§8 session
 > protocol, "keep it honest", fake-bridge testing, train-select → cold-OOS).
-> Opened 2026-10-03, branch `arena/01a10125-scalper`.
 
 ---
+
+## 0. Resume protocol — start here in a later session
+
+1. **Establish the baseline; do not infer it from this file.** Work from the
+   latest `main` on the session's assigned branch. PR #14 is the integration
+   point (`bfb1dff`), but a later `main` may supersede it. On `scalping`, first
+   collect—not modify—these facts:
+
+   ```bash
+   cd /root/scalper
+   git rev-parse HEAD
+   git status --short
+   systemctl is-enabled scalper-btc-bot scalper-btc-dashboard 2>&1 || true
+   systemctl is-active scalper-btc-bot scalper-btc-dashboard 2>&1 || true
+   ss -tlnp | grep -E '8088|8089' || true
+   test -f data/BTCUSD_M5.csv && wc -l data/BTCUSD_M5.csv || true
+   ```
+
+   Record the output in the session notes before saying whether anything was
+   deployed. Do **not** install, enable, restart, or start a BTC unit merely
+   because its unit file is present in the repository.
+
+2. **Do Phase 0 first if BTC data/specs are absent.** Run the read-only commands
+   in §7, including the shared-bridge concurrency probe while observing the
+   gold bot. `btc/recon.py` never sends orders and intentionally does not call
+   `mt5.shutdown()` because gold may share the terminal session.
+
+3. **Respect the gates.** Phase 1 must establish that the strategy has an edge
+   on real XM BTCUSD data using train-select → cold-OOS; Phase 2 is paper-only;
+   a separate XM account (or an equivalent hard combined-account risk gate) is
+   required before any BTC LIVE decision. Never copy gold's parameter values.
+
+4. **Close the loop before ending a session.** Update this status block, §9,
+   and the BTC item in the root `HANDOFF.md` §5 with dated, observed evidence.
+   For any shared-code change, rerun and record the gold regressions in §6. Do
+   not write “deployed”, “running”, or “verified” without the command output
+   that establishes it.
 
 ## 1. Verdict: what carried over
 
@@ -242,7 +285,7 @@ mt5env/bin/python btc/tool.py research/loss_analysis.py
 
 | Date | Change | Why |
 |---|---|---|
-| 10-03 | **Opened as PR #14** (`arena/01a10125-scalper` → `main`, open; 3 commits, 22 files, +1533/−46). Merge side-effect documented in the gold handoff §1: the deploy cron restarts gold within 15 min, and the BTC units are not installed so nothing else runs. | User asked for the PR. |
+| 10-03 | **PR #14 merged into `main`** at 10:11:28 UTC as `bfb1dff` ([PR #14](https://github.com/shashidaren/scalper/pull/14); head `arena/01a10125-scalper`). The code is integrated; that does **not** establish post-merge server state. Before merge the BTC units were absent, and §0 now requires a server-side observation before claiming a deployment, runtime state, open port, or BTC dataset. | Integrate the separately verified BTC handoff/plumbing while keeping the next action evidence-led. |
 | 10-03 | **`btc/e2e_smoke.py` added; BTC-config pipeline dry-run clean (`arena/01a10125-scalper`)**: committed end-to-end smoke test (fake MT5 over a real RPyC `SlaveService` socket, ephemeral port, temp instance + log dir, refuses LIVE/FORWARD_TEST-violating configs, instance-generic via `--config-dir`) — passes 7/7 on the BTC instance and on the gold config dir, proving the contract-size hook per instrument (−$3.45 vs −$344.72 on the same 344.7-point stop). Fixed two harness bugs found this way (buffered prints lost at `os._exit`; the fake *tick* spread must respect the instance's `MAX_SPREAD_POINTS`, since the live gate reads the tick, not the CSV). Ran the full BTC pipeline (sweep `--verify`, `--oos`, `loss_analysis`) under the BTC config on synthetic BTC-shaped bars: tooling runs, `--verify` agrees, session filter off shows as `session=off`. Gold re-checked after the small shared-code cleanups (`loss_analysis` session-off display, "Price Δ%" header, order-comment hook): backtest, parity and paper-exit all unchanged. | Finish the plumbing verification end-to-end and prove the runbook works before real BTC data exists. |
 | 10-03 | **Phase 1 plumbing built + verified (`arena/01a10125-scalper`)**: ten backwards-compatible hooks in shared code (contract size, price digits/POINT, `LOG_DIR`, ATR floor + SL/TP multiples, indicator periods, dashboard title); `btc/config.py` (all BTC values, placeholders flagged), `btc/_instance.py`, `btc/run.py`, `btc/dashboard.py`, `btc/tool.py`; `services/scalper-btc-{bot,dashboard}.service`; `deploy.sh` multi-service restart that skips uninstalled units. Verified: gold `backtest.py` and `parity_test.py` unchanged, `btc/tool.py --check` 9/9, a gold-identical instance config reproduces gold's numbers exactly, sweep ≡ backtest under the BTC config, both shims resolve the right engine/config, template renders both titles. | User chose to build the plumbing in parallel with the server-side Phase 0 recon. |
 | 10-03 | Created this file + `btc/recon.py` (read-only Phase 0 probe; `--self-test` verified) and a pointer/record in the gold `HANDOFF.md`. | User asked whether a BTC scalper is cheaper given the gold work, and asked for a separate handoff. |
