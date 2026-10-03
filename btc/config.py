@@ -70,6 +70,31 @@ SESSION_FILTER_ENABLED = False
 SESSION_START_HOUR_UTC = 7     # inert while the filter is off; documents intent
 SESSION_END_HOUR_UTC = 20
 
+# --- entry blackout windows (24/7 instrument; gold has none) ---
+# Gold's market closes daily, which hides two costs that BTC does not hide:
+#   * swap/financing is charged at the broker's daily rollover (XM server time
+#     23:59 = 21:59 UTC in winter / 20:59 UTC in summer, server runs GMT+2/+3),
+#     with crypto's TRIPLE swap on the Friday->Saturday rollover;
+#   * XM suspends crypto for ~30 min of Saturday maintenance
+#     (10:05-10:35 GMT+2 = 08:05-08:35 UTC winter / 07:05-07:35 UTC summer).
+# Sources + what still has to be confirmed on the terminal: see
+# docs/btc_market_reference_2026-10-03.md and btc/recon.py (server-time offset,
+# actual swap values from symbol_info).
+#
+# The engine does NOT model swap P&L; this filter only stops it from OPENING a
+# scalp into a rollover/maintenance minute. Both windows are UTC
+# ({"name", "start": "HH:MM", "minutes": N, "days": [Mon=0..Sun=6]}), the
+# filter is shared code (strategy.py + the replay engine, parity-tested), and
+# it stays OFF until recon confirms the server's UTC offset — a wrong offset
+# would blank out the wrong hour.
+ENTRY_BLACKOUTS_ENABLED = False      # PLACEHOLDER: flip on after recon confirms the offset
+ENTRY_BLACKOUT_WINDOWS = [
+    # winter (server GMT+2): rollover 21:59 UTC; summer shifts to 20:59 UTC
+    {"name": "swap_rollover", "start": "21:45", "minutes": 30},
+    # Saturday crypto maintenance (winter offset)
+    {"name": "xm_maintenance", "start": "08:00", "minutes": 45, "days": [5]},
+]
+
 # PLACEHOLDER: gold's adopted levels, unvalidated on BTC. Sweep 36/64…44/56 and
 # the 30/70 baseline before adopting anything.
 RSI_BUY_LEVEL = 40

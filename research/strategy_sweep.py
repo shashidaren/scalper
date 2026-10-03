@@ -37,6 +37,7 @@ import pandas as pd
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import config  # noqa: E402
+from strategy import blackout_hit, config_blackouts  # noqa: E402
 
 # Instrument economics from config (defaults = gold: 1.00 lot = 100 oz, 2 digits).
 # A BTC instance (btc/config.py) sets CONTRACT_SIZE=1.0 so $PnL and the spread
@@ -66,6 +67,10 @@ class Params:
     session_end: int = 17
     h1_trend: bool = False
     h1_ema_period: int = 50
+    # Entry blackout windows (normalised tuples, see strategy.normalise_blackouts).
+    # Empty for gold; a 24/7 instrument can block swap-rollover / maintenance
+    # minutes here and the replay stays identical to the live path.
+    blackouts: tuple = ()
 
     # exits / risk
     sl_atr_mult: float = 2.0
@@ -99,6 +104,7 @@ def params_from_config(**overrides) -> Params:
         be_trigger_r=getattr(config, "BE_TRIGGER_R", 0.75),
         lot_size=float(getattr(config, "LOT_SIZE", 0.01)),
         spread_price=None,  # per-bar from the CSV, like backtest.py
+        blackouts=config_blackouts(),
     )
     return replace(base, **overrides)
 
@@ -196,7 +202,20 @@ def h1_trend_series(df: pd.DataFrame, p: Params) -> np.ndarray:
 # --------------------------------------------------------------------------
 # Replay
 # --------------------------------------------------------------------------
-def signal_at(p: Params, ind: dict, hours: np.ndarray, h1_up, i: int):
+def blackout_mask(times: pd.Series, blackouts) -> np.ndarray | None:
+    """Per-bar "entries blocked here" mask, or None when nothing is blocked.
+
+    Mirrors strategy.ScalpStrategy.check_signal, which evaluates the blackout
+    against the *loop* bar's timestamp (the forming bar), not the signal bar.
+    """
+    if not blackouts:
+        return None
+    return np.array([blackout_hit(blackouts, t) is not None
+                     for t in times.dt.to_pydatetime()], dtype=bool)
+
+
+def signal_at(p: Params, ind: dict, hours: np.ndarray, h1_up, i: int,
+              blocked: np.ndarray | None = None):
     """Signal decision at loop bar `i` — a direct transcription of
     ScalpStrategy.check_signal's closed-bar branch.
 
@@ -208,6 +227,8 @@ def signal_at(p: Params, ind: dict, hours: np.ndarray, h1_up, i: int):
     if si < 1:
         return None
     close, ema, rsi, atr = ind["close"], ind["ema"], ind["rsi"], ind["atr"]
+    if blocked is not None and blocked[i]:
+        return None
     in_session = (not p.session_enabled) or (p.session_start <= hours[i] < p.session_end)
     if not (in_session and close[si] > 0 and atr[si] >= p.atr_min and not np.isnan(ema[si])):
         return None
@@ -238,6 +259,7 @@ def run(csv_file: str, p: Params, df: pd.DataFrame | None = None) -> dict:
         if p.spread_price is None:  # no column and no explicit value
             p = replace(p, spread_price=float(getattr(config, "SPREAD_COST_PRICE", 0.45)))
     h1_up = h1_trend_series(df, p) if p.h1_trend else None
+    blocked = blackout_mask(df["time"], p.blackouts)
 
     balance = 1000.0
     initial = balance
@@ -251,7 +273,7 @@ def run(csv_file: str, p: Params, df: pd.DataFrame | None = None) -> dict:
     for i in range(start, n):
         # --- signal (mirrors check_signal: index -2 is the last completed bar)
         if trade is None and i >= start:
-            signal = signal_at(p, ind, hours, h1_up, i)
+            signal = signal_at(p, ind, hours, h1_up, i, blocked)
             if signal:
                 si = i - 1                  # signal bar
                 entry = close[si]
@@ -672,14 +694,21 @@ def sweep_ema(df, base):
 
 
 def sweep_honest(df, base):
-    """The table that matters: candidates re-priced with the real spread."""
+    """The table that matters: candidates re-priced with the real spread.
+
+    "Real" = the mean of the CSV's own spread column for whatever instrument is
+    loaded (gold: $0.47; BTC: whatever XM quotes), not a hard-coded gold value.
+    """
+    st = csv_spread_stats(df)
+    real = st.get("mean", st["config"])
+    optimistic = round(real * 2.0 / 3.0, 2)   # the "too good" assumption, same ratio as gold's 0.30 vs 0.47
     return _rows(df, base, [
-        ("live cfg: BE.75 sp.30", dict(be_trigger_r=0.75, spread_price=0.30)),
-        ("live cfg + real spread", dict(be_trigger_r=0.75, spread_price=0.47)),
-        ("BE 1.0R + real spread", dict(be_trigger_r=1.00, spread_price=0.47)),
-        ("BE 1.25R + real spread", dict(be_trigger_r=1.25, spread_price=0.47)),
-        ("BE 1.5R + real spread", dict(be_trigger_r=1.50, spread_price=0.47)),
-        ("BE off + real spread", dict(be_trigger_r=None, spread_price=0.47)),
+        (f"BE .75 sp {optimistic:.2f}", dict(be_trigger_r=0.75, spread_price=optimistic)),
+        (f"BE .75 + real {real:.2f}", dict(be_trigger_r=0.75, spread_price=real)),
+        ("BE 1.0R + real spread", dict(be_trigger_r=1.00, spread_price=real)),
+        ("BE 1.25R + real spread", dict(be_trigger_r=1.25, spread_price=real)),
+        ("BE 1.5R + real spread", dict(be_trigger_r=1.50, spread_price=real)),
+        ("BE off + real spread", dict(be_trigger_r=None, spread_price=real)),
     ], f"honest re-pricing (warm-up {base.warmup_bars})")
 
 
@@ -845,14 +874,35 @@ def sweep_h1(df, base):
     ], "H1 trend confirmation")
 
 
+def csv_spread_stats(df) -> dict:
+    """Round-trip spread in *price* units from the CSV's own spread column.
+
+    Instrument-agnostic (uses POINT = 10^-config.PRICE_DIGITS), so the spread
+    sweep below is no longer a list of gold literals: on BTC it prices the
+    broker's own ~500-point quote instead of gold's $0.47.
+    """
+    cfg_default = float(getattr(config, "SPREAD_COST_PRICE", 0.45))
+    if "spread" not in df.columns:
+        return {"config": cfg_default}
+    s = pd.to_numeric(df["spread"], errors="coerce").dropna() * POINT
+    if s.empty:
+        return {"config": cfg_default}
+    return {
+        "config": cfg_default,
+        "mean": float(s.mean()),
+        "median": float(s.median()),
+        "p90": float(s.quantile(0.90)),
+    }
+
+
 def sweep_spread(df, base):
-    return _rows(df, base, [
-        ("spread 0.30 (current)", dict(spread_price=0.30)),
-        ("spread 0.40", dict(spread_price=0.40)),
-        ("spread 0.47 (CSV mean)", dict(spread_price=0.47)),
-        ("spread 0.51 (CSV median)", dict(spread_price=0.51)),
-        ("spread per-bar (CSV)", dict(spread_price=None)),
-    ], "spread assumption")
+    st = csv_spread_stats(df)
+    variants = [(f"spread {st['config']:.2f} (config)", dict(spread_price=st["config"]))]
+    for key, lbl in (("mean", "CSV mean"), ("median", "CSV median"), ("p90", "CSV p90")):
+        if key in st:
+            variants.append((f"spread {st[key]:.2f} ({lbl})", dict(spread_price=st[key])))
+    variants.append(("spread per-bar (CSV)", dict(spread_price=None)))
+    return _rows(df, base, variants, "spread assumption")
 
 
 SWEEPS = {

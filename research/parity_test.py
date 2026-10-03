@@ -18,6 +18,7 @@ Exit: 0 = parity holds, 1 = mismatch (do not trust a sweep until this passes).
 import os
 import sys
 
+import numpy as np
 import pandas as pd
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -28,13 +29,26 @@ from mt5_bridge import MT5Bridge  # noqa: E402
 from strategy import ScalpStrategy  # noqa: E402
 import strategy_sweep as sweep  # noqa: E402
 
+_POINT = 10 ** -int(getattr(config, "PRICE_DIGITS", 2))
+
+
+def _tick_from_bar(bar, time_sec: int) -> "_FakeTick":
+    """Build a fake tick priced off the bar it belongs to (instrument-agnostic)."""
+    bid = float(bar["close"])
+    spread_pts = float(bar["spread"]) if "spread" in bar.dtype.names else 45.0
+    return _FakeTick(time_sec, bid, bid + spread_pts * _POINT)
+
 
 class _FakeTick:
-    def __init__(self, time_sec: int, bid: float = 4000.0, ask: float = 4000.45):
+    """Minimal tick stand-in. The price is taken from the instrument's own data
+    (see `_tick_from_bar`) rather than a hard-coded gold-ish 4000.00, so the
+    harness reads sensibly on any symbol."""
+
+    def __init__(self, time_sec: int, bid: float, ask: float | None = None):
         self.time = int(time_sec)
         self.time_msc = int(time_sec) * 1000
         self.bid = float(bid)
-        self.ask = float(ask)
+        self.ask = float(ask) if ask is not None else float(bid) + _POINT * 45
 
 
 class _FakeMT5ForRates:
@@ -105,7 +119,8 @@ def _check_bridge_cache_parity(df: pd.DataFrame, replay_all: dict,
             expected_sig = replay_all[bar_i]
 
             for cycle in range(cycles_per_bar):
-                tick = _FakeTick(forming_ts + cycle * 15) if mode == "with_tick" else None
+                tick = (_tick_from_bar(struct_rates[bar_i], forming_ts + cycle * 15)
+                        if mode == "with_tick" else None)
                 rates = bridge.get_rates(tick=tick)
                 sig, sl_d, tp_d = strat.check_signal(rates, when=bar_dt)
 
@@ -134,6 +149,89 @@ def _check_bridge_cache_parity(df: pd.DataFrame, replay_all: dict,
     print(f"bridge cache check: {n_bars} M5 bars x 20 (15s) cycles = {n_bars * 20} loops -> "
           f"{n_bars} full ({full_count}-bar) fetches (20x reduction), 0 signal/timing mismatches")
     return 0
+
+
+def _check_blackout_parity(df: pd.DataFrame, window: int, step: int = 541) -> int:
+    """Entry-blackout windows must mean the same thing live and in replay.
+
+    Gold ships with no blackouts, so this forces a synthetic pair of windows
+    (one plain, one that wraps midnight on a single weekday) onto the active
+    config and asserts that `check_signal` and `signal_at` still agree bar for
+    bar - and that the windows actually blocked something, otherwise the test
+    would pass vacuously. The config is restored afterwards.
+    """
+    import strategy as strategy_mod
+
+    windows = [
+        # 13:00-14:00 UTC sits inside gold's 07-20 session, so these really do
+        # suppress live signals instead of hiding behind the session filter.
+        {"name": "swap", "start": "13:00", "minutes": 60},
+        {"name": "maint", "start": "23:50", "minutes": 45, "days": [5]},
+    ]
+    prev_enabled = getattr(config, "ENTRY_BLACKOUTS_ENABLED", None)
+    prev_windows = getattr(config, "ENTRY_BLACKOUT_WINDOWS", None)
+    config.ENTRY_BLACKOUTS_ENABLED = True
+    config.ENTRY_BLACKOUT_WINDOWS = windows
+    try:
+        p = sweep.params_from_config(label="blackout-parity")
+        if not p.blackouts:
+            print("FAIL: blackout windows did not reach the replay params")
+            return 1
+        ind = sweep.compute_indicators(df, p)
+        hours = df["time"].dt.hour.to_numpy()
+        blocked = sweep.blackout_mask(df["time"], p.blackouts)
+        if blocked is None or not blocked.any():
+            print("FAIL: synthetic blackout windows blocked no bars")
+            return 1
+
+        replay = {i: sweep.signal_at(p, ind, hours, None, i, blocked)
+                  for i in range(window - 1, len(df))}
+        baseline = {i: sweep.signal_at(p, ind, hours, None, i, None)
+                    for i in range(window - 1, len(df))}
+        suppressed = [i for i in replay if baseline[i] and not replay[i]]
+
+        cols = [c for c in ("time", "open", "high", "low", "close", "tick_volume", "spread")
+                if c in df.columns]
+        sampled = sorted(set(i for i in replay if blocked[i])
+                         | set(suppressed)
+                         | set(range(window - 1, len(df), step)))
+        bad = []
+        for i in sampled:
+            rates = df.iloc[i - window + 1:i + 1][cols].to_dict("records")
+            live, _, _ = ScalpStrategy().check_signal(rates, when=df["time"].iloc[i])
+            if live != replay[i]:
+                bad.append((i, str(df["time"].iloc[i]), live, replay[i]))
+        if bad:
+            print(f"FAIL: {len(bad)} blackout mismatches, first few:")
+            for m in bad[:10]:
+                print("   bar %d %s: live=%s replay=%s" % m)
+            return 1
+        if not suppressed:
+            print("FAIL: blackout suppressed no signals - the check would be vacuous")
+            return 1
+        strat = ScalpStrategy()
+        hit_bar = suppressed[-1]
+        strat.check_signal(df.iloc[hit_bar - window + 1:hit_bar + 1][cols].to_dict("records"),
+                           when=df["time"].iloc[hit_bar])
+        reason = strat.last_skip_reason or ""
+        if not reason.startswith("blackout:"):
+            print(f"FAIL: blocked bar did not report a blackout skip reason (got {reason!r})")
+            return 1
+        print(f"blackout check: {int(blocked.sum())} bars blocked "
+              f"({len(suppressed)} real signals suppressed), {len(sampled)} bars compared, "
+              f"0 mismatches, skip reason {reason!r}")
+        return 0
+    finally:
+        if prev_enabled is None:
+            delattr(config, "ENTRY_BLACKOUTS_ENABLED")
+        else:
+            config.ENTRY_BLACKOUTS_ENABLED = prev_enabled
+        if prev_windows is None:
+            if hasattr(config, "ENTRY_BLACKOUT_WINDOWS"):
+                delattr(config, "ENTRY_BLACKOUT_WINDOWS")
+        else:
+            config.ENTRY_BLACKOUT_WINDOWS = prev_windows
+        _ = strategy_mod  # imported for clarity; config is read through `config`
 
 
 def main(csv_file: str | None = None, step: int = 137) -> int:
@@ -208,6 +306,9 @@ def main(csv_file: str | None = None, step: int = 137) -> int:
         return 1
 
     if _check_bridge_cache_parity(df, replay_all, window, margin) != 0:
+        return 1
+
+    if _check_blackout_parity(df, window) != 0:
         return 1
 
     print("PASS: live check_signal and sweep replay agree on every sampled bar")
