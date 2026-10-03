@@ -83,22 +83,29 @@ class ScalpStrategy:
         else:
             df = pd.DataFrame(rates)
 
-            # 1. Trend Filter: 200 EMA
-            df['ema200'] = df['close'].ewm(span=200, adjust=False).mean()
+            # Indicator periods come from config so a second symbol instance
+            # (btc/config.py) can run different ones; defaults are the original
+            # literals (200/14/14), so gold is unchanged.
+            ema_period = int(getattr(config, "EMA_PERIOD", 200))
+            rsi_period = int(getattr(config, "RSI_PERIOD", 14))
+            atr_period = int(getattr(config, "ATR_PERIOD", 14))
 
-            # 2. RSI (14)
+            # 1. Trend Filter: EMA (200 by default)
+            df['ema200'] = df['close'].ewm(span=ema_period, adjust=False).mean()
+
+            # 2. RSI
             delta = df['close'].diff()
-            gain = (delta.where(delta > 0, 0)).rolling(window=14).mean()
-            loss = (-delta.where(delta < 0, 0)).rolling(window=14).mean()
+            gain = (delta.where(delta > 0, 0)).rolling(window=rsi_period).mean()
+            loss = (-delta.where(delta < 0, 0)).rolling(window=rsi_period).mean()
             rs = gain / loss
             df['rsi'] = 100 - (100 / (1 + rs))
 
-            # 3. ATR (14) Volatility
+            # 3. ATR Volatility
             high_low = df['high'] - df['low']
             high_cp = (df['high'] - df['close'].shift()).abs()
             low_cp = (df['low'] - df['close'].shift()).abs()
             tr = pd.concat([high_low, high_cp, low_cp], axis=1).max(axis=1)
-            df['atr'] = tr.rolling(14).mean()
+            df['atr'] = tr.rolling(atr_period).mean()
 
             current_close = df['close'].iloc[idx]
             current_ema = df['ema200'].iloc[idx]
@@ -120,14 +127,17 @@ class ScalpStrategy:
                     current_close, current_ema, current_atr, rsi_curr, rsi_prev
                 )
 
-        # Minimum volatility filter ($0.50)
-        if current_atr < 0.50:
-            self.last_skip_reason = f"atr_low:{current_atr:.2f}<0.50"
+        # Minimum volatility filter (price units; gold 0.50, BTC sets its own)
+        atr_min = float(getattr(config, "ATR_MIN", 0.50))
+        if current_atr < atr_min:
+            self.last_skip_reason = f"atr_low:{current_atr:.2f}<{atr_min:g}"
             return None, 0, 0
 
-        # Dynamic SL & TP based on market volatility (still ~1:2.5 RR)
-        sl_dist = current_atr * 2.0
-        tp_dist = current_atr * 5.0
+        # Dynamic SL & TP based on market volatility (gold: 2.0 -> 5.0 ATR,
+        # i.e. ~1:2.5 RR; both multiples are config keys so a BTC instance can
+        # carry its own geometry without touching the engine)
+        sl_dist = current_atr * float(getattr(config, "SL_ATR_MULT", 2.0))
+        tp_dist = current_atr * float(getattr(config, "TP_ATR_MULT", 5.0))
 
         buy_level = getattr(config, "RSI_BUY_LEVEL", 35)
         sell_level = getattr(config, "RSI_SELL_LEVEL", 65)

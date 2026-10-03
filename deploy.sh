@@ -10,7 +10,10 @@ set -euo pipefail
 REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 BRANCH="${DEPLOY_BRANCH:-main}"
 REMOTE="${DEPLOY_REMOTE:-origin}"
-SERVICE="${DEPLOY_SERVICE:-scalper-bot}"
+# One or more services, space separated. DEPLOY_SERVICE (singular) still works
+# for back-compat with the existing cron; by default we restart the gold bot
+# and - only if its unit is actually installed - the BTC bot as well.
+SERVICES="${DEPLOY_SERVICES:-${DEPLOY_SERVICE:-scalper-bot scalper-btc-bot}}"
 LOG_DIR="${REPO_DIR}/logs"
 mkdir -p "$LOG_DIR"
 
@@ -32,10 +35,17 @@ TS="$(date -Is)"
 
 if [ "$BEFORE" != "$AFTER" ]; then
   if command -v systemctl >/dev/null 2>&1; then
-    systemctl restart "$SERVICE"
-    echo "$TS restarted ${SERVICE} at ${AFTER} (was ${BEFORE}) branch=${BRANCH}" | tee -a "${LOG_DIR}/deploy.log"
+    RESTARTED=""
+    for svc in $SERVICES; do
+      if systemctl cat "$svc" >/dev/null 2>&1; then
+        systemctl restart "$svc" && RESTARTED="${RESTARTED}${RESTARTED:+ }${svc}"
+      else
+        echo "$TS note: unit ${svc} not installed - skipped" >> "${LOG_DIR}/deploy.log"
+      fi
+    done
+    echo "$TS restarted ${RESTARTED:-<none>} at ${AFTER} (was ${BEFORE}) branch=${BRANCH}" | tee -a "${LOG_DIR}/deploy.log"
   else
-    echo "$TS code updated to ${AFTER} but systemctl not found; restart ${SERVICE} manually" | tee -a "${LOG_DIR}/deploy.log"
+    echo "$TS code updated to ${AFTER} but systemctl not found; restart ${SERVICES} manually" | tee -a "${LOG_DIR}/deploy.log"
   fi
 else
   echo "$TS already up to date (${AFTER}) branch=${BRANCH}" >> "${LOG_DIR}/deploy.log"

@@ -2,11 +2,18 @@ import json
 from datetime import datetime, date
 from pathlib import Path
 
+import config
+
 # Anchor logs to the repository directory (not the process CWD) so logs are
 # always in <repo>/logs no matter where the bot is started from.
+#
+# A second symbol instance (see btc/config.py) points config.LOG_DIR at its own
+# directory so the two bots never share trades.jsonl / daily_stats.json /
+# paper_account.json / KILL_SWITCH. Absent that key, gold resolves to exactly
+# the same <repo>/logs as before.
 BASE_DIR = Path(__file__).resolve().parent
-LOG_DIR = BASE_DIR / "logs"
-LOG_DIR.mkdir(exist_ok=True)
+LOG_DIR = Path(getattr(config, "LOG_DIR", BASE_DIR / "logs"))
+LOG_DIR.mkdir(parents=True, exist_ok=True)
 
 TRADES_FILE = LOG_DIR / "trades.jsonl"
 SYSTEM_FILE = LOG_DIR / "system.jsonl"

@@ -19,8 +19,11 @@ from logger import LOG_DIR, log_trade, update_daily_pnl
 
 STATE_FILE = LOG_DIR / "paper_account.json"
 
-# XAU/USD contract: 1.00 lot = 100 oz, so profit = price_diff * volume * 100
-CONTRACT_SIZE = 100.0
+# Contract economics come from config so a second instance (btc/config.py) can
+# use its own instrument: XAU/USD is 1.00 lot = 100 oz (price_diff * vol * 100);
+# BTCUSD is 1.00 lot = 1 BTC (price_diff * vol * 1). Defaults preserve gold.
+CONTRACT_SIZE = float(getattr(config, "CONTRACT_SIZE", 100.0))
+PRICE_DIGITS = int(getattr(config, "PRICE_DIGITS", 2))
 
 
 class PaperAccount:
@@ -76,9 +79,9 @@ class PaperAccount:
         sl_dist = float(sl_dist)
         tp_dist = float(tp_dist)
         if side == "BUY":
-            sl, tp = round(price - sl_dist, 2), round(price + tp_dist, 2)
+            sl, tp = round(price - sl_dist, PRICE_DIGITS), round(price + tp_dist, PRICE_DIGITS)
         else:
-            sl, tp = round(price + sl_dist, 2), round(price - tp_dist, 2)
+            sl, tp = round(price + sl_dist, PRICE_DIGITS), round(price - tp_dist, PRICE_DIGITS)
         self.position = {
             "side": side,
             "entry": float(price),

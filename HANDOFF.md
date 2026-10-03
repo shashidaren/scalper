@@ -8,26 +8,37 @@ code, parameters, or the server must update §1 (state), §3 (changelog) and
 
 ## 1. Where things stand (as of 2026-10-03)
 
-> **Update (2026-10-03, branch `arena/01a10125-scalper`): PLANNING ONLY — no
-> gold code, config, parameter or server change of any kind.** The user asked
-> whether a **BTCUSD scalper** can reuse this stack, in a separate subfolder
-> with its own dashboard port on the same server, and asked for a separate
-> handoff. Both exist now: **`btc/HANDOFF.md`** (the BTC scalper handoff —
-> status, reusability audit, architecture, phased plan with decision gates,
-> risks) and **`btc/recon.py`** (read-only Phase 0 probe: contract spec,
-> spread-vs-ATR economics, 24/7 coverage check, writes
-> `data/BTCUSD_M5.csv`; it deliberately does not call `mt5.shutdown()` because
-> the gold bot shares the terminal session). Verdict: the **infrastructure**
-> (MT5 container + bridge, engine loop, ledger, paper book, backtest/sweep/
-> parity/loss tooling, deploy + systemd pattern) is ~70% reusable verbatim;
-> gold's **parameter values** are 0% reusable and must be re-derived on BTC
-> data — and ten gold assumptions hard-coded in shared files (contract size
-> 100 oz in `paper.py`/`backtest.py`, `LOG_DIR` anchored to the repo, the ATR
-> floor and 2.0/5.0×ATR multiples inside `strategy.py`, `MAX_SPREAD_POINTS=80`,
-> the risk-gate calibration, …) would silently break a BTC instance; they are
-> catalogued with file evidence in `btc/HANDOFF.md` §4. Gold's own regression
-> (255 trades / +$456.58 / PF 1.32 / max DD $108.65) was re-verified in the
-> Arena sandbox on 2026-10-03 and is the gate for any future shared-file hook.
+> **Update (2026-10-03, branch `arena/01a10125-scalper`): BTC scalper plumbing
+> built — gold's behaviour is PROVEN unchanged, and nothing was deployed or run
+> on the server.** The user asked whether a **BTCUSD scalper** can reuse this
+> stack, in a separate subfolder with its own dashboard port, and asked for a
+> separate handoff: **`btc/HANDOFF.md`** is that handoff (verdict, architecture,
+> phase plan with decision gates, risks, Phase 0 commands), with
+> **`btc/recon.py`** as the read-only Phase 0 probe (contract spec,
+> spread-vs-ATR economics, 24/7 coverage; no orders and deliberately **no**
+> `mt5.shutdown()`, because the gold bot shares the terminal session).
+> Verdict: the **infrastructure** (MT5 container + bridge, engine loop, ledger,
+> paper book, backtest/sweep/parity/loss tooling, deploy + systemd pattern) is
+> ~70% reusable verbatim; gold's **parameter values** are 0% reusable and must
+> be re-derived on BTC data.
+>
+> **What changed in shared gold code:** ten gold values that were hard-coded in
+> the engine are now config keys — `CONTRACT_SIZE=100.0`, `PRICE_DIGITS=2`,
+> `ATR_MIN=0.50`, `SL_ATR_MULT=2.0`, `TP_ATR_MULT=5.0`, `EMA_PERIOD=200`,
+> `RSI_PERIOD=14`, `ATR_PERIOD=14` (new, in `config.py`), plus `config.LOG_DIR`
+> and `config.DASHBOARD_TITLE` read via `getattr` with the old paths/names as
+> fallbacks (`logger.py`, `dashboard.py`). **Every value equals the literal it
+> replaced**; `strategy.py`'s skip reason now formats the floor as
+> `atr_low:x.xx<0.5` instead of `<0.50` (string only — nothing parses it).
+> Verified after all hooks were in place: **`backtest.py` = 255 trades /
+> +$456.58 / PF 1.32 / max DD $108.65 / WR 28.2% / 72 TP · 43 BE · 140 SL**
+> (identical) and **`research/parity_test.py` = PASS, 460 signals, 0
+> mismatches**, plus an instance-regression where a gold-valued config with a
+> diverted `LOG_DIR` reproduces the same 255/+$456.58 through the hooked engine.
+> New BTC-side code (`btc/config.py`, `_instance.py`, `run.py`, `dashboard.py`,
+> `tool.py`, two systemd units, `deploy.sh` multi-service restart) is inert for
+> gold. `TRADING_MODE` stays `"FORWARD_TEST"`; `btc/HANDOFF.md` §4 tracks the
+> ten hooks and §6 records the evidence.
 >
 > **Update (2026-10-02, this session, branch `arena/01a0fd8e-scalper`):** loss
 > analysis of the adopted config — **decision: REMAIN, no parameter change** —
@@ -297,7 +308,7 @@ stale-tick thresholds (`STALE_TICK_WARN_CYCLES=20`,
 
 | Date | Change | Why |
 |---|---|---|
-| 10-03 | **BTC scalper planning (`arena/01a10125-scalper`) — no gold code touched**: added `btc/HANDOFF.md` (reusability audit, instance-dir architecture for a second bot + dashboard port 8089 on the same server, list of ten gold assumptions hard-coded in shared files that would break BTC, phased plan with decision gates, risk list) and `btc/recon.py` (read-only Phase 0 probe: symbol/contract spec, spread-vs-ATR economics, weekday/hour coverage, writes `data/BTCUSD_M5.csv`; no orders, no `mt5.shutdown()` so the running gold bot is undisturbed; `--self-test` covers the maths offline). Gold's regression was re-verified locally (255 / +$456.58 / PF 1.32 / 72-43-140 / max DD $108.65) as the safety gate for any future shared-file hook. | User asked whether a bitcoin scalper is cheaper to set up on the back of this work and asked for a separate handoff for it. |
+| 10-03 | **BTC scalper: separate handoff + Phase 1 plumbing (`arena/01a10125-scalper`)**: added `btc/HANDOFF.md` (reusability audit, instance-dir architecture, phased plan with gates, risks, server commands) and `btc/recon.py` (read-only Phase 0 probe: contract spec, spread-vs-ATR economics, weekday/hour coverage, writes `data/BTCUSD_M5.csv`; no orders and no `mt5.shutdown()` so the running gold bot is undisturbed; `--self-test` verified). Then the plumbing: ten hard-coded gold values became config keys with default-equal values (`CONTRACT_SIZE`, `PRICE_DIGITS`/POINT, `ATR_MIN`, `SL_ATR_MULT`, `TP_ATR_MULT`, `EMA_PERIOD`, `RSI_PERIOD`, `ATR_PERIOD`, plus `getattr`-style `LOG_DIR` and `DASHBOARD_TITLE`), and the BTC instance landed (`btc/config.py`, `_instance.py`, `run.py`, `dashboard.py` on :8089, `tool.py`, two systemd units, multi-service `deploy.sh`). **Proof it did not move gold: `backtest.py` still 255 / +$456.58 / PF 1.32 / max DD $108.65 / 72-43-140, `parity_test.py` PASS (460 signals, 0 mismatches), `btc/tool.py --check` 9/9, and a gold-valued instance config with a diverted `LOG_DIR` reproduces the same 255/+$456.58 through the hooked engine.** Nothing deployed; `btc/config.py` is all flagged placeholders and stays `FORWARD_TEST`. | User asked whether a bitcoin scalper is cheaper to set up on the back of this work, wanted it in a subfolder with its own port, and asked for a separate handoff. |
 | 10-02 | **Loss analysis → decision: REMAIN, no parameter change (`arena/01a0fd8e-scalper`)**: added `research/loss_analysis.py` (per-trade loss anatomy: exit-type P&L decomposition, spread-vs-edge split, streak/day clustering, live-gate replay, conditional expectancy by hour/weekday/side/month/ATR quartile, MFE-excursion and tail/concentration stats) and `research/strategy_sweep.py --candidates` (train-select → cold-OOS → regime → walk-forward re-test of BE/SL/TP/time-exit/ATR-floor/session under the *adopted* config). Written up in `docs/loss_analysis_2026-10-02.md`. **`config.py`/`strategy.py`/`run.py`/`backtest.py` untouched; still `FORWARD_TEST`.** | User asked whether to change the strategy or remain after 183 of 255 trades lost. The losses are structural: 98.7% of gross loss is full stop-outs (−$1,388.93) while the 43 BE scratches cost $18.99 in total, and spread is only $112.24 = 6% of gross profit — so neither exit management nor costs are the leak; with a 1R stop / 2.5R target the structural break-even WR is 28.6% vs 28.2% actual, i.e. a thin tail-driven edge (top-5 winners = 57% of net). Re-testing the knobs the honest way killed every "obvious fix": the two best in-sample options (BE off +$563.46, SL 2.5×ATR +$520.66) are both *worse* on TRAIN alone, time exits lose at every length, and ATR floor 4.0 / BE 2.0R are TRAIN+ but OOS−. Only `TP 6.0×ATR` clears TRAIN + cold OOS + both regimes + 4/4 walk-forward folds (251 trades, +$538.06, PF 1.38), with `TP 6.0 + ATR floor 3.0` the only config whose 95% CI excludes zero (+$580.90, PF 1.44, max DD $98.98, P(net>0)=0.980) — pre-registered for the untouched OOS pull rather than adopted, because the gain is inside a ±$570 CI, the dataset was already inspected in PR #7/#11/#12, both cost trade frequency, and a third config change in three days would reset the §5 100-trade paper clock. Also closed two §5 TODOs by measurement: `MAX_CONSECUTIVE_LOSSES=4` would cost $31.49 (N=3: $184.34), and "skip Friday after 16:00 UTC" is backwards (Friday ≥16:00 is +$51.90/16 trades; the damage is 07:00 and 13:00). |
 | 10-01 | **OOS validation, 1s paper-exit polling & closed-bar rate caching (`arena/01a0f77d-scalper`, PR #12)**: added `--oos` to `research/strategy_sweep.py` and `--bars`/`--start-pos`/`--out` to `fetch_data.py`; added `POSITION_CHECK_INTERVAL_SECONDS=1` (`config.py`), `poll_paper_position` (`run.py`), and `research/paper_exit_test.py`; cached closed-bar rates in `MT5Bridge.get_rates()` and closed-bar indicators in `ScalpStrategy.check_signal()`, verified in `research/parity_test.py`; documented in `docs/oos_and_execution_fidelity_2026-10-01.md` | Follow-up review after PR #11 flagged three gaps: (1) all tuned thresholds were evaluated on the full `GOLD_M5.csv` sample — chronological 50/50 and regime (`Jun–Jul` Bear/Range vs `Aug–Sep` Bull/Pullback) splits show train-only selection still picks `BE 1.5R, RSI 40/60, 07–20 UTC` (#1 of 60 on H1) and holds up cold on OOS (`+$170.52`, PF 1.27, `P(net>0)=0.838`; regime OOS PF 1.33, `P(net>0)=0.858`), though expectancy shrinks 37%, Q3 is flat (`+$5.81`, PF 1.02), and the 124-trade OOS CI still spans zero; (2) 15s snapshot polling in paper mode could miss fast wicks through SL/BE/TP — 1s polling while `paper.has_position()` closes that gap with 0 extra load when flat; (3) `get_rates()` was pulling 1,050 bars every 15s — caching by closed-bar timestamp cuts full RPyC fetches 20× with 0 signal/timing drift. Still `FORWARD_TEST`. |
 | 10-01 | **Trade-frequency tuning (PR #11, `7635fad`, merged & verified on server)**: `RSI_BUY_LEVEL` 35→40, `RSI_SELL_LEVEL` 65→60, `SESSION_END_HOUR_UTC` 17→20 in `config.py`; fixed a float-precision bug in `research/strategy_sweep.py`'s `_rolling_mean` (cumsum → `pandas.rolling`, see `docs/strategy_iteration_2026-10-01.md`) | User reported the bot was "hardly taking any trades" (174 trades over ~101 backtest days, one-at-a-time, 10h session). Swept RSI thresholds and the session window one variable at a time; the combination gives 255 trades (+47%), net +$456.58 (was +$52.80), PF 1.32 (was 1.06), bootstrap P(net>0)=0.96 (was 0.60 — old config's CI spanned zero), profitable every month and both halves of the data. More trades *and* a better backtested edge, not a trade-off between them. Still `FORWARD_TEST` only — no validated live edge yet. |
@@ -611,14 +622,17 @@ Note: the patched image may still carry `set -ex` tracing in
 - [ ] After more paper data: experiment with H1 trend confirmation or tighter
   session window (e.g. 08–16 UTC only).
 - [ ] Optional next filter: skip new entries after 16:00 UTC on Friday (thin gold).
-- [ ] **BTCUSD scalper (separate handoff: `btc/HANDOFF.md`).** Planning only as
-  of 2026-10-03 — nothing built, nothing deployed, no config change. Next
-  concrete step is Phase 0 on the server (`mt5env/bin/python btc/recon.py
-  --bars 20000`, plus the 8089-port and shared-bridge concurrency checks in
-  `btc/HANDOFF.md` §7), then the Phase 1 gate: does the strategy shape have any
-  edge on BTC at all (train-select → cold OOS) before any service is written.
-  Do not copy gold parameters; `btc/HANDOFF.md` §4 lists what must be
-  re-derived and §6 lists the gold-safety rules.
+- [ ] **BTCUSD scalper (separate handoff: `btc/HANDOFF.md`).** Plumbing is
+  built and locally verified as of 2026-10-03 (gold proved unchanged — see the
+  §1 banner and §3); **nothing is deployed and no BTC data exists yet.**
+  Next concrete step is Phase 0 on the server (`mt5env/bin/python btc/recon.py
+  --bars 20000`, `btc/tool.py --check`, the 8089-port check and the
+  shared-bridge concurrency probe in `btc/HANDOFF.md` §7), then the Phase 1
+  gate: does the strategy shape have any edge on BTC at all (train-select →
+  cold OOS) before the units are installed. Do not copy gold parameters —
+  `btc/config.py` flags every placeholder and `btc/HANDOFF.md` §4 lists the ten
+  hooks, §6 the gold-safety evidence, §8 the risks (own XM account required
+  before any LIVE flip).
 
 ## 6. Runbook (common commands, on the server)
 

@@ -45,6 +45,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import config  # noqa: E402
 from research.strategy_sweep import (  # noqa: E402
     CONTRACT_SIZE,
+    POINT,
     compute_indicators,
     params_from_config,
     run,
@@ -65,7 +66,7 @@ def build_trades(csv_file: str, df: pd.DataFrame | None = None, p=None):
 
     spread_col = None
     if "spread" in df.columns:
-        spread_col = np.nan_to_num(df["spread"].to_numpy(float) * 0.01,
+        spread_col = np.nan_to_num(df["spread"].to_numpy(float) * POINT,
                                    nan=float(getattr(config, "SPREAD_COST_PRICE", 0.45)))
 
     out = []
