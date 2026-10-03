@@ -11,9 +11,10 @@ REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 BRANCH="${DEPLOY_BRANCH:-main}"
 REMOTE="${DEPLOY_REMOTE:-origin}"
 # One or more services, space separated. DEPLOY_SERVICE (singular) still works
-# for back-compat with the existing cron; by default we restart the gold bot
-# and - only if its unit is actually installed - the BTC bot as well.
-SERVICES="${DEPLOY_SERVICES:-${DEPLOY_SERVICE:-scalper-bot scalper-btc-bot}}"
+# for back-compat with the existing cron. Default to gold only: `systemctl
+# restart` starts a disabled-but-installed unit, so BTC must be an explicit
+# opt-in after its Phase 1 gate and paper-deployment authorization.
+SERVICES="${DEPLOY_SERVICES:-${DEPLOY_SERVICE:-scalper-bot}}"
 LOG_DIR="${REPO_DIR}/logs"
 mkdir -p "$LOG_DIR"
 
