@@ -33,14 +33,18 @@ def run_backtest(csv_file):
     active_trade = None
     trades_history = []
 
-    # Prefer the data's own spread column (points, 2-digit gold -> *0.01) over a
-    # constant guess; it is the realistic per-bar cost. Fall back to
-    # config.SPREAD_COST_PRICE when the column is missing.
+    # Prefer the data's own spread column (points -> price via the instrument's
+    # quoted digits: 2-digit gold/BTC -> *0.01) over a constant guess; it is the
+    # realistic per-bar cost. Fall back to config.SPREAD_COST_PRICE when the
+    # column is missing.
+    digits = int(getattr(config, "PRICE_DIGITS", 2))
+    point = 10.0 ** -digits
+    contract_size = float(getattr(config, "CONTRACT_SIZE", 100.0))
     use_data_spread = "spread" in df.columns and df["spread"].notna().any()
     fallback_spread = float(getattr(config, "SPREAD_COST_PRICE", 0.30))
     if use_data_spread:
         print(f"Using per-bar spread from the data (mean "
-              f"{df['spread'].mean() * 0.01:.3f} price units).")
+              f"{df['spread'].mean() * point:.3f} price units, {digits} digits).")
     else:
         print(f"No spread column; using config.SPREAD_COST_PRICE={fallback_spread:.2f}.")
 
@@ -55,7 +59,7 @@ def run_backtest(csv_file):
         bar_time = _parse_bar_time(current_bar.get("time"))
         if use_data_spread:
             raw_spread = current_bar.get("spread")
-            spread_cost = (float(raw_spread) * 0.01
+            spread_cost = (float(raw_spread) * point
                            if raw_spread == raw_spread else fallback_spread)  # NaN-safe
         else:
             spread_cost = fallback_spread
@@ -131,7 +135,7 @@ def run_backtest(csv_file):
                     result = "TP"
 
             if closed:
-                dollar_pnl = pnl * (config.LOT_SIZE * 100)
+                dollar_pnl = pnl * (config.LOT_SIZE * contract_size)
                 balance += dollar_pnl
                 peak = max(peak, balance)
                 dd = peak - balance

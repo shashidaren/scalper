@@ -343,7 +343,9 @@ class MT5Bridge:
                 "tp": float(tp),
                 "deviation": 20,
                 "magic": config.MAGIC_NUMBER,
-                "comment": "Gold Scalper v7",
+                # Shows up in the MT5 terminal / broker statement, so a second
+                # instance can label its own orders (btc/config.py sets it).
+                "comment": getattr(config, "ORDER_COMMENT", "Gold Scalper v7"),
                 "type_time": self.mt5.ORDER_TIME_GTC,
                 "type_filling": self._filling_mode(sym_info),
             }

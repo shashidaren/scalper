@@ -1,0 +1,23 @@
+[Unit]
+Description=Bitcoin Scalper (BTCUSD) Live Trading Bot - FORWARD_TEST/paper
+After=network-online.target docker.service
+Wants=network-online.target docker.service
+
+[Service]
+Type=simple
+User=root
+# WorkingDirectory + the script path both put btc/ first on sys.path, so the
+# engine resolves btc/config.py. btc/run.py also pre-registers it in sys.modules
+# (see btc/_instance.py) so path order can never mix the two instances.
+WorkingDirectory=/root/scalper/btc
+Environment=PATH=/root/scalper/mt5env/bin:/usr/local/bin:/usr/bin:/bin
+# Same shared MT5 container/bridge as the gold bot (localhost:18812).
+ExecStartPre=/root/scalper/mt5env/bin/python /root/scalper/wait_for_mt5.py --timeout 180
+ExecStart=/root/scalper/mt5env/bin/python -u /root/scalper/btc/run.py
+Restart=always
+RestartSec=10
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

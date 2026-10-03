@@ -1,0 +1,17 @@
+[Unit]
+Description=Bitcoin Scalper Web Dashboard (port 8089, reads btc/logs only)
+After=network.target
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/root/scalper/btc
+Environment=PATH=/root/scalper/mt5env/bin:/usr/local/bin:/usr/bin:/bin
+ExecStart=/root/scalper/mt5env/bin/python -u /root/scalper/btc/dashboard.py
+Restart=always
+RestartSec=5
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

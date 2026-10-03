@@ -1,8 +1,10 @@
 #!/usr/bin/env python3
 """
-Dashboard for Gold Scalper.
-Reads ONLY from status/log files written by the bot.
-Never opens its own MT5 / RPyC connection.
+Dashboard for the Scalper bot.
+
+Reads ONLY from status/log files written by the bot (via logger.LOG_DIR, so a
+second instance such as btc/ shows its own book). Never opens its own MT5 /
+RPyC connection.
 """
 
 import json
@@ -15,14 +17,19 @@ from fastapi.responses import HTMLResponse
 from fastapi.templating import Jinja2Templates
 
 import config
-from logger import get_connection_status, get_live_status, get_today_stats
+from logger import (
+    LOG_DIR, get_connection_status, get_live_status, get_today_stats,
+)
 
 BASE_DIR = Path(__file__).parent
-LOG_DIR = BASE_DIR / "logs"
 TRADES_FILE = LOG_DIR / "trades.jsonl"
 SYSTEM_FILE = LOG_DIR / "system.jsonl"
 
-app = FastAPI(title="Gold Scalper Dashboard", version="1.3")
+# Title is config-driven so a second instance (btc/dashboard.py) is branded
+# correctly; gold falls back to the original name.
+DASHBOARD_TITLE = getattr(config, "DASHBOARD_TITLE", "Gold Scalper Dashboard")
+
+app = FastAPI(title=DASHBOARD_TITLE, version="1.4")
 templates = Jinja2Templates(directory=str(BASE_DIR / "templates"))
 
 
@@ -78,6 +85,7 @@ async def index(request: Request):
                     "max_daily_loss": getattr(config, "MAX_DAILY_LOSS", 30),
                     "max_trades": getattr(config, "MAX_TRADES_PER_DAY", 15),
                 },
+                "title": DASHBOARD_TITLE,
                 "now": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
             }
         )

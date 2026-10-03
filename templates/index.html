@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Gold Scalper Dashboard</title>
+  <title>{{ title }}</title>
   <meta http-equiv="refresh" content="15" />
   <style>
     :root {
@@ -102,7 +102,7 @@
   </style>
 </head>
 <body>
-  <h1>Gold Scalper Dashboard</h1>
+  <h1>{{ title }}</h1>
   <p class="subtitle">Last refresh: {{ now }} &nbsp;•&nbsp; Auto-refresh every 15s</p>
 
   <!-- Top metrics -->
@@ -266,7 +266,7 @@
   </div>
 
   <footer>
-    Gold Scalper Dashboard &nbsp;•&nbsp; Auto-refresh 15s &nbsp;•&nbsp; <a href="/api/status" style="color:var(--blue)">JSON API</a>
+    {{ title }} &nbsp;•&nbsp; Auto-refresh 15s &nbsp;•&nbsp; <a href="/api/status" style="color:var(--blue)">JSON API</a>
   </footer>
 </body>
 </html>

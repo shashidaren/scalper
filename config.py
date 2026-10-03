@@ -79,6 +79,33 @@ RSI_SELL_LEVEL = 60
 # re-fire the same RSI cross after a quick scratch/BE exit.
 SIGNAL_ON_CLOSED_BAR = True
 
+# --- Indicator periods & ATR risk geometry ---
+# These used to be literals inside strategy.py (200 / 14 / 14, ATR floor 0.50,
+# SL 2.0xATR, TP 5.0xATR). They are config keys now so a second symbol instance
+# (see btc/config.py) can carry its own values without forking the engine.
+# The values here are exactly the old literals: gold behaves identically.
+# Consumers: strategy.check_signal, research/strategy_sweep.py
+# (params_from_config), research/parity_test.py (parity guard).
+EMA_PERIOD = 200
+RSI_PERIOD = 14
+ATR_PERIOD = 14
+
+# Minimum ATR to trade at all. NOTE: 0.50 never binds on the current gold data
+# (file ATR min ~1.22 — see docs/loss_analysis_2026-10-02.md §4), so for gold
+# this is documentation, not a live filter; keep it explicit rather than
+# silently mis-tuning it.
+ATR_MIN = 0.50
+
+# Exit geometry in ATR multiples (backtest and live read the same keys).
+SL_ATR_MULT = 2.0
+TP_ATR_MULT = 5.0
+
+# --- Instrument economics (symbol-agnostic engine) ---
+# XAU/USD on XM Standard: 1.00 lot = 100 oz, so $PnL = price_diff * lots * 100.
+# A BTC instance overrides both of these (1 lot = 1 BTC, same 2 digits).
+CONTRACT_SIZE = 100.0
+PRICE_DIGITS = 2      # quoted decimals; spread points -> price = 10^-digits
+
 # --- Indicator window (single source of truth) ---
 # How many M5 bars the signal window must contain. The 200-EMA only has
 # (window - 1) bars of recursion, and with adjust=False the seed keeps weight

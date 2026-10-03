@@ -38,7 +38,12 @@ import pandas as pd
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import config  # noqa: E402
 
-CONTRACT_SIZE = 100.0  # XAU/USD: 1.00 lot = 100 oz
+# Instrument economics from config (defaults = gold: 1.00 lot = 100 oz, 2 digits).
+# A BTC instance (btc/config.py) sets CONTRACT_SIZE=1.0 so $PnL and the spread
+# conversion stay correct on a different instrument.
+CONTRACT_SIZE = float(getattr(config, "CONTRACT_SIZE", 100.0))
+PRICE_DIGITS = int(getattr(config, "PRICE_DIGITS", 2))
+POINT = 10.0 ** -PRICE_DIGITS
 
 
 # --------------------------------------------------------------------------
@@ -80,11 +85,17 @@ def params_from_config(**overrides) -> Params:
     """Defaults mirroring config.py, then apply overrides."""
     base = Params(
         warmup_bars=int(getattr(config, "INDICATOR_WINDOW_BARS", 202)),
+        ema_period=int(getattr(config, "EMA_PERIOD", 200)),
+        rsi_period=int(getattr(config, "RSI_PERIOD", 14)),
+        atr_period=int(getattr(config, "ATR_PERIOD", 14)),
         rsi_buy=float(getattr(config, "RSI_BUY_LEVEL", 35)),
         rsi_sell=float(getattr(config, "RSI_SELL_LEVEL", 65)),
+        atr_min=float(getattr(config, "ATR_MIN", 0.50)),
         session_enabled=bool(getattr(config, "SESSION_FILTER_ENABLED", True)),
         session_start=int(getattr(config, "SESSION_START_HOUR_UTC", 7)),
         session_end=int(getattr(config, "SESSION_END_HOUR_UTC", 17)),
+        sl_atr_mult=float(getattr(config, "SL_ATR_MULT", 2.0)),
+        tp_atr_mult=float(getattr(config, "TP_ATR_MULT", 5.0)),
         be_trigger_r=getattr(config, "BE_TRIGGER_R", 0.75),
         lot_size=float(getattr(config, "LOT_SIZE", 0.01)),
         spread_price=None,  # per-bar from the CSV, like backtest.py
@@ -220,7 +231,7 @@ def run(csv_file: str, p: Params, df: pd.DataFrame | None = None) -> dict:
     hours = df["time"].dt.hour.to_numpy()
     times = df["time"].to_numpy()
     if p.spread_price is None and "spread" in df.columns:
-        spread_col = df["spread"].to_numpy(float) * 0.01
+        spread_col = df["spread"].to_numpy(float) * POINT
         spread_col = np.nan_to_num(spread_col, nan=float(getattr(config, "SPREAD_COST_PRICE", 0.45)))
     else:
         spread_col = None
@@ -476,7 +487,7 @@ def oos_report(df: pd.DataFrame, base: Params, n_boot: int = 10000) -> list[str]
                    f"{te['trades']:>5} {te['net']:>9.2f} {te.get('pf',0):>6.2f} {pte:>7.3f}")
 
     out.append("\n=== 4. 4-Fold Chronological Walk-Forward (Adopted: RSI 40/60, 07-20, BE 1.5R) ===")
-    out.append(header() + f"   {'95% CI (' + str(n_boot) + ' boot)':<21} P(>0)   Gold Δ%")
+    out.append(header() + f"   {'95% CI (' + str(n_boot) + ' boot)':<21} P(>0)   Price Δ%")
     playable = len(df) - start
     fold = playable // 4
     for k in range(4):
