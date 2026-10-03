@@ -6,7 +6,8 @@ This file replaces an earlier bootstrap whose branch/bundle instructions are no
 longer current. **PR #16** already merged the BTC pre-data follow-through into
 `main` as `a4d6ecf` at **2026-10-03 11:22:44 UTC**. Do not fetch/apply the old
 private bundle or patch series, and do not switch away from the Arena-assigned
-branch `arena/01a101b6-scalper`.
+branch `arena/01a101b6-scalper`. The follow-up is tracked in PR #17 from this
+branch.
 
 At the start of this session, the earlier expected tree hash
 (`614f0e512e99efc226a8cdff9f569fd9c4d2c56b`) did not match the checkout
