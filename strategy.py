@@ -2,6 +2,59 @@ from datetime import datetime, timezone
 import pandas as pd
 import config
 
+
+def normalise_blackouts(windows):
+    """Normalise config.ENTRY_BLACKOUT_WINDOWS into comparable tuples.
+
+    Each window is a dict:
+        {"name": "swap", "start": "20:45", "minutes": 30, "days": [4]}
+    `start` is UTC HH:MM, `minutes` is the length of the window (the window is
+    [start, start+minutes) and may wrap past midnight), `days` is an optional
+    list of UTC weekday numbers (Mon=0 ... Sun=6); omitted/None = every day.
+
+    Returns a tuple of (name, start_minute, minutes, days_or_None) so it can be
+    stored on a frozen dataclass and compared cheaply.
+    """
+    out = []
+    for w in windows or []:
+        if isinstance(w, (tuple, list)) and len(w) == 4:
+            name, start_min, minutes, days = w
+        else:
+            name = str(w.get("name", "blackout"))
+            hh, _, mm = str(w.get("start", "00:00")).partition(":")
+            start_min = int(hh) * 60 + int(mm or 0)
+            minutes = int(w.get("minutes", 0))
+            days = w.get("days")
+        if int(minutes) <= 0:
+            continue
+        days = None if days is None else tuple(sorted(int(d) for d in days))
+        out.append((str(name), int(start_min) % 1440, int(minutes), days))
+    return tuple(out)
+
+
+def config_blackouts(cfg=config):
+    """Blackout windows for the active instance config (empty unless enabled)."""
+    if not getattr(cfg, "ENTRY_BLACKOUTS_ENABLED", False):
+        return ()
+    return normalise_blackouts(getattr(cfg, "ENTRY_BLACKOUT_WINDOWS", ()))
+
+
+def blackout_hit(blackouts, when):
+    """Name of the first blackout window covering `when` (UTC), else None."""
+    if not blackouts:
+        return None
+    minute = when.hour * 60 + when.minute
+    weekday = when.weekday()
+    for name, start_min, minutes, days in blackouts:
+        for offset in (0, 1440):          # handle windows that wrap midnight
+            delta = minute + offset - start_min
+            if 0 <= delta < minutes:
+                day = (weekday - 1) % 7 if offset else weekday
+                if days is None or day in days:
+                    return name
+    return None
+
+
 class ScalpStrategy:
     def __init__(self):
         # Last closed-bar timestamp we already emitted a BUY/SELL for.
@@ -54,6 +107,19 @@ class ScalpStrategy:
         # the last `min_bars` bars, otherwise the EMA200 seed weight (and thus
         # the signal) would differ from the backtester.
         rates = rates[-min_bars:]
+
+        # Entry blackout windows (24/7 instruments: swap/financing rollover and
+        # broker maintenance). Empty and inert unless the instance config sets
+        # ENTRY_BLACKOUTS_ENABLED = True, so gold is unchanged. Checked before
+        # the session filter so the replay engine (research.strategy_sweep
+        # signal_at, which tests `blocked` first) reports the same reason.
+        blackouts = config_blackouts()
+        if blackouts:
+            now = when or datetime.now(timezone.utc)
+            hit = blackout_hit(blackouts, now)
+            if hit:
+                self.last_skip_reason = f"blackout:{hit}"
+                return None, 0, 0
 
         # Session filter (live uses now; backtest can pass bar time)
         if not self._in_session(when):
