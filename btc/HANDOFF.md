@@ -1,5 +1,58 @@
 # HANDOFF — Bitcoin (BTCUSD) Scalper
 
+> ## ⛔ Status 2026-10-03 (latest): **Phase 1b FAILED — No-Go.** BTC has no edge at XM's spread; there is no service and Phase 2 is blocked.
+>
+> The Phase 1b decision gate — `btc/train_select.py` on the real 20,000-bar
+> `data/BTCUSD_M5.csv`, observed on `scalping` at
+> `2026-10-03T17:07:55+00:00` with `/root/scalper` clean at `f5e76c8` —
+> returned **FAIL**. The frozen TRAIN-selected candidate
+> (`ATR p75=113.14, SL=2.0, BE=off`) is **negative on cold OOS**:
+> `n=70, net −$46.11, PF 0.75, maxDD $56.29, iid 95% CI [−$126.90, +$37.82],
+> P(net>0)=0.138` — against a gate requiring positive cold-OOS net **and**
+> PF ≳ 1.2. The pre-registered baseline is worse
+> (`n=217, −$95.50, PF 0.72, P(net>0)=0.025`). Expectancy decays from
+> **+$0.76/trade on TRAIN to −$0.66/trade on OOS**, i.e. the in-sample edge is
+> selection noise.
+>
+> The cause is **structural, not a tuning problem**. Measured on the same file:
+> **spread / median ATR = 52.0%**, **spread / risk = 26.0%** (gold pays ~5.3% of
+> a stop), so the required win rate is **~36.0%** vs **23.8%** actual; net
+> before spread is only **+$17.16 (+$0.04/trade)** against **$183.00** of
+> spread paid (28% of gross profit); and 96.0% of gross loss is 267 full
+> stop-outs while the 59 breakeven scratches cost $24.90 in total. Every
+> one-variable sweep (SL / TP / BE / RSI / spread) over all 20,000 bars is
+> net-negative, and all 4 months, all 4 ATR quartiles, 6 of 7 weekdays and both
+> directions lose. The spread row is the cleanest proof: charging the 5.00
+> config fallback instead of the real spread moves the result from −$165.84 to
+> −$4.49 (PF 0.99) — nearly the whole loss is the spread, and even then there
+> is no gross edge.
+>
+> **Full write-up: `docs/btc_phase1_result_2026-10-03.md`.** Per §5, a negative
+> result is the deliverable and there is **no service**:
+> `scalper-btc-bot` and `scalper-btc-dashboard` are `disabled`/`inactive` on
+> `scalping` (`:8089` not listening; the unauthorized unit that started during
+> the `a4d6ecf` → `d8add56` transition deploy was stopped at `16:50:21 UTC`
+> after 0 trades), `deploy.sh` keeps its gold-only default, and `crontab -l`
+> has **no** `DEPLOY_SERVICES`/`DEPLOY_SERVICE` override. **Do not tune on OOS,
+> do not loosen `MAX_SPREAD_POINTS` to let a losing strategy trade, and do not
+> copy gold parameters.** A future attempt needs a new pre-registered
+> hypothesis (different timeframe or account tier) and its own untouched data
+> pull — reusing this file would be tuning on inspected data.
+>
+> **This was a documentation-only change.** No config, strategy, engine or
+> trading parameter was touched: `config.py`, `btc/config.py`, `strategy.py`
+> and `run.py` are unmodified, and `TRADING_MODE` stays `"FORWARD_TEST"` on
+> both instances. Gold re-verified locally on branch `arena/01a102c4-scalper`:
+> `backtest.py` **255 / +$456.58 / PF 1.32 / max DD $108.65 / 72-43-140**,
+> `research/parity_test.py` **PASS** (460 signals, 0 mismatches),
+> `btc/tool.py --check` **11/11 PASS**, `btc/train_select_test.py` **PASS**,
+> `tests/test_deploy_services.sh` **PASS 3/3**.
+>
+> **Provenance:** this Arena container cannot resolve `scalping` and holds only
+> the gold CSVs (`data/*.csv` is git-ignored), so the BTC numbers above are the
+> server run's recorded output, not a local reproduction. The five checks in
+> the previous paragraph *were* re-run locally.
+
 > **Status 2026-10-03: plumbing is merged; BTC trading is not authorised.**
 > PR [#14](https://github.com/shashidaren/scalper/pull/14) merged into `main` as
 > `bfb1dff` at **2026-10-03 10:11:28 UTC**. The code was verified locally before
@@ -411,6 +464,7 @@ prints OOS only after freezing one winner, and never changes config.
 
 | Date | Change | Why |
 |---|---|---|
+| 10-03 | **BTCUSD Phase 1b completed: FAIL / No-Go — negative result recorded (`arena/01a102c4-scalper`)** — ran the full §5 Phase 1b sequence on the real `data/BTCUSD_M5.csv` (20,000 bars, `2026-07-25 21:55` .. `2026-10-03 13:40` UTC, 5,600 weekend bars, 24/24 hours) on `scalping` at `2026-10-03T17:07:55+00:00`, `/root/scalper` clean at `f5e76c8`, and wrote the mandated one-page negative result to **`docs/btc_phase1_result_2026-10-03.md`**. Gate order held: `strategy_sweep.py --verify` reproduced `backtest.py` exactly (**433 trades / −$165.84 / PF 0.74 / WR 23.8% / 103W-330L / avgR −0.46 / maxDD $169.46 / 107 TP · 59 BE · 267 SL**), then `btc/train_select.py` ranked the 60-config grid on TRAIN only (floors `zero/p10/p25/p50/p75 = 0.00/19.94/40.22/65.06/113.14`; replay veto `1.25× TRAIN p90 = 6,250` pts, vetoing 0.00% of TRAIN quotes vs **100.00%** for the `MAX_SPREAD_POINTS=1500` placeholder), froze `ATR p75=113.14 SL=2.0 BE=off` (`44 tr, +$33.43, PF 1.29`), then read cold OOS: **winner `n=70, −$46.11, PF 0.75, maxDD $56.29, P(net>0)=0.138`** and **baseline `n=217, −$95.50, PF 0.72, P(net>0)=0.025`** → **FAIL** (`net < 0` and `PF < 1.2`). `derive_params.py` explains why it cannot work: median price $77,304.55, `PRICE_DIGITS=2`, $0.0100 per 1.00 move, ATR(14) p50 81.62 / p90 179.03, spread mean 4,242 pts = 42.41 px = **$0.4242** round trip at 0.01 lots → **spread/median-ATR 52.0%**, **spread/risk 26.0%**, break-even WR 28.6% → **~36.0%** with spread vs **23.8%** actual. `research/loss_analysis.py`: gross profit $465.72 / gross loss $631.55, SL 267 exits = **96.0%** of gross loss (−$606.26) vs BE 59 = 3.9% (−$24.90), **net before spread +$17.16 (+$0.04/trade) vs $183.00 spread paid (28% of gross profit, avg $0.42/trade, 1R = avg $1.82)**; all 4 months, all 4 ATR quartiles, 6/7 weekdays and both directions negative; 76 losing streaks, mean 4.34, max 20. One-variable sweeps all net-negative (SL 1.0× −$338.79 → 3.0× −$6.96; BE 0.5R −$320.29 → off −$119.42; RSI 30/70 −$129.03 … 45/55 −$177.76; spread fallback 5.00 −$4.49 PF 0.99 vs per-bar CSV −$165.84). Server state confirmed read-only: gold `scalper-bot`/`scalper-dashboard` active (`SIM: $128.62 \| SimEquity: $131.03`, open paper position undisturbed, `:8088` up), `scalper-btc-bot`/`scalper-btc-dashboard` **disabled + inactive** (`:8089` not listening; BTC bot stopped `16:50:21 UTC` after 0 trades with `high_spread` skips at ~4,000 pts), bridge `18812` listening, deploy cron `*/15 * * * * DEPLOY_BRANCH=main` with **no** `DEPLOY_SERVICES` override, last deploy line `restarted scalper-bot at f5e76c8… (was d8add56…) branch=main` (gold-only restart confirmed). **Documentation only: `config.py`, `btc/config.py`, `strategy.py`, `run.py` untouched, `TRADING_MODE` still `FORWARD_TEST` on both instances, no BTC unit installed/enabled/started.** Gold + BTC tests re-run locally: `backtest.py` **255 / +$456.58 / PF 1.32 / max DD $108.65 / 72-43-140** (identical to the §6 baseline), `parity_test.py` **PASS** (460 signals, 0 mismatches, 20× cache reduction, blackout check clean), `btc/tool.py --check` **11/11**, `btc/train_select_test.py` **PASS**, `tests/test_deploy_services.sh` **PASS 3/3**. | §5 requires that when the cold-OOS gate fails, a one-page negative result is the deliverable and there is **no service**, with no tuning on OOS. Recording the measured verdict — and its structural cause (a ~52% spread-to-ATR ratio, i.e. a ~36% required win rate against 23.8% actual) — is what stops a later session from re-litigating the same dataset, loosening the spread gate, or copying gold parameters onto an instrument where they cannot pay for the spread. |
 | 10-03 | **BTC dashboard price-card label + `server_check.py` cron output (`arena/01a102b0-scalper`)** — confirmed `ssh scalping` and `/root/scalper/data/BTCUSD_M5.csv` remain unreachable from the Arena container (`e2b.local`), so no real-file Phase 1b result or live server state is claimed from the local checkout. Audited the BTC dashboard (`btc/dashboard.py` → `dashboard.py` → `templates/index.html`) and engine (`btc/run.py` → `run.py` → `mt5_bridge.py` → `logger.py`): `live.bid`, `live.ask`, and `live.spread` on `:8089` are genuine `BTCUSD` quotes read from `btc/logs/live_status.json`, while `templates/index.html` line 132 still had `<h2>GOLD Price</h2>` hard-coded. Replaced it with `<h2>{{ config.symbol if config is defined and config.symbol else "GOLD" }} Price</h2>` (`GOLD Price` on gold, `BTCUSD Price` on BTC) and added a template check in `btc/tool.py --check` (11/11 PASS). Also fixed `btc/server_check.py` `to_markdown()` to emit the already-collected `crontab -l` (`r["cron"]`) block, and documented why the transition deploy from `a4d6ecf` → `d8add56` started the disabled `scalper-btc-bot` unit (the pre-PR-#17 `deploy.sh` bound `SERVICES` before `git pull`). All gold regressions (`backtest.py` 255 / +$456.58 / PF 1.32, `parity_test.py`, `paper_exit_test.py`) and BTC tests (`e2e_smoke.py`, `train_select_test.py`, `test_deploy_services.sh`) PASS. | Fix the hard-coded "GOLD Price" card heading on the BTC dashboard and ensure `btc/server_check.py` prints `crontab -l` in markdown mode. |
 | 10-03 | **BTC Phase 1b prep + deploy safety (`arena/01a101b6-scalper`, PR #17)** — the real BTC file/server is unavailable from this Arena checkout, so no BTC result is claimed. Added `btc/train_select.py` (fixed ATR-floor × SL × BE grid; floors and spread veto derived on TRAIN only; rank TRAIN only; then cold-read one frozen candidate + baseline) and optional `Params.max_spread_points` in the replay engine (default `None`, so gold is unchanged). Documented that generic `--oos`/`--candidates` are gold-specific. Changed `deploy.sh` default to gold-only because a restart starts a disabled-but-installed BTC unit; BTC now requires explicit Phase 2 opt-in. Verified with helper tests, gold backtest/parity/paper-exit regressions, BTC isolation/e2e, and mocked deploy-service test. Selector smoke on `GOLD_M5.csv` is plumbing-only, not evidence. | Make Phase 1b reproducible without overreading gold-specific reports, and prevent a cron deploy from unintentionally starting the not-yet-authorized BTC unit. |
 | 10-03 | **Pre-data follow-through (`arena/01a1016f-scalper`)** — everything in the plan that does not need the server. §4 item 9: `--sweep spread` and `--sweep honest` now derive their price levels from the loaded CSV's own `spread` column (`csv_spread_stats`, POINT-aware) instead of gold's 0.30/0.47/0.51 literals. §4 item 10: `parity_test`'s fake tick is built from the bar it belongs to (close + that bar's spread × POINT) instead of 4000.00/4000.45. New §4 item 11: optional **entry blackout windows** (`ENTRY_BLACKOUTS_ENABLED`, `ENTRY_BLACKOUT_WINDOWS` — UTC `HH:MM` + minutes + optional weekdays, wraps midnight) implemented once in `strategy.py` and mirrored in the replay engine (`blackout_mask` → `signal_at(..., blocked)`), so live/backtest parity still holds on a 24/7 instrument; `parity_test` grew a dedicated check that forces two synthetic windows, asserts 0 live-vs-replay mismatches over 874 compared bars, that 40 real signals were actually suppressed (non-vacuous) and that the skip reason is `blackout:<name>`. `btc/config.py` ships the XM rollover + Saturday-maintenance candidates **disabled**. New tools: **`btc/server_check.py`** (§0 checklist as one read-only, MT5-free command; markdown or `--json`) and **`btc/derive_params.py`** (CSV → measured ATR/spread distributions → candidate `PRICE_DIGITS`/`ATR_MIN`/`MAX_SPREAD_POINTS`/`SPREAD_COST_PRICE`/`MAX_DAILY_LOSS` + spread-vs-risk economics and the structural break-even WR). New doc **`docs/btc_market_reference_2026-10-03.md`**: cited web priors (contract 1 BTC/lot, 0.01 min, leverage 1:250 vs 1:500 *conflict*, Standard spread ~500 pts ≈ $5/lot, 24/7, Sat 10:05–10:35 GMT+2 maintenance, crypto triple swap Fri→Sat), each line mapped to the command that confirms it. **Gold re-verified after every change: `backtest.py` 255 / +$456.58 / PF 1.32 / max DD $108.65 / 72-43-140, `parity_test.py` PASS (460 signals, 0 mismatches, + the new blackout check), `paper_exit_test.py` PASS (M5 OHLC 48 / +$89.43 / PF 1.35), `btc/tool.py --check` 10/10, `btc/e2e_smoke.py` ALL PASS on both the BTC instance and the gold config dir.** Sanity check on the new deriver: run on `data/GOLD_M5.csv` it reproduces gold's documented facts (spread mean $0.47, break-even WR 28.6%, suggested daily loss $31.3 vs the adopted $30). | User asked to follow through the pending work and to add a web reference for BTC like the gold material. Phase 0/1 still need the server, so this closes every item that does not. |
