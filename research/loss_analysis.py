@@ -134,7 +134,8 @@ def report(csv_file: str, json_out: str | None = None) -> list[str]:
     w("LOSS ANATOMY — current config (replayed via research/strategy_sweep.py)")
     w(f"  {csv_file}: {len(df)} bars, {df['time'].min()} -> {df['time'].max()}")
     w(f"  params: BE={p.be_trigger_r}R SL={p.sl_atr_mult}xATR TP={p.tp_atr_mult}xATR "
-      f"RSI={p.rsi_buy}/{p.rsi_sell} session={p.session_start}-{p.session_end}UTC")
+      f"RSI={p.rsi_buy}/{p.rsi_sell} "
+      + (f"session={p.session_start}-{p.session_end}UTC" if p.session_enabled else "session=off"))
     w("=" * 78)
     w(f"trades {res['trades']}  net ${res['net']:.2f}  PF {res['pf']:.2f}  "
       f"WR {res['win_rate']:.1f}%  avgR {res['avg_r']:.2f}  maxDD ${res['max_dd']:.2f}")

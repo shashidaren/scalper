@@ -487,7 +487,7 @@ def oos_report(df: pd.DataFrame, base: Params, n_boot: int = 10000) -> list[str]
                    f"{te['trades']:>5} {te['net']:>9.2f} {te.get('pf',0):>6.2f} {pte:>7.3f}")
 
     out.append("\n=== 4. 4-Fold Chronological Walk-Forward (Adopted: RSI 40/60, 07-20, BE 1.5R) ===")
-    out.append(header() + f"   {'95% CI (' + str(n_boot) + ' boot)':<21} P(>0)   Gold Δ%")
+    out.append(header() + f"   {'95% CI (' + str(n_boot) + ' boot)':<21} P(>0)   Price Δ%")
     playable = len(df) - start
     fold = playable // 4
     for k in range(4):

@@ -48,6 +48,7 @@ spread column).
     run.py           engine entry  -> services/scalper-btc-bot.service
     dashboard.py     :8089 board   -> services/scalper-btc-dashboard.service
     tool.py          run any repo script under the instance config; --check
+    e2e_smoke.py     end-to-end fake-broker smoke test (no real MT5 needed)
     recon.py         read-only Phase 0 probe (btc/HANDOFF §7)
     logs/            BTC runtime files (gitignored)
   services/scalper-btc-bot.service, scalper-btc-dashboard.service
@@ -120,7 +121,17 @@ exactly as before — proven in §6, not asserted.
 measures the shared-bridge concurrency question. *Gate: symbol exists, specs
 sane, 20k+ bars available.* Then `data/BTCUSD_M5.csv` (+ M1) exist.
 
-**Phase 1 — does the shape have an edge on BTC at all?** On BTC data:
+**Phase 1a — plumbing: DONE and verified 2026-10-03** (§6): instance dir, config
+hooks, dashboard :8089, systemd units, deploy integration, and
+`btc/e2e_smoke.py` — a committed end-to-end test (fake MT5 over a real RPyC
+socket, its own ephemeral port + temp dirs, refuses a non-FORWARD_TEST config)
+that drives a signal → paper entry → SL exit and checks the instrument's own
+contract maths. It passes on both the BTC instance (`-$3.45` = 344.7 px × 0.01 ×
+**1 BTC**) and the gold config dir (`-$344.72` = 344.7 px × 0.01 × **100 oz**),
+i.e. the parameterisation is proven on both instruments, not just asserted.
+Run it on the server any time: `mt5env/bin/python btc/e2e_smoke.py`.
+
+**Phase 1b — does the shape have an edge on BTC at all?** On BTC data:
 `btc/tool.py research/strategy_sweep.py --verify` (must agree with `backtest.py`
 first) → `--sweep` RSI/session/BE/SL/TP/ATR-floor → `--oos` (train-select, cold
 read) → `--candidates` → `research/loss_analysis.py`. Derive, in this order:
@@ -165,6 +176,10 @@ Evidence from 2026-10-03 (all re-run after every hook was in place):
 | Instance-regression: `/tmp/inst_test` config (gold values, only `LOG_DIR` diverted) driving the hooked engine | **255 / +$456.58 / PF 1.32** — plumbing is behaviour-neutral |
 | `btc/tool.py research/strategy_sweep.py --csv data/GOLD_M5.csv --verify` under the **BTC** config | sweep engine ≡ `backtest.py` (both 377 trades / +$2.83 / PF 1.13) — numbers meaningless on gold data, equivalence is the point |
 | `btc/run.py` + `btc/dashboard.py` executed via `runpy` | engine resolved from repo root, app title "Bitcoin Scalper Dashboard", port 8089, `LOG_DIR=btc/logs` |
+| `research/paper_exit_test.py` (gold) | **PASS** — fake-bridge scenarios + M1/M5 table unchanged (`M5 OHLC 48 / +$89.43 / PF 1.35`) |
+| `btc/e2e_smoke.py` on the **BTC** instance | **7/7 PASS** — signal → SIM_ENTRY → SL exit −$3.45 (344.7 px × 0.01 × 1 BTC), no ENTRY, gold `logs/` untouched |
+| `btc/e2e_smoke.py --config-dir .` (**gold** config) | **7/7 PASS** — same path, −$344.72 (× 100 oz): the contract hook is correctly per-instrument |
+| BTC-config pipeline dry-run on synthetic BTC-shaped bars (`/tmp`, disposable) | `--verify` sweep ≡ backtest (both 333 / −$140.42 / PF 0.80); `--oos` (train/cold, OAT, 4-fold walk-forward) and `loss_analysis` run clean; `loss_analysis` prints `session=off` and BTC-scale anatomy. **Synthetic numbers are noise — the point is the tooling runs under the BTC config.** |
 | `templates/index.html` render (jinja2) | renders for both gold and BTC titles |
 | `git check-ignore` | `btc/logs/*` and `data/*.csv` ignored |
 
@@ -227,5 +242,6 @@ mt5env/bin/python btc/tool.py research/loss_analysis.py
 
 | Date | Change | Why |
 |---|---|---|
+| 10-03 | **`btc/e2e_smoke.py` added; BTC-config pipeline dry-run clean (`arena/01a10125-scalper`)**: committed end-to-end smoke test (fake MT5 over a real RPyC `SlaveService` socket, ephemeral port, temp instance + log dir, refuses LIVE/FORWARD_TEST-violating configs, instance-generic via `--config-dir`) — passes 7/7 on the BTC instance and on the gold config dir, proving the contract-size hook per instrument (−$3.45 vs −$344.72 on the same 344.7-point stop). Fixed two harness bugs found this way (buffered prints lost at `os._exit`; the fake *tick* spread must respect the instance's `MAX_SPREAD_POINTS`, since the live gate reads the tick, not the CSV). Ran the full BTC pipeline (sweep `--verify`, `--oos`, `loss_analysis`) under the BTC config on synthetic BTC-shaped bars: tooling runs, `--verify` agrees, session filter off shows as `session=off`. Gold re-checked after the small shared-code cleanups (`loss_analysis` session-off display, "Price Δ%" header, order-comment hook): backtest, parity and paper-exit all unchanged. | Finish the plumbing verification end-to-end and prove the runbook works before real BTC data exists. |
 | 10-03 | **Phase 1 plumbing built + verified (`arena/01a10125-scalper`)**: ten backwards-compatible hooks in shared code (contract size, price digits/POINT, `LOG_DIR`, ATR floor + SL/TP multiples, indicator periods, dashboard title); `btc/config.py` (all BTC values, placeholders flagged), `btc/_instance.py`, `btc/run.py`, `btc/dashboard.py`, `btc/tool.py`; `services/scalper-btc-{bot,dashboard}.service`; `deploy.sh` multi-service restart that skips uninstalled units. Verified: gold `backtest.py` and `parity_test.py` unchanged, `btc/tool.py --check` 9/9, a gold-identical instance config reproduces gold's numbers exactly, sweep ≡ backtest under the BTC config, both shims resolve the right engine/config, template renders both titles. | User chose to build the plumbing in parallel with the server-side Phase 0 recon. |
 | 10-03 | Created this file + `btc/recon.py` (read-only Phase 0 probe; `--self-test` verified) and a pointer/record in the gold `HANDOFF.md`. | User asked whether a BTC scalper is cheaper given the gold work, and asked for a separate handoff. |

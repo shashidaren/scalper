@@ -50,6 +50,7 @@ def check(instance_dir: str, config) -> int:
         ("paper.STATE_FILE under instance logs", Path(paper.STATE_FILE).parent.resolve() == want_log_dir),
         ("MAGIC_NUMBER != gold (999111)", int(config.MAGIC_NUMBER) != 999111),
         ("TRADING_MODE == FORWARD_TEST", str(config.TRADING_MODE) == "FORWARD_TEST"),
+        ("ORDER_COMMENT set", bool(getattr(config, "ORDER_COMMENT", ""))),
     ]
 
     try:  # needs pandas/numpy (present in mt5env and the local test venv)

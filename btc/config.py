@@ -41,6 +41,7 @@ LOG_DIR = Path(__file__).resolve().parent / "logs"
 
 DASHBOARD_TITLE = "Bitcoin Scalper Dashboard"
 DASHBOARD_PORT = 8089
+ORDER_COMMENT = "BTC Scalper v1"   # shown in the MT5 terminal / broker history
 
 # --- trading mode ---
 # Non-negotiable until BTC has its own paper track record: no real orders.
