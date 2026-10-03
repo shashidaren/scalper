@@ -3,13 +3,12 @@
 ## 1. Current state and stale instructions
 
 This file replaces an earlier bootstrap whose branch/bundle instructions are no
-longer current. **PR #16** already merged the BTC pre-data follow-through into
-`main` as `a4d6ecf` at **2026-10-03 11:22:44 UTC**. Do not fetch/apply the old
-private bundle or patch series, and do not switch away from the Arena-assigned
-branch `arena/01a101b6-scalper`. The follow-up is tracked in PR #17 from this
-branch.
+longer current. **PR #16** (`a4d6ecf`) and **PR #17** (`d8add56`) are already
+merged into `main`. Do not fetch/apply the old private bundle or patch series,
+and do not switch away from the Arena-assigned branch (`arena/01a102b0-scalper`
+in this session).
 
-At the start of this session, the earlier expected tree hash
+At the start of the earlier session, the expected tree hash
 (`614f0e512e99efc226a8cdff9f569fd9c4d2c56b`) did not match the checkout
 (`993c8d7e4dcbfbf280246af1d4f1c39ac507e05`). That tree hash was specified
 for the separate private branch/bundle in the old instructions, which is
@@ -26,27 +25,42 @@ authorizes paper deployment. Gold must remain unchanged.
 
 ## 3. Carry-over report — not freshly verified by this session
 
-The prior bootstrap reports the following server observations from
-`scalping` on 2026-10-03. Treat them as useful leads, **not a fresh server
-check**:
+The prior bootstrap and user-reported server check (`2026-10-03 16:47 UTC`)
+report the following server observations from `scalping`. Treat them as useful
+leads, **not a fresh server check from Arena**:
 
+- `/root/scalper` was clean at `d8add5678d74a1b6381c6e702432a0e1f0a0ce62` (PR #17).
 - `data/BTCUSD_M5.csv`: 20,000 bars, 2026-07-25 21:55 to 2026-10-03 13:40 UTC,
-  including about 5,600 weekend bars.
+  including about 5,600 weekend bars (`data/BTCUSD_M1.csv` absent).
 - Median BTC price $77,304.55; ATR(14) p10/p25/p50/p75/p90 about
   29.58/48.32/81.62/121.31/179.03; spread mean 4,242 points ($42.41), mostly
-  4,000–5,000 points. The old `MAX_SPREAD_POINTS=1500` placeholder would veto
-  nearly/all entries if these spread observations still hold.
+  4,000–5,000 points. The old `MAX_SPREAD_POINTS=1500` placeholder vetoes
+  entries at ~4,000 points.
 - Gold parameters replayed on that BTC file reportedly gave 433 trades,
   −$165.84, PF 0.74. Binance proxy runs are **not evidence** for XM BTCUSD.
-- The previous report said the BTC service was installed but disabled; that was
-  user-reported and is not confirmed in this session. A disabled unit can still
-  be started by `systemctl restart`.
+- Runtime finding (user-reported 16:47 UTC): `scalper-btc-bot` was `disabled`
+  but **active** (SIM mode, 0 trades, repeated `high_spread` skips at 4,000
+  points vs the 1,500-point placeholder), and `scalper-btc-dashboard` was
+  `enabled` and `active` on `:8089`. Why `scalper-btc-bot` started on the first
+  deploy after PR #17 merged: in `deploy.sh`, `SERVICES` is evaluated at line 17
+  *before* `git pull --ff-only` at line 33, so the pre-PR-#17 script (`a4d6ecf`)
+  still held `SERVICES="scalper-bot scalper-btc-bot"` in memory during the pull
+  to `d8add56` and restarted both units one final time. Later cron runs on
+  `d8add56` default to `scalper-bot` only (unless `crontab` overrides
+  `DEPLOY_SERVICES`/`DEPLOY_SERVICE`), which does not stop an already-running
+  process.
+- Dashboard finding (verified & fixed in `arena/01a102b0-scalper`): the BTC
+  dashboard (`:8089`) already displays real `BTCUSD` `bid`/`ask`/`spread` from
+  `btc/logs/live_status.json`, while `templates/index.html` line 132 had
+  `<h2>GOLD Price</h2>` hard-coded; now parameterized as
+  `<h2>{{ config.symbol if config is defined and config.symbol else "GOLD" }} Price</h2>`.
+  Also fixed `btc/server_check.py` `to_markdown()` to render `crontab -l`.
 
 The current Arena workspace contains only `GOLD_M1.csv` and `GOLD_M5.csv`; it
 has no BTC CSV. A read-only SSH attempt to host alias `scalping` failed with
-DNS resolution, so this session could not run `btc/server_check.py`, the BTC
-sweep, or the bridge concurrency probe. **No new BTC result or server status
-is claimed.**
+DNS resolution, so this session could not run `btc/server_check.py` on
+`scalping`, the real-file BTC sweep, or the bridge concurrency probe. **No new
+BTC result or live server status is claimed from the Arena sandbox.**
 
 ## 4. Next steps — run on the server with the real BTC CSV
 

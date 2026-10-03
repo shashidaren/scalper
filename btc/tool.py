@@ -62,6 +62,33 @@ def check(instance_dir: str, config) -> int:
     except ImportError as e:
         print(f"  (skipping sweep checks: {e})")
 
+    try:
+        from jinja2 import Environment, FileSystemLoader
+        env = Environment(loader=FileSystemLoader(str(Path(ROOT) / "templates")))
+        html = env.get_template("index.html").render(
+            title=getattr(config, "DASHBOARD_TITLE", "Gold Scalper Dashboard"),
+            now="2026-10-03 00:00:00",
+            live={"connected": True, "bid": 77300.0, "ask": 77340.0, "spread": 4000,
+                  "balance": 200.0, "equity": 200.0, "positions": [], "mode": config.TRADING_MODE},
+            stats={"pnl": 0.0, "trades": 0, "wins": 0, "losses": 0},
+            conn={"reconnect_count": 1, "last_tick_time": "2026-10-03 00:00:00"},
+            uptime_str="0h 1m 0s",
+            trades=[],
+            system_logs=[],
+            config={
+                "symbol": config.SYMBOL,
+                "lot_size": config.LOT_SIZE,
+                "max_spread": config.MAX_SPREAD_POINTS,
+                "max_daily_loss": config.MAX_DAILY_LOSS,
+                "max_trades": config.MAX_TRADES_PER_DAY,
+            },
+        )
+        checks.append((f"dashboard template shows '{config.SYMBOL} Price'",
+                       f"<h2>{config.SYMBOL} Price</h2>" in html
+                       and (config.SYMBOL == "GOLD" or "<h2>GOLD Price</h2>" not in html)))
+    except ImportError as e:
+        print(f"  (skipping template check: {e})")
+
     print(f"instance check — {instance_dir}")
     print(f"  config.__file__   {config.__file__}")
     print(f"  SYMBOL            {config.SYMBOL}   MAGIC {config.MAGIC_NUMBER}   MODE {config.TRADING_MODE}")

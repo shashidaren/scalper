@@ -178,6 +178,7 @@ def to_markdown(r: dict) -> str:
     L.append("")
     for rel, v in r["log_dirs"].items():
         L.append(f"- `{rel}/`: {v}")
+    L.append(f"- crontab (`crontab -l`):\n```\n{r.get('cron', 'unknown')}\n```")
     L.append(f"- deploy log tail:\n```\n{r['deploy_log_tail']}\n```")
     if r.get("journal"):
         for unit, text in r["journal"].items():
