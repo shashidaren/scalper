@@ -129,7 +129,7 @@
     </div>
 
     <div class="card">
-      <h2>GOLD Price</h2>
+      <h2>{{ config.symbol if config is defined and config.symbol else "GOLD" }} Price</h2>
       <div class="value small">{{ "%.2f"|format(live.bid or 0) }} / {{ "%.2f"|format(live.ask or 0) }}</div>
       <div style="color:var(--muted)">Spread: {{ live.spread or 0 }} points</div>
     </div>

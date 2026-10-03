@@ -31,7 +31,40 @@
 > `FORWARD_TEST`; the separate-account / hard combined-gate requirement in §8
 > risk 5 still blocks any LIVE flip.
 >
-> **Update 2026-10-03 (Arena follow-up):** the bootstrap's referenced server
+> **Update 2026-10-03 (branch `arena/01a102b0-scalper`, after PR #17 `d8add56`):**
+> - **Server access & Phase 1b status:** From this Arena container (`e2b.local`),
+>   `ssh scalping` still fails DNS resolution and `/home/user/scalper/data/`
+>   contains only `GOLD_M1.csv` and `GOLD_M5.csv` (`data/BTCUSD_M5.csv` is
+>   git-ignored on `/root/scalper`). Per §0, no server runtime state or real-file
+>   Phase 1b result is claimed from the local checkout.
+> - **User-reported server snapshot (2026-10-03 16:47 UTC, carry-over):**
+>   `/root/scalper` was clean at `d8add5678d74a1b6381c6e702432a0e1f0a0ce62`;
+>   `data/BTCUSD_M5.csv` had 20,000 bars (`2026-07-25 21:55` .. `2026-10-03 13:40`
+>   UTC), `data/BTCUSD_M1.csv` absent; `scalper-btc-bot` was `disabled` but
+>   **active** (SIM mode, 0 trades, repeated `high_spread` skips at ~4,000 pts vs
+>   the 1,500-pt placeholder); `scalper-btc-dashboard` was `enabled` and `active`
+>   on `:8089`; gold was active with an open paper position.
+> - **Why `scalper-btc-bot` started on the PR #17 deploy & why `crontab -l` was
+>   missing from the markdown report:** (1) In `deploy.sh`, `SERVICES` is bound at
+>   line 17 *before* `git pull --ff-only` at line 33, so when the cron ran on the
+>   pre-PR-#17 checkout (`a4d6ecf`), the running shell still held the old default
+>   (`scalper-bot scalper-btc-bot`) during the pull to `d8add56` and restarted
+>   both units one final time (`systemctl restart` starts a disabled unit). Later
+>   runs on `d8add56` default to `scalper-bot` only (unless `crontab` overrides
+>   `DEPLOY_SERVICES`/`DEPLOY_SERVICE`), which does not stop an already-running
+>   `scalper-btc-bot`. (2) `btc/server_check.py` collected `r["cron"]` in
+>   `collect()` (`--json`) but omitted it in `to_markdown()`; fixed so default
+>   markdown output includes `crontab -l`.
+> - **BTC dashboard price vs label (`templates/index.html`):** Verified that
+>   `btc/dashboard.py` + `btc/run.py` already display real **`BTCUSD`** `bid`,
+>   `ask`, and `spread` from `btc/logs/live_status.json` (`MT5Bridge` queries
+>   `config.SYMBOL = "BTCUSD"`). Only the price card header in
+>   `templates/index.html` line 132 was hard-coded as `<h2>GOLD Price</h2>`;
+>   changed to `<h2>{{ config.symbol if config is defined and config.symbol else "GOLD" }} Price</h2>`
+>   (`GOLD Price` on gold, `BTCUSD Price` on BTC) and added an assertion to
+>   `btc/tool.py --check` (now 11/11 PASS).
+>
+> **Update 2026-10-03 (Arena follow-up, PR #17 `d8add56`):** the bootstrap's referenced server
 > command/bundle is not in this checkout, the local workspace has no BTC CSV,
 > and `ssh scalping` cannot resolve from this environment. No real-file Phase
 > 1b or server-status check was run. Added `btc/train_select.py` to replace the
@@ -196,7 +229,7 @@ the account yet; `btc/recon.py` answers all of it in one run:
 | 4 | `strategy.py` ATR floor 0.50 + SL/TP 2.0/5.0 literals | `ATR_MIN`, `SL_ATR_MULT`, `TP_ATR_MULT` | ✅ done (gold values kept) |
 | 4b | `strategy.py` EMA/RSI/ATR periods 200/14/14 | `EMA_PERIOD`, `RSI_PERIOD`, `ATR_PERIOD` | ✅ done (also wired into the sweep's `params_from_config`, so parity holds) |
 | 5 | `logger.py` `LOG_DIR = <repo>/logs` | `config.LOG_DIR` (fallback = old path) | ✅ done |
-| 6 | dashboard title/branding hard-coded | `config.DASHBOARD_TITLE` + `{{ title }}` | ✅ done (gold name preserved) |
+| 6 | dashboard title/branding hard-coded | `config.DASHBOARD_TITLE` + `{{ title }}` + `{{ config.symbol }} Price` | ✅ done (gold name & `GOLD Price` preserved; BTC shows `BTCUSD Price`) |
 | 7 | `MAGIC_NUMBER 999111`, "Gold Scalper v7" order comment | BTC = 999112; comment cosmetic | ✅ magic done; comment left |
 | 8 | risk gates calibrated to gold P&L | `MAX_DAILY_LOSS=8` placeholder in `btc/config.py` | ⚠️ must be re-derived from BTC trade data |
 | 9 | sweep's `CONTRACT_SIZE` + gold spread sweep list | `--sweep spread` / `--sweep honest` now price from the **loaded CSV's own spread column** (`csv_spread_stats`: config / mean / median / p90 / per-bar) | ✅ done 10-03 |
@@ -287,7 +320,7 @@ Evidence from 2026-10-03 (all re-run after every hook was in place):
 |---|---|
 | `backtest.py` on gold | **255 / +$456.58 / PF 1.32 / max DD $108.65 / 72-43-140** — unchanged |
 | `research/parity_test.py` | **PASS** — 460 replay signals, 0 mismatches, 20× cache reduction intact |
-| `btc/tool.py --check` | 9/9 PASS: btc config wins, `btc/logs` isolated, contract size, magic, mode |
+| `btc/tool.py --check` | 11/11 PASS: btc config wins, `btc/logs` isolated, contract size, magic, mode, template shows `BTCUSD Price` |
 | Instance-regression: `/tmp/inst_test` config (gold values, only `LOG_DIR` diverted) driving the hooked engine | **255 / +$456.58 / PF 1.32** — plumbing is behaviour-neutral |
 | `btc/tool.py research/strategy_sweep.py --csv data/GOLD_M5.csv --verify` under the **BTC** config | sweep engine ≡ `backtest.py` (both 377 trades / +$2.83 / PF 1.13) — numbers meaningless on gold data, equivalence is the point |
 | `btc/run.py` + `btc/dashboard.py` executed via `runpy` | engine resolved from repo root, app title "Bitcoin Scalper Dashboard", port 8089, `LOG_DIR=btc/logs` |
@@ -295,7 +328,7 @@ Evidence from 2026-10-03 (all re-run after every hook was in place):
 | `btc/e2e_smoke.py` on the **BTC** instance | **7/7 PASS** — signal → SIM_ENTRY → SL exit −$3.45 (344.7 px × 0.01 × 1 BTC), no ENTRY, gold `logs/` untouched |
 | `btc/e2e_smoke.py --config-dir .` (**gold** config) | **7/7 PASS** — same path, −$344.72 (× 100 oz): the contract hook is correctly per-instrument |
 | BTC-config pipeline dry-run on synthetic BTC-shaped bars (`/tmp`, disposable) | `--verify` sweep ≡ backtest (both 333 / −$140.42 / PF 0.80); `--oos` (train/cold, OAT, 4-fold walk-forward) and `loss_analysis` run clean; `loss_analysis` prints `session=off` and BTC-scale anatomy. **Synthetic numbers are noise — the point is the tooling runs under the BTC config.** |
-| `templates/index.html` render (jinja2) | renders for both gold and BTC titles |
+| `templates/index.html` render (jinja2) | renders both titles and per-symbol price card header (`GOLD Price` vs `BTCUSD Price`) |
 | `git check-ignore` | `btc/logs/*` and `data/*.csv` ignored |
 | `btc/train_select_test.py` (Arena follow-up) | **PASS** — 60-grid generation, no BE=0, TRAIN-only ranking, spread-veto integration and split checks |
 | `btc/tool.py btc/train_select.py --csv data/GOLD_M5.csv --bootstrap 100 --top 3` | **PASS as a plumbing smoke only** under BTC config; uses gold prices, so its P&L is explicitly not BTC evidence |
@@ -378,6 +411,7 @@ prints OOS only after freezing one winner, and never changes config.
 
 | Date | Change | Why |
 |---|---|---|
+| 10-03 | **BTC dashboard price-card label + `server_check.py` cron output (`arena/01a102b0-scalper`)** — confirmed `ssh scalping` and `/root/scalper/data/BTCUSD_M5.csv` remain unreachable from the Arena container (`e2b.local`), so no real-file Phase 1b result or live server state is claimed from the local checkout. Audited the BTC dashboard (`btc/dashboard.py` → `dashboard.py` → `templates/index.html`) and engine (`btc/run.py` → `run.py` → `mt5_bridge.py` → `logger.py`): `live.bid`, `live.ask`, and `live.spread` on `:8089` are genuine `BTCUSD` quotes read from `btc/logs/live_status.json`, while `templates/index.html` line 132 still had `<h2>GOLD Price</h2>` hard-coded. Replaced it with `<h2>{{ config.symbol if config is defined and config.symbol else "GOLD" }} Price</h2>` (`GOLD Price` on gold, `BTCUSD Price` on BTC) and added a template check in `btc/tool.py --check` (11/11 PASS). Also fixed `btc/server_check.py` `to_markdown()` to emit the already-collected `crontab -l` (`r["cron"]`) block, and documented why the transition deploy from `a4d6ecf` → `d8add56` started the disabled `scalper-btc-bot` unit (the pre-PR-#17 `deploy.sh` bound `SERVICES` before `git pull`). All gold regressions (`backtest.py` 255 / +$456.58 / PF 1.32, `parity_test.py`, `paper_exit_test.py`) and BTC tests (`e2e_smoke.py`, `train_select_test.py`, `test_deploy_services.sh`) PASS. | Fix the hard-coded "GOLD Price" card heading on the BTC dashboard and ensure `btc/server_check.py` prints `crontab -l` in markdown mode. |
 | 10-03 | **BTC Phase 1b prep + deploy safety (`arena/01a101b6-scalper`, PR #17)** — the real BTC file/server is unavailable from this Arena checkout, so no BTC result is claimed. Added `btc/train_select.py` (fixed ATR-floor × SL × BE grid; floors and spread veto derived on TRAIN only; rank TRAIN only; then cold-read one frozen candidate + baseline) and optional `Params.max_spread_points` in the replay engine (default `None`, so gold is unchanged). Documented that generic `--oos`/`--candidates` are gold-specific. Changed `deploy.sh` default to gold-only because a restart starts a disabled-but-installed BTC unit; BTC now requires explicit Phase 2 opt-in. Verified with helper tests, gold backtest/parity/paper-exit regressions, BTC isolation/e2e, and mocked deploy-service test. Selector smoke on `GOLD_M5.csv` is plumbing-only, not evidence. | Make Phase 1b reproducible without overreading gold-specific reports, and prevent a cron deploy from unintentionally starting the not-yet-authorized BTC unit. |
 | 10-03 | **Pre-data follow-through (`arena/01a1016f-scalper`)** — everything in the plan that does not need the server. §4 item 9: `--sweep spread` and `--sweep honest` now derive their price levels from the loaded CSV's own `spread` column (`csv_spread_stats`, POINT-aware) instead of gold's 0.30/0.47/0.51 literals. §4 item 10: `parity_test`'s fake tick is built from the bar it belongs to (close + that bar's spread × POINT) instead of 4000.00/4000.45. New §4 item 11: optional **entry blackout windows** (`ENTRY_BLACKOUTS_ENABLED`, `ENTRY_BLACKOUT_WINDOWS` — UTC `HH:MM` + minutes + optional weekdays, wraps midnight) implemented once in `strategy.py` and mirrored in the replay engine (`blackout_mask` → `signal_at(..., blocked)`), so live/backtest parity still holds on a 24/7 instrument; `parity_test` grew a dedicated check that forces two synthetic windows, asserts 0 live-vs-replay mismatches over 874 compared bars, that 40 real signals were actually suppressed (non-vacuous) and that the skip reason is `blackout:<name>`. `btc/config.py` ships the XM rollover + Saturday-maintenance candidates **disabled**. New tools: **`btc/server_check.py`** (§0 checklist as one read-only, MT5-free command; markdown or `--json`) and **`btc/derive_params.py`** (CSV → measured ATR/spread distributions → candidate `PRICE_DIGITS`/`ATR_MIN`/`MAX_SPREAD_POINTS`/`SPREAD_COST_PRICE`/`MAX_DAILY_LOSS` + spread-vs-risk economics and the structural break-even WR). New doc **`docs/btc_market_reference_2026-10-03.md`**: cited web priors (contract 1 BTC/lot, 0.01 min, leverage 1:250 vs 1:500 *conflict*, Standard spread ~500 pts ≈ $5/lot, 24/7, Sat 10:05–10:35 GMT+2 maintenance, crypto triple swap Fri→Sat), each line mapped to the command that confirms it. **Gold re-verified after every change: `backtest.py` 255 / +$456.58 / PF 1.32 / max DD $108.65 / 72-43-140, `parity_test.py` PASS (460 signals, 0 mismatches, + the new blackout check), `paper_exit_test.py` PASS (M5 OHLC 48 / +$89.43 / PF 1.35), `btc/tool.py --check` 10/10, `btc/e2e_smoke.py` ALL PASS on both the BTC instance and the gold config dir.** Sanity check on the new deriver: run on `data/GOLD_M5.csv` it reproduces gold's documented facts (spread mean $0.47, break-even WR 28.6%, suggested daily loss $31.3 vs the adopted $30). | User asked to follow through the pending work and to add a web reference for BTC like the gold material. Phase 0/1 still need the server, so this closes every item that does not. |
 | 10-03 | **PR #14 merged into `main`** at 10:11:28 UTC as `bfb1dff` ([PR #14](https://github.com/shashidaren/scalper/pull/14); head `arena/01a10125-scalper`). The code is integrated; that does **not** establish post-merge server state. Before merge the BTC units were absent, and §0 now requires a server-side observation before claiming a deployment, runtime state, open port, or BTC dataset. | Integrate the separately verified BTC handoff/plumbing while keeping the next action evidence-led. |
