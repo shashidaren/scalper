@@ -8,6 +8,25 @@ code, parameters, or the server must update §1 (state), §3 (changelog) and
 
 ## 1. Where things stand (as of 2026-10-03)
 
+> **Update (2026-10-03, branch `arena/01a101b6-scalper`): reviewed the BTC
+> bootstrap and closed two follow-ups.** The bootstrap's old private-branch /
+> bundle instructions are stale: PR #16 already merged the pre-data work to
+> `main` as `a4d6ecf` at 11:22:44 UTC. Phase 1b is still open, but this Arena
+> checkout has only the gold CSVs, not `data/BTCUSD_M5.csv` or the referenced
+> server command script, and `ssh scalping` fails DNS resolution here; no BTC
+> result or server state was re-claimed, and no BTC service was touched. Added
+> `btc/train_select.py`: the existing generic `--oos`/`--candidates` reports
+> hard-code gold settings, so the new BTC selector ranks only on TRAIN, freezes
+> one config, then reads its cold OOS result; its replay applies a TRAIN-derived
+> spread veto. Also made `deploy.sh` default to `scalper-bot` only because
+> `systemctl restart` can start a disabled-but-installed BTC unit; BTC now
+> requires explicit `DEPLOY_SERVICES` opt-in after Phase 1 and paper approval.
+> Verification: gold backtest remains **255 / +$456.58 / PF 1.32 / max DD
+> $108.65 / 72-43-140**; parity and paper-exit tests PASS; BTC isolation/e2e
+> smoke tests PASS; `btc/train_select_test.py` and the deploy-service mock test
+> PASS. The selector's end-to-end smoke used `GOLD_M5.csv` under the BTC config
+> strictly as a plumbing test—not BTC evidence.
+
 > **Update (2026-10-03, branch `arena/01a1016f-scalper`): BTC pre-data
 > follow-through — gold is again PROVEN unchanged, nothing deployed.** Closed
 > every BTC item that does not need the server (details in `btc/HANDOFF.md` §9):
@@ -353,6 +372,7 @@ stale-tick thresholds (`STALE_TICK_WARN_CYCLES=20`,
 
 | Date | Change | Why |
 |---|---|---|
+| 10-03 | **BTC Phase 1b prep + deploy safety (`arena/01a101b6-scalper`, PR #17)**: added `btc/train_select.py` because the existing `research/strategy_sweep.py --oos` and `--candidates` reports hard-code gold settings; the BTC selector ranks a fixed ATR-floor/SL/BE grid on TRAIN only, derives its spread veto from TRAIN p90, then reads one frozen winner and baseline on cold OOS. Added optional `Params.max_spread_points` to the replay engine (default off, preserving gold). `deploy.sh` now defaults to `scalper-bot` only—`systemctl restart` starts disabled-but-installed units—while Phase 2 can opt BTC in explicitly. Arena had no BTC CSV or reachable `scalping` host, so no real Phase 1b result or new server state is claimed. Gold regression, BTC isolation/e2e, selector helper, and mocked deploy tests passed; the selector's Gold CSV smoke was plumbing-only. | Make the real-file BTC test reproducible and stop the main deploy cron from starting an unauthorized BTC unit. |
 | 10-03 | **BTC pre-data follow-through (`arena/01a1016f-scalper`)**: closed the two ⚠️ leftovers in `btc/HANDOFF.md` §4 (spread sweep levels and the parity fake tick are now derived from the loaded CSV/instrument rather than gold literals), added an optional, parity-tested **entry blackout** filter to shared code for 24/7 instruments (inert for gold), and added `btc/server_check.py` (read-only §0 evidence collector), `btc/derive_params.py` (CSV → candidate values for every flagged placeholder) and `docs/btc_market_reference_2026-10-03.md` (cited XM BTCUSD priors: contract, spread, leverage conflict, 24/7 + Saturday maintenance, Friday triple swap). **Gold unchanged and re-verified: backtest 255 / +$456.58 / PF 1.32 / max DD $108.65 / 72-43-140, parity PASS (460 signals, 0 mismatches + new blackout check), paper-exit PASS, `btc/tool.py --check` 10/10, `btc/e2e_smoke.py` ALL PASS both instances.** Nothing deployed; no server observation; `TRADING_MODE` still `FORWARD_TEST` on both instances. | User asked to follow through the pending BTC work and add a web reference sheet for bitcoin like the gold material. Phase 0/1 need the MT5 bridge, so this finishes everything that does not. |
 | 10-03 | **BTC plumbing finished: `btc/e2e_smoke.py` + full pipeline dry-run (`arena/01a10125-scalper`)**: committed end-to-end smoke test (fake MT5 behind a real RPyC `SlaveService` on an ephemeral port, temp instance/log dir, refuses a non-FORWARD_TEST config) — 7/7 PASS on the BTC instance (`-$3.45` stop = 344.7 px × 0.01 × 1 BTC) and on the gold config dir (`-$344.72` = × 100 oz), so the contract-size hook is proven on both instruments. Ran the whole BTC research pipeline (sweep `--verify` ≡ `backtest.py`, `--oos` train/cold + 4-fold walk-forward, `loss_analysis`) under the BTC config on synthetic BTC-shaped bars — the tooling runs; the synthetic P&L is noise and is labelled as such. Small shared-code cleanups: `loss_analysis` prints `session=off` when the filter is disabled, the walk-forward header says "Price Δ%" instead of "Gold Δ%", and the order comment is now `getattr(config, "ORDER_COMMENT", ...)`. **Gold re-verified after all of it: backtest 255 / +$456.58 / PF 1.32 / max DD $108.65 / 72-43-140, parity PASS (460 signals, 0 mismatches), paper-exit PASS (M5 OHLC 48 / +$89.43 / PF 1.35), `btc/tool.py --check` 10/10.** PR [#14](https://github.com/shashidaren/scalper/pull/14) subsequently merged into `main` as `bfb1dff` at 2026-10-03 10:11:28 UTC. The merge does not prove server deployment; see `btc/HANDOFF.md` §0 for the required post-merge observation before any BTC-runtime claim. | Finish the BTC plumbing verification before Phase 0/1 need it. |
 | 10-03 | **BTC scalper: separate handoff + Phase 1 plumbing (`arena/01a10125-scalper`)**: added `btc/HANDOFF.md` (reusability audit, instance-dir architecture, phased plan with gates, risks, server commands) and `btc/recon.py` (read-only Phase 0 probe: contract spec, spread-vs-ATR economics, weekday/hour coverage, writes `data/BTCUSD_M5.csv`; no orders and no `mt5.shutdown()` so the running gold bot is undisturbed; `--self-test` verified). Then the plumbing: ten hard-coded gold values became config keys with default-equal values (`CONTRACT_SIZE`, `PRICE_DIGITS`/POINT, `ATR_MIN`, `SL_ATR_MULT`, `TP_ATR_MULT`, `EMA_PERIOD`, `RSI_PERIOD`, `ATR_PERIOD`, plus `getattr`-style `LOG_DIR` and `DASHBOARD_TITLE`), and the BTC instance landed (`btc/config.py`, `_instance.py`, `run.py`, `dashboard.py` on :8089, `tool.py`, two systemd units, multi-service `deploy.sh`). **Proof it did not move gold: `backtest.py` still 255 / +$456.58 / PF 1.32 / max DD $108.65 / 72-43-140, `parity_test.py` PASS (460 signals, 0 mismatches), `btc/tool.py --check` 9/9, and a gold-valued instance config with a diverted `LOG_DIR` reproduces the same 255/+$456.58 through the hooked engine.** Nothing deployed; `btc/config.py` is all flagged placeholders and stays `FORWARD_TEST`. | User asked whether a bitcoin scalper is cheaper to set up on the back of this work, wanted it in a subfolder with its own port, and asked for a separate handoff. |
@@ -669,29 +689,21 @@ Note: the patched image may still carry `set -ex` tracing in
 - [ ] After more paper data: experiment with H1 trend confirmation or tighter
   session window (e.g. 08–16 UTC only).
 - [ ] Optional next filter: skip new entries after 16:00 UTC on Friday (thin gold).
-- [ ] **BTCUSD scalper (separate handoff: `btc/HANDOFF.md`).** Plumbing is
-  built and locally verified as of 2026-10-03 (gold proved unchanged — see the
-  §1 banner and §3); **nothing is deployed and no BTC data exists yet.**
-  Next concrete step is Phase 0 on the server (`mt5env/bin/python btc/recon.py
-  --bars 20000`, `btc/tool.py --check`, the 8089-port check and the
-  shared-bridge concurrency probe in `btc/HANDOFF.md` §7), then the Phase 1
-  gate: does the strategy shape have any edge on BTC at all (train-select →
-  cold OOS) before the units are installed. Do not copy gold parameters —
-  `btc/config.py` flags every placeholder and `btc/HANDOFF.md` §4 lists the ten
-  hooks, §6 the gold-safety evidence, §8 the risks (own XM account required
-  before any LIVE flip). **PR [#14](https://github.com/shashidaren/scalper/pull/14)
-  merged into `main` as `bfb1dff` at 2026-10-03 10:11:28 UTC.** Its merge makes
-  the repository eligible for the normal deploy cron, not proof that the server
-  updated or that BTC units remain absent. Start the observed-state checklist in
-  `btc/HANDOFF.md` §0 — now a single read-only command, `python3
-  btc/server_check.py` — then run Phase 0 before considering the runbook above.
-  Once `data/BTCUSD_M5.csv` exists, `btc/tool.py btc/derive_params.py` turns it
-  into candidate values for the flagged placeholders, and
-  `docs/btc_market_reference_2026-10-03.md` holds the cited web priors to check
-  the terminal against (including the XM crypto maintenance halt and the
-  Friday triple swap, which the new optional entry-blackout filter can avoid
-  opening into — the windows ship **disabled** until recon confirms the
-  server's UTC offset).
+- [ ] **BTCUSD scalper (separate handoff: `btc/HANDOFF.md`).** Plumbing and
+  pre-data follow-through are merged (PR #14 `bfb1dff`, #15, #16 `a4d6ecf`;
+  latest merge 2026-10-03 11:22:44 UTC). The earlier bootstrap reports that
+  `scalping` has a 20k-bar `data/BTCUSD_M5.csv` and that the BTC bot unit was
+  disabled, but this session could not reach that host; those are carry-over
+  facts, not a fresh server observation. Do not infer server status from this
+  checkout (which has only gold CSVs). Start with the read-only
+  `python3 btc/server_check.py`, then follow Phase 1b in `btc/HANDOFF.md`:
+  compare `--verify` with `backtest.py`, run the BTC-specific
+  `btc/tool.py btc/train_select.py` (the generic `--oos`/`--candidates` reports
+  are gold-specific), and record real-file results. Do not copy gold parameters
+  or adopt the proxy result. Keep `btc/config.py` placeholders and do not start
+  BTC services until the spread veto, shared-bridge concurrency, edge gate, and
+  explicit paper-deployment approval are all resolved. `deploy.sh` now defaults
+  to gold-only; Phase 2 must opt in to the BTC unit explicitly.
 
 ## 6. Runbook (common commands, on the server)
 

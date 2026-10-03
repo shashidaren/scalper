@@ -78,9 +78,14 @@ class Params:
     be_trigger_r: float | None = 0.75
     max_bars_in_trade: int | None = None
 
-    # costs
+    # costs / live entry gate
     spread_price: float | None = 0.30   # None -> use the CSV's per-bar spread column
     lot_size: float = 0.01
+    # Optional replay-only live spread veto. Kept unset by default so the
+    # existing gold --verify path remains identical to backtest.py, which does
+    # not model run.py's entry veto. BTC research can pass a TRAIN-derived
+    # threshold explicitly.
+    max_spread_points: float | None = None
 
     # bookkeeping
     label: str = "baseline"
@@ -214,6 +219,22 @@ def blackout_mask(times: pd.Series, blackouts) -> np.ndarray | None:
                      for t in times.dt.to_pydatetime()], dtype=bool)
 
 
+def spread_gate_mask(df: pd.DataFrame, max_spread_points: float | None) -> np.ndarray | None:
+    """Return the live entry spread-veto mask for the replay loop.
+
+    `run.py` checks the current tick's spread before evaluating a signal. The
+    replay loop represents that same decision point with the current/forming
+    bar (`i`), so the CSV spread at `i` is the closest available equivalent.
+    Missing/invalid quotes are blocked conservatively when the gate is enabled.
+    """
+    if max_spread_points is None:
+        return None
+    if "spread" not in df.columns:
+        raise ValueError("max_spread_points requires a per-bar 'spread' column")
+    points = pd.to_numeric(df["spread"], errors="coerce").to_numpy(float)
+    return ~np.isfinite(points) | (points > float(max_spread_points))
+
+
 def signal_at(p: Params, ind: dict, hours: np.ndarray, h1_up, i: int,
               blocked: np.ndarray | None = None):
     """Signal decision at loop bar `i` — a direct transcription of
@@ -260,6 +281,9 @@ def run(csv_file: str, p: Params, df: pd.DataFrame | None = None) -> dict:
             p = replace(p, spread_price=float(getattr(config, "SPREAD_COST_PRICE", 0.45)))
     h1_up = h1_trend_series(df, p) if p.h1_trend else None
     blocked = blackout_mask(df["time"], p.blackouts)
+    spread_blocked = spread_gate_mask(df, p.max_spread_points)
+    if spread_blocked is not None:
+        blocked = spread_blocked if blocked is None else (blocked | spread_blocked)
 
     balance = 1000.0
     initial = balance
