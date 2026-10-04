@@ -124,17 +124,24 @@ def collect(repo: str, journal_lines: int) -> dict:
             r["portfolio"] = f"unreadable: {e}"
     else:
         r["portfolio"] = "absent (no combined gate yet — both bots must have run once)"
-    r["account_mode"] = os.getenv("ACCOUNT_MODE") or "unknown (check .env ACCOUNT_MODE or config)"
-    # also try reading from .env if present
+    r["account_mode"] = os.getenv("ACCOUNT_MODE") or "shared (default — .env ACCOUNT_MODE not set)"
+    # Also try reading from .env if present.
     env_path = os.path.join(repo, ".env")
     if os.path.exists(env_path):
         try:
             for line in open(env_path):
-                if line.strip().startswith("ACCOUNT_MODE"):
-                    r["account_mode"] = line.strip()
+                key, sep, value = line.strip().partition("=")
+                if sep and key.strip() == "ACCOUNT_MODE":
+                    r["account_mode"] = value.strip() or r["account_mode"]
                     break
         except Exception:
             pass
+    # Report what the running portfolio gate actually used. This is stronger
+    # evidence than configuration alone and avoids an "unknown" mode after a run.
+    if isinstance(r["portfolio"], dict) and r["portfolio"].get("mode"):
+        r["effective_account_mode"] = r["portfolio"]["mode"]
+    else:
+        r["effective_account_mode"] = r["account_mode"]
 
     deploy_log = os.path.join(repo, "logs", "deploy.log")
     if os.path.exists(deploy_log):
@@ -182,7 +189,7 @@ def to_markdown(r: dict) -> str:
     L.append(f"- repo `{r['repo']}` HEAD `{r.get('git_head')}` branch `{r.get('git_branch')}`")
     L.append(f"- last commit: {r.get('git_last_commit', 'unknown')}")
     L.append(f"- `git status --short`: `{r.get('git_status')}`")
-    L.append(f"- account mode: `{r.get('account_mode')}` (shared=one pool :18812, isolated=two pools :18812/:18813)")
+    L.append(f"- account mode: `{r.get('account_mode')}`; effective: `{r.get('effective_account_mode')}` (shared=one pool :18812, isolated=two pools :18812/:18813)")
     L.append("")
     L.append("| unit | installed | enabled | active |")
     L.append("|---|---|---|---|")
