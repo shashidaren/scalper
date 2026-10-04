@@ -4,8 +4,8 @@
 # .env (gitignored) via env_file. See .env.example for the template.
 #
 # Hybrid 2026-10-04:
-#   ACCOUNT_MODE=shared   (default) → one container  mt5-gold  :18812  one equity pool
-#   ACCOUNT_MODE=isolated → two containers mt5-gold :18812 + mt5-btc :18813  two pools
+#   ACCOUNT_MODE=shared   (default) → one container  mt5      :18812  one equity pool
+#   ACCOUNT_MODE=isolated → two containers mt5      :18812 + mt5-btc :18813  two pools
 # Second container is opt-in via Compose profile "isolated" so shared mode pays zero overhead:
 #   docker compose up -d                          # shared (one container)
 #   docker compose --profile isolated up -d       # isolated (two containers)
@@ -19,11 +19,10 @@
 #   docker compose --profile isolated up -d
 
 services:
-  mt5-gold:
-    container_name: mt5-gold
-    # Compat: the old name "mt5" is kept as an alias so existing scripts
-    # (`docker ps | grep mt5`, `docker logs mt5`) still match.
-    # Remove the alias after one release if desired.
+  # Keep the historic service/container name. Renaming this to mt5-gold makes
+  # Compose leave the existing mt5 container orphaned, still holding :5901.
+  mt5:
+    container_name: mt5
     image: lprett-mt5linux-patched
     restart: unless-stopped
     env_file:
@@ -43,12 +42,6 @@ services:
       - "${MT5_GOLD_PORT:-18812}:18812"   # RPyC bridge — gold bot connects here
       - "5901:5901"
       - "8080:8080"                      # noVNC: http://<server-ip>:8080
-    # Backward compat for scripts that address "mt5" by name/port 18812
-    # (both compose names resolve to this container in shared mode)
-    networks:
-      default:
-        aliases:
-          - mt5
 
   mt5-btc:
     container_name: mt5-btc
