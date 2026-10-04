@@ -11,7 +11,10 @@ User=root
 # (see btc/_instance.py) so path order can never mix the two instances.
 WorkingDirectory=/root/scalper/btc
 Environment=PATH=/root/scalper/mt5env/bin:/usr/local/bin:/usr/bin:/bin
-# Same shared MT5 container/bridge as the gold bot (localhost:18812).
+# Hybrid 2026-10-04: isolated BTC reads MT5_BTC_PORT via env; shared keeps 18812.
+EnvironmentFile=-/root/scalper/.env
+# Same shared MT5 container/bridge as the gold bot in shared mode (localhost:18812),
+# second container :18813 in isolated mode.
 ExecStartPre=/root/scalper/mt5env/bin/python /root/scalper/wait_for_mt5.py --timeout 180
 ExecStart=/root/scalper/mt5env/bin/python -u /root/scalper/btc/run.py
 Restart=always

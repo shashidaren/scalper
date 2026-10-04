@@ -8,7 +8,9 @@ Failure modes handled here:
   * Dead/hung server mid-session                        -> bounded RPC timeout
   * Any of the above during setup                       -> connection cleaned up
 """
+import os
 import socket
+import threading
 import time
 
 import rpyc
@@ -50,6 +52,8 @@ def probe_bridge(host=None, port=None, timeout=5.0):
 class MT5Bridge:
     """Connects to MetaTrader5 through the RPyC classic server."""
 
+    _lock = threading.RLock()
+
     def __init__(self):
         self.conn = None
         self.mt5 = None
@@ -60,6 +64,15 @@ class MT5Bridge:
         self._cached_forming_bar_ts = None
         self.rates_full_fetches = 0
         self.rates_cache_hits = 0
+        self._shared = bool(getattr(config, "SHARED_BRIDGE", False))
+        env_mode = os.getenv("ACCOUNT_MODE", "").strip().lower()
+        if env_mode == "isolated" and getattr(config, "SYMBOL", "") == "BTCUSD":
+            env_port = os.getenv("MT5_BTC_PORT") or os.getenv("MT5_GOLD_PORT")
+            if env_port:
+                try:
+                    config.PORT = int(env_port)
+                except Exception:
+                    pass
 
         # 1) Classified TCP pre-check so errors are actionable.
         ok, err = probe_bridge(timeout=getattr(config, "CONNECT_TIMEOUT_SECONDS", 10))
@@ -118,19 +131,22 @@ class MT5Bridge:
             raise
 
     def get_account_info(self):
-        return self.mt5.account_info()
+        with self._lock:
+            return self.mt5.account_info()
 
     def get_live_tick(self, retries=5):
-        for _ in range(max(int(retries), 1)):
-            tick = self.mt5.symbol_info_tick(config.SYMBOL)
-            if tick and tick.bid > 0 and tick.ask > 0:
-                return tick
-            if retries > 1:
-                time.sleep(0.5)
-        return None
+        with self._lock:
+            for _ in range(max(int(retries), 1)):
+                tick = self.mt5.symbol_info_tick(config.SYMBOL)
+                if tick and tick.bid > 0 and tick.ask > 0:
+                    return tick
+                if retries > 1:
+                    time.sleep(0.5)
+            return None
 
     def get_symbol_info(self):
-        return self.mt5.symbol_info(config.SYMBOL)
+        with self._lock:
+            return self.mt5.symbol_info(config.SYMBOL)
 
     @staticmethod
     def _bar_time(bar):
@@ -153,6 +169,10 @@ class MT5Bridge:
         self._cached_forming_bar_ts = None
 
     def get_rates(self, count=None, tick=None, force=False):
+        with self._lock:
+            return self._get_rates_locked(count, tick, force)
+
+    def _get_rates_locked(self, count=None, tick=None, force=False):
         # Default to the shared indicator window (+ a small safety margin) so
         # the live signal sees the same warm-up as the backtester; the strategy
         # slices back to INDICATOR_WINDOW_BARS (see config.INDICATOR_FETCH_MARGIN).
@@ -238,12 +258,13 @@ class MT5Bridge:
         return rates
 
     def has_open_position(self):
-        positions = self.mt5.positions_get(symbol=config.SYMBOL)
-        if positions:
-            for pos in positions:
-                if pos.magic == config.MAGIC_NUMBER:
-                    return True
-        return False
+        with self._lock:
+            positions = self.mt5.positions_get(symbol=config.SYMBOL)
+            if positions:
+                for pos in positions:
+                    if pos.magic == config.MAGIC_NUMBER:
+                        return True
+            return False
 
     def _filling_mode(self, sym_info):
         """Pick an order filling mode the symbol actually supports.
@@ -269,22 +290,28 @@ class MT5Bridge:
         Returns True when the check cannot be performed (let the broker decide),
         False only when we can prove free margin is insufficient.
         """
-        try:
-            required = self.mt5.order_calc_margin(order_type, config.SYMBOL, float(volume), float(price))
-        except Exception:
-            return True
-        if required is None:
-            return True
-        try:
-            acc = self.mt5.account_info()
-            free = float(acc.margin_free) if acc else None
-        except Exception:
-            return True
-        if free is None:
-            return True
-        return float(required) <= free
+        with self._lock:
+            try:
+                required = self.mt5.order_calc_margin(order_type, config.SYMBOL, float(volume), float(price))
+            except Exception:
+                return True
+            if required is None:
+                return True
+            try:
+                acc = self.mt5.account_info()
+                free = float(acc.margin_free) if acc else None
+            except Exception:
+                return True
+            if free is None:
+                return True
+            return float(required) <= free
 
     def open_trade(self, signal, sl_dist, tp_dist, max_attempts=3):
+        """Thread-safe wrapper — serializes on the shared MT5 global."""
+        with self._lock:
+            return self._open_trade_locked(signal, sl_dist, tp_dist, max_attempts)
+
+    def _open_trade_locked(self, signal, sl_dist, tp_dist, max_attempts=3):
         """Execute a market trade with dynamic ATR-based SL/TP distances.
 
         Retries transient failures (requotes, price moved/off) up to
@@ -373,11 +400,13 @@ class MT5Bridge:
         if self._closed:
             return
         self._closed = True
-        try:
-            if self.mt5 is not None:
-                self.mt5.shutdown()
-        except Exception:
-            pass
+        # 2026-10-04 hybrid: in shared mode never shutdown the terminal — the other bot shares it.
+        if not getattr(self, "_shared", False):
+            try:
+                if self.mt5 is not None:
+                    self.mt5.shutdown()
+            except Exception:
+                pass
         try:
             if self.conn is not None:
                 self.conn.close()

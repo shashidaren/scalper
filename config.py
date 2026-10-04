@@ -124,3 +124,40 @@ INDICATOR_WINDOW_BARS = 1000
 # from the broker would otherwise silence every signal) without changing the
 # indicator values.
 INDICATOR_FETCH_MARGIN = 50
+
+# --- Portfolio / hybrid mode (2026-10-04) ---
+# One .env can drive two topologies:
+#   ACCOUNT_MODE=shared   -> one XM login, one container :18812, one equity pool (today)
+#   ACCOUNT_MODE=isolated -> two logins, two containers :18812/:18813, two pools
+# Env var wins; fall back to "shared" for today's paper books.
+import os as _os
+ACCOUNT_MODE = _os.getenv("ACCOUNT_MODE", "shared").strip().lower() or "shared"
+if ACCOUNT_MODE not in ("shared", "isolated"):
+    ACCOUNT_MODE = "shared"
+
+# Combined daily gates when ACCOUNT_MODE=shared (the whole account, not per-bot).
+# Per-bot gates (MAX_DAILY_LOSS=30 / MAX_TRADES_PER_DAY=15) stay as defense-in-depth;
+# the portfolio gate is measured from combined backtest/R P&L.
+# Defaults: gold 30+ btc 8 = 38 / trades 15+15 capped at 25 (see docs/redesign_2026-10-04.md §7).
+# Env overrides allow re-deriving without code change.
+try:
+    PORTFOLIO_MAX_DAILY_LOSS = float(_os.getenv("PORTFOLIO_MAX_DAILY_LOSS", "38.0"))
+except Exception:
+    PORTFOLIO_MAX_DAILY_LOSS = 38.0
+try:
+    PORTFOLIO_MAX_TRADES_PER_DAY = int(_os.getenv("PORTFOLIO_MAX_TRADES_PER_DAY", "25"))
+except Exception:
+    PORTFOLIO_MAX_TRADES_PER_DAY = 25
+
+# Shared-bridge flag: when True, MT5Bridge.close() must NOT call mt5.shutdown()
+# (shutdown kills the single MT5 terminal for both bots). Isolated mode sets False
+# per instance (each has its own Wine prefix / container).
+SHARED_BRIDGE = (ACCOUNT_MODE == "shared")
+# HOST/PORT can be overridden for isolated second container; shared keeps 18812
+HOST = _os.getenv("MT5_HOST", HOST)
+try:
+    if ACCOUNT_MODE == "isolated":
+        PORT = int(_os.getenv("MT5_GOLD_PORT", str(PORT)))
+except Exception:
+    pass
+

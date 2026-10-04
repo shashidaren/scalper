@@ -9,6 +9,10 @@ from logger import (
     LOG_DIR, log_system, log_trade, get_today_stats,
     update_connection_status, update_live_status
 )
+try:
+    from portfolio import portfolio_blocked
+except Exception:
+    portfolio_blocked = None  # portfolio gate optional (e.g. during unit tests)
 
 # Emergency stop: create this file to disable NEW entries without killing the
 # service (open positions keep their broker-side SL/TP). Remove it to resume.
@@ -157,6 +161,20 @@ def main():
                     log_system("WARNING", f"Max trades per day reached ({stats['trades']}). Sleeping.")
                     time.sleep(300)
                     continue
+
+                # --- Portfolio-level gate (shared-account mode) ---
+                # In ACCOUNT_MODE=shared one equity pool is at risk, so per-bot
+                # gates alone can hide 2× loss. Both bots check this combined gate
+                # every loop (file-based, <1ms when flat). Isolated mode returns False.
+                if portfolio_blocked is not None:
+                    try:
+                        p_blocked, p_reason = portfolio_blocked()
+                        if p_blocked:
+                            log_system("WARNING", f"Portfolio gate blocked: {p_reason} - sleeping.")
+                            time.sleep(300)
+                            continue
+                    except Exception as e:
+                        log_system("WARNING", f"Portfolio gate check failed: {e}")
 
                 # --- Market data (tolerant) ---
                 acc = bridge.get_account_info()

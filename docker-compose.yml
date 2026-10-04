@@ -1,31 +1,73 @@
-# MT5 terminal (Wine) + RPyC bridge that the scalper bot talks to.
+# MT5 terminal(s) (Wine) + RPyC bridge(s) that the scalper bots talk to.
 #
 # This file is committed and contains NO secrets. Credentials are read from
 # .env (gitignored) via env_file. See .env.example for the template.
 #
-# Usage:
-#   cp .env.example .env   # once, then fill in real values
+# Hybrid 2026-10-04:
+#   ACCOUNT_MODE=shared   (default) → one container  mt5-gold  :18812  one equity pool
+#   ACCOUNT_MODE=isolated → two containers mt5-gold :18812 + mt5-btc :18813  two pools
+# Second container is opt-in via Compose profile "isolated" so shared mode pays zero overhead:
+#   docker compose up -d                          # shared (one container)
+#   docker compose --profile isolated up -d       # isolated (two containers)
+#
+# Usage (shared, today):
+#   cp .env.example .env   # once, then fill in MT5_LOGIN / MT5_PASSWORD
 #   docker compose up -d
+#
+# Isolated (future):
+#   # fill MT5_GOLD_LOGIN / MT5_BTC_LOGIN in .env, set ACCOUNT_MODE=isolated
+#   docker compose --profile isolated up -d
 
 services:
-  mt5:
-    container_name: mt5
-    # Local image snapshotted from the patched container (fixes the stale-fifo
-    # and set -e restart bugs in lprett/mt5linux):
-    #   docker commit mt5 lprett-mt5linux-patched
-    # You can switch back to lprett/mt5linux:latest once upstream fixes them:
-    # https://github.com/lucas-campagna/mt5linux
+  mt5-gold:
+    container_name: mt5-gold
+    # Compat: the old name "mt5" is kept as an alias so existing scripts
+    # (`docker ps | grep mt5`, `docker logs mt5`) still match.
+    # Remove the alias after one release if desired.
     image: lprett-mt5linux-patched
     restart: unless-stopped
     env_file:
-      - .env              # MT5_LOGIN / MT5_PASSWORD / MT5_SERVER / VNC_PASSWORD
+      - .env
     environment:
-      MT5_HOST: 0.0.0.0   # bind address of the RPyC server inside the container
-      RPYC_PORT: 18812
+      # In isolated mode GOLD can have its own creds; fallback to shared MT5_*.
+      MT5_LOGIN: ${MT5_GOLD_LOGIN:-${MT5_LOGIN}}
+      MT5_PASSWORD: ${MT5_GOLD_PASSWORD:-${MT5_PASSWORD}}
+      MT5_SERVER: ${MT5_GOLD_SERVER:-${MT5_SERVER}}
+      VNC_PASSWORD: ${MT5_GOLD_VNC_PASSWORD:-${VNC_PASSWORD}}
+      MT5_HOST: 0.0.0.0
+      RPYC_PORT: ${MT5_GOLD_PORT:-18812}
       NOVNC_PORT: 5901
       NOVNC_PAGE_PORT: 8080
       NOVNC_HOST: localhost
     ports:
-      - "18812:18812"     # RPyC bridge — the bot connects here (config.HOST/PORT)
-      - "5901:5901"       # noVNC websocket
-      - "8080:8080"       # noVNC web UI: http://<server-ip>:8080
+      - "${MT5_GOLD_PORT:-18812}:18812"   # RPyC bridge — gold bot connects here
+      - "5901:5901"
+      - "8080:8080"                      # noVNC: http://<server-ip>:8080
+    # Backward compat for scripts that address "mt5" by name/port 18812
+    # (both compose names resolve to this container in shared mode)
+    networks:
+      default:
+        aliases:
+          - mt5
+
+  mt5-btc:
+    container_name: mt5-btc
+    image: lprett-mt5linux-patched
+    restart: unless-stopped
+    profiles: ["isolated"]               # only started with --profile isolated
+    env_file:
+      - .env
+    environment:
+      MT5_LOGIN: ${MT5_BTC_LOGIN}
+      MT5_PASSWORD: ${MT5_BTC_PASSWORD}
+      MT5_SERVER: ${MT5_BTC_SERVER:-${MT5_SERVER}}
+      VNC_PASSWORD: ${MT5_BTC_VNC_PASSWORD:-${VNC_PASSWORD}}
+      MT5_HOST: 0.0.0.0
+      RPYC_PORT: ${MT5_BTC_PORT:-18813}
+      NOVNC_PORT: 5901
+      NOVNC_PAGE_PORT: 8080
+      NOVNC_HOST: localhost
+    ports:
+      - "${MT5_BTC_PORT:-18813}:18813"   # BTC bot connects here when isolated
+      - "5902:5901"                      # avoid host collision with gold
+      - "8081:8080"                      # noVNC btc: http://<server-ip>:8081

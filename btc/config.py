@@ -20,15 +20,19 @@ Phase 1 train-select/cold-OOS sweep). Until then:
 Nothing here has been validated against a live BTCUSD feed yet — see
 `btc/HANDOFF.md` §3 for the broker specs still to confirm with `btc/recon.py`.
 """
+import os
 from pathlib import Path
 
-# --- connection (same MT5 terminal/container as gold; one bridge, two bots) ---
+# --- connection (hybrid 2026-10-04) ---
+# ACCOUNT_MODE=shared (default): one MT5 terminal / bridge :18812 for both bots
+# ACCOUNT_MODE=isolated: two terminals — gold :18812, btc :18813 (MT5_BTC_PORT)
+# Host/port here are defaults; mt5_bridge also re-reads env at connect time.
 HOST = "localhost"
-PORT = 18812
+PORT = 18812  # default; overridden below after ACCOUNT_MODE is known (18813 when isolated)
 
 # --- instrument ---
-SYMBOL = "BTCUSD"          # PLACEHOLDER: confirm the exact broker name (btc/recon.py)
-TIMEFRAME = "M5"
+SYMBOL = os.getenv("BTC_SYMBOL", "BTCUSD")          # PLACEHOLDER: confirm the exact broker name (btc/recon.py)
+TIMEFRAME = os.getenv("BTC_TIMEFRAME", os.getenv("TIMEFRAME", "M5"))  # M15/H1 for Phase-1c hypothesis A
 
 # Must differ from gold's 999111: positions/deals/ledger are magic-matched, so a
 # shared magic would let the two books see each other's fills in LIVE mode.
@@ -161,3 +165,24 @@ SIGNAL_ON_CLOSED_BAR = True
 # converges the EMA200 seed weight to ~5e-5 on gold and is symbol-agnostic.
 INDICATOR_WINDOW_BARS = 1000
 INDICATOR_FETCH_MARGIN = 50
+
+# --- Portfolio / hybrid mode (2026-10-04) ---
+# Must match gold's portfolio defaults when ACCOUNT_MODE=shared (one equity pool).
+ACCOUNT_MODE = os.getenv("ACCOUNT_MODE", "shared").strip().lower() or "shared"
+if ACCOUNT_MODE not in ("shared", "isolated"):
+    ACCOUNT_MODE = "shared"
+PORTFOLIO_MAX_DAILY_LOSS = float(os.getenv("PORTFOLIO_MAX_DAILY_LOSS", "38.0"))
+PORTFOLIO_MAX_TRADES_PER_DAY = int(os.getenv("PORTFOLIO_MAX_TRADES_PER_DAY", "25"))
+SHARED_BRIDGE = (ACCOUNT_MODE == "shared")
+
+# Hybrid port: isolated BTC uses 18813 (MT5_BTC_PORT), shared uses 18812
+if ACCOUNT_MODE == "isolated":
+    try:
+        PORT = int(os.getenv("MT5_BTC_PORT", "18813"))
+    except Exception:
+        PORT = 18813
+else:
+    PORT = 18812
+# HOST can also be overridden (rare)
+HOST = os.getenv("MT5_HOST", HOST)
+
