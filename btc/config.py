@@ -47,10 +47,11 @@ ORDER_COMMENT = "BTC Scalper v1"   # shown in the MT5 terminal / broker history
 # Non-negotiable until BTC has its own paper track record: no real orders.
 TRADING_MODE = "FORWARD_TEST"
 
-# Paper account (FORWARD_TEST only). Same $200 start as gold for comparability,
-# but note the per-trade $ are ~10x smaller at 0.01 lots (see CONTRACT_SIZE),
-# so this book will look quieter and its %% returns are not comparable to gold.
-SIM_START_BALANCE = 200.0
+# Paper account (FORWARD_TEST only). Same $300 start as gold for comparability
+# (bumped 2026-10-04: $200 → $300), but note the per-trade $ are ~10x smaller
+# at 0.01 lots (see CONTRACT_SIZE), so this book will look quieter and its %%
+# returns are not comparable to gold.
+SIM_START_BALANCE = 300.0
 
 # --- instrument economics ---
 # XM BTCUSD: 1.00 lot = 1 BTC, 2 decimals (digits/point come from symbol_info at

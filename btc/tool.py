@@ -69,7 +69,7 @@ def check(instance_dir: str, config) -> int:
             title=getattr(config, "DASHBOARD_TITLE", "Gold Scalper Dashboard"),
             now="2026-10-03 00:00:00",
             live={"connected": True, "bid": 77300.0, "ask": 77340.0, "spread": 4000,
-                  "balance": 200.0, "equity": 200.0, "positions": [], "mode": config.TRADING_MODE},
+                  "balance": 300.0, "equity": 300.0, "positions": [], "mode": config.TRADING_MODE},
             stats={"pnl": 0.0, "trades": 0, "wins": 0, "losses": 0},
             conn={"reconnect_count": 1, "last_tick_time": "2026-10-03 00:00:00"},
             uptime_str="0h 1m 0s",

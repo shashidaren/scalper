@@ -53,7 +53,7 @@ An experimental algorithmic trading and backtesting framework for **GOLD / XAUUS
 
 - Ported the `FORWARD_TEST` approach from `shashidaren/gold-trading-bot`:
   real MT5 ticks, fully simulated balance/positions — **no orders are sent**
-- `paper.py`: crash-safe simulated account ($200 start), SL/TP exit logic,
+- `paper.py`: crash-safe simulated account ($300 start, was $200 until 2026-10-04), SL/TP exit logic,
   breakeven ratchet at +0.75R (same as the gold bot)
 - Simulated closes update the daily stats, so all risk gates apply in paper mode
 - Dashboard shows a `(PAPER)` badge and the simulated balance
@@ -198,8 +198,8 @@ systemctl daemon-reload && systemctl restart scalper-bot
 ## Forward-Test (Paper) Mode
 
 `TRADING_MODE = "FORWARD_TEST"` (default) runs the exact same strategy and
-risk gates on **real MT5 ticks**, but fills are simulated against a $200
-paper balance (`SIM_START_BALANCE`). Open simulated positions survive bot
+risk gates on **real MT5 ticks**, but fills are simulated against a $300
+paper balance (`SIM_START_BALANCE`, was $200 until 2026-10-04). Open simulated positions survive bot
 restarts (`logs/paper_account.json`), exits resolve SL-first like the gold
 bot, and every simulated close counts toward the daily trade/loss limits.
 

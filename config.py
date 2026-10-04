@@ -12,8 +12,8 @@ TIMEFRAME = "M5"
 # "LIVE"         = real orders through the MT5 bridge
 TRADING_MODE = "FORWARD_TEST"
 
-# Paper account (FORWARD_TEST only)
-SIM_START_BALANCE = 200.0   # dummy balance to emulate with
+# Paper account (FORWARD_TEST only) — reset 2026-10-04: $200 → $300
+SIM_START_BALANCE = 300.0   # dummy balance to emulate with
 # Move SL to breakeven once +X R. Offline sweep (2026-09-30, 20k M5 bars,
 # docs/strategy_iteration_2026-09-30.md) shows the old 0.75R was actively
 # harmful: it scratched 94 of 189 trades at entry (each paying a full spread)

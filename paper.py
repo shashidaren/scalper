@@ -28,7 +28,7 @@ PRICE_DIGITS = int(getattr(config, "PRICE_DIGITS", 2))
 
 class PaperAccount:
     def __init__(self):
-        self.balance = float(getattr(config, "SIM_START_BALANCE", 200.0))
+        self.balance = float(getattr(config, "SIM_START_BALANCE", 300.0))
         self.position = None
         self.closed = 0
         self.wins = 0
@@ -61,7 +61,7 @@ class PaperAccount:
             }, f, indent=2)
 
     def reset(self):
-        self.balance = float(getattr(config, "SIM_START_BALANCE", 200.0))
+        self.balance = float(getattr(config, "SIM_START_BALANCE", 300.0))
         self.position = None
         self.closed = self.wins = self.losses = 0
         self.save()
