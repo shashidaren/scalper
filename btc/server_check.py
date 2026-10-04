@@ -32,7 +32,7 @@ DEFAULT_REPO = os.path.dirname(HERE)
 
 GOLD_UNITS = ("scalper-bot", "scalper-dashboard")
 BTC_UNITS = ("scalper-btc-bot", "scalper-btc-dashboard")
-PORTS = ("8088", "8089", "18812")
+PORTS = ("8088", "8089", "18812", "18813")
 
 
 def sh(cmd, cwd=None, timeout=20):
@@ -106,13 +106,35 @@ def collect(repo: str, journal_lines: int) -> dict:
             logs[rel] = "absent"
             continue
         entries = []
-        for fn in ("trades.jsonl", "daily_stats.json", "paper_account.json", "KILL_SWITCH"):
+        for fn in ("trades.jsonl", "daily_stats.json", "paper_account.json", "KILL_SWITCH", "portfolio.json", "portfolio_KILL_SWITCH"):
             p = os.path.join(d, fn)
             if os.path.exists(p):
                 mtime = datetime.fromtimestamp(os.path.getmtime(p), timezone.utc)
                 entries.append(f"{fn} ({os.path.getsize(p)}B, mtime {mtime:%Y-%m-%d %H:%M}Z)")
         logs[rel] = ", ".join(entries) if entries else "no runtime files"
     r["log_dirs"] = logs
+    # portfolio (hybrid 2026-10-04)
+    port_file = os.path.join(repo, "logs", "portfolio.json")
+    if os.path.exists(port_file):
+        try:
+            with open(port_file) as fh:
+                pj = json.load(fh)
+            r["portfolio"] = pj
+        except Exception as e:
+            r["portfolio"] = f"unreadable: {e}"
+    else:
+        r["portfolio"] = "absent (no combined gate yet — both bots must have run once)"
+    r["account_mode"] = os.getenv("ACCOUNT_MODE") or "unknown (check .env ACCOUNT_MODE or config)"
+    # also try reading from .env if present
+    env_path = os.path.join(repo, ".env")
+    if os.path.exists(env_path):
+        try:
+            for line in open(env_path):
+                if line.strip().startswith("ACCOUNT_MODE"):
+                    r["account_mode"] = line.strip()
+                    break
+        except Exception:
+            pass
 
     deploy_log = os.path.join(repo, "logs", "deploy.log")
     if os.path.exists(deploy_log):
@@ -160,6 +182,7 @@ def to_markdown(r: dict) -> str:
     L.append(f"- repo `{r['repo']}` HEAD `{r.get('git_head')}` branch `{r.get('git_branch')}`")
     L.append(f"- last commit: {r.get('git_last_commit', 'unknown')}")
     L.append(f"- `git status --short`: `{r.get('git_status')}`")
+    L.append(f"- account mode: `{r.get('account_mode')}` (shared=one pool :18812, isolated=two pools :18812/:18813)")
     L.append("")
     L.append("| unit | installed | enabled | active |")
     L.append("|---|---|---|---|")
@@ -178,6 +201,11 @@ def to_markdown(r: dict) -> str:
     L.append("")
     for rel, v in r["log_dirs"].items():
         L.append(f"- `{rel}/`: {v}")
+    portj = r.get("portfolio")
+    if isinstance(portj, dict):
+        L.append(f"- portfolio `logs/portfolio.json`: mode={portj.get('mode')} pnl={portj.get('pnl')} trades={portj.get('trades')}/{portj.get('limits',{}).get('max_trades')} blocked={portj.get('blocked')} reason={portj.get('block_reason')}")
+    else:
+        L.append(f"- portfolio: {portj}")
     L.append(f"- crontab (`crontab -l`):\n```\n{r.get('cron', 'unknown')}\n```")
     L.append(f"- deploy log tail:\n```\n{r['deploy_log_tail']}\n```")
     if r.get("journal"):

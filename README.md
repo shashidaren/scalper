@@ -155,11 +155,36 @@ Notes:
 - `docker-compose.yml` contains no secrets and is safe to commit.
 - The image uses the credentials only for its first-run auto-login. Once the
   Wine prefix exists, the login is stored inside it — manage it via the noVNC
-  UI at `http://<server-ip>:8080`.
+  UI at `http://<server-ip>:8080` (`:8081` for BTC when isolated).
 - If you rotate the MT5 password, change it in MT5 (noVNC), then keep `.env`
   in sync for the record.
 - Requires the Docker Compose plugin (`docker compose version`); if missing:
   `apt-get install docker-compose-plugin`.
+
+### Hybrid mode — one `.env`, shared vs isolated (2026-10-04)
+
+`ACCOUNT_MODE` in `.env` picks the topology without code change (see `.env.example`):
+
+- `ACCOUNT_MODE=shared` (default, what you run today) — one XM login → one container `mt5-gold` on `:18812`, one equity pool. Both bots share the MT5 terminal and the RPyC bridge; `portfolio.py` enforces a **combined** gate `PORTFOLIO_MAX_DAILY_LOSS=38 / TRADES=25` (per-bot `30/8` stay as defense-in-depth). No `mt5.shutdown()` on shared bridge.
+- `ACCOUNT_MODE=isolated` — two logins → `mt5-gold :18812` + `mt5-btc :18813`, two Wine prefixes, two pools. Each bot has its own bridge; per-account gates are authoritative, portfolio gate is advisory.
+
+Switching is deploy-time only:
+
+```bash
+# shared (today)
+docker compose up -d
+# isolated (after you create a second XM account)
+# 1) fill MT5_BTC_LOGIN / MT5_BTC_PASSWORD etc in .env, set ACCOUNT_MODE=isolated
+# 2) bring up second container
+docker compose --profile isolated up -d
+# 3) re-install systemd units (they read .env via EnvironmentFile)
+sudo cp services/scalper-bot.service services/scalper-btc-bot.service /etc/systemd/system/
+sudo systemctl daemon-reload && sudo systemctl restart scalper-bot
+```
+
+Both bots check the portfolio file `logs/portfolio.json` every loop; both dashboards (`:8088` gold, `:8089` btc) show the same banner and `GET /api/portfolio` (also merged into `/api/status`).
+
+See `docs/redesign_2026-10-04.md` (architecture) and `docs/btc_phase1c_hypotheses_2026-10-04.md` (next BTC hypotheses, untouched-data runbook).
 
 ---
 
@@ -212,6 +237,7 @@ and restart the service — same engine, real orders.
 
 - Spread filter, position guard, ATR filter
 - Dynamic 1:2.5 R:R
+- Portfolio gate (hybrid 2026-10-04): combined `PORTFOLIO_MAX_DAILY_LOSS=38` / `TRADES=25` when `ACCOUNT_MODE=shared` (plus per-bot `30/15` & `8/15`). `logs/portfolio_KILL_SWITCH` blocks both; per-bot `KILL_SWITCH` still works.
 - Daily loss limit ($30)
 - Max trades/day (15)
 - Auto-reconnect
