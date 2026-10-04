@@ -20,6 +20,13 @@ import config
 from logger import (
     LOG_DIR, get_connection_status, get_live_status, get_today_stats,
 )
+try:
+    from portfolio import portfolio_state as _get_portfolio_state
+except Exception:
+    try:
+        from portfolio import get_portfolio_state as _get_portfolio_state
+    except Exception:
+        _get_portfolio_state = None
 
 BASE_DIR = Path(__file__).parent
 TRADES_FILE = LOG_DIR / "trades.jsonl"
@@ -57,6 +64,12 @@ async def index(request: Request):
         conn = get_connection_status()
         recent_trades = read_jsonl(TRADES_FILE, limit=40)
         recent_system = read_jsonl(SYSTEM_FILE, limit=30)
+        portfolio = None
+        if _get_portfolio_state is not None:
+            try:
+                portfolio = _get_portfolio_state()
+            except Exception:
+                portfolio = None
 
         uptime_str = "—"
         try:
@@ -75,6 +88,7 @@ async def index(request: Request):
                 "live": live,
                 "stats": stats,
                 "conn": conn,
+                "portfolio": portfolio,
                 "uptime_str": uptime_str,
                 "trades": recent_trades,
                 "system_logs": recent_system,
@@ -108,7 +122,7 @@ async def index(request: Request):
 @app.get("/api/status")
 async def api_status():
     try:
-        return {
+        data = {
             "live": get_live_status(),
             "stats": get_today_stats(),
             "connection": get_connection_status(),
@@ -116,5 +130,21 @@ async def api_status():
             "system": read_jsonl(SYSTEM_FILE, limit=15),
             "timestamp": datetime.now().isoformat()
         }
+        if _get_portfolio_state is not None:
+            try:
+                data["portfolio"] = _get_portfolio_state()
+            except Exception:
+                pass
+        return data
+    except Exception as e:
+        return {"error": str(e), "timestamp": datetime.now().isoformat()}
+
+
+@app.get("/api/portfolio")
+async def api_portfolio():
+    if _get_portfolio_state is None:
+        return {"error": "portfolio module not available", "timestamp": datetime.now().isoformat()}
+    try:
+        return _get_portfolio_state()
     except Exception as e:
         return {"error": str(e), "timestamp": datetime.now().isoformat()}

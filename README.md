@@ -53,7 +53,7 @@ An experimental algorithmic trading and backtesting framework for **GOLD / XAUUS
 
 - Ported the `FORWARD_TEST` approach from `shashidaren/gold-trading-bot`:
   real MT5 ticks, fully simulated balance/positions — **no orders are sent**
-- `paper.py`: crash-safe simulated account ($200 start), SL/TP exit logic,
+- `paper.py`: crash-safe simulated account ($300 start, was $200 until 2026-10-04), SL/TP exit logic,
   breakeven ratchet at +0.75R (same as the gold bot)
 - Simulated closes update the daily stats, so all risk gates apply in paper mode
 - Dashboard shows a `(PAPER)` badge and the simulated balance
@@ -155,11 +155,36 @@ Notes:
 - `docker-compose.yml` contains no secrets and is safe to commit.
 - The image uses the credentials only for its first-run auto-login. Once the
   Wine prefix exists, the login is stored inside it — manage it via the noVNC
-  UI at `http://<server-ip>:8080`.
+  UI at `http://<server-ip>:8080` (`:8081` for BTC when isolated).
 - If you rotate the MT5 password, change it in MT5 (noVNC), then keep `.env`
   in sync for the record.
 - Requires the Docker Compose plugin (`docker compose version`); if missing:
   `apt-get install docker-compose-plugin`.
+
+### Hybrid mode — one `.env`, shared vs isolated (2026-10-04)
+
+`ACCOUNT_MODE` in `.env` picks the topology without code change (see `.env.example`):
+
+- `ACCOUNT_MODE=shared` (default, what you run today) — one XM login → one container `mt5-gold` on `:18812`, one equity pool. Both bots share the MT5 terminal and the RPyC bridge; `portfolio.py` enforces a **combined** gate `PORTFOLIO_MAX_DAILY_LOSS=38 / TRADES=25` (per-bot `30/8` stay as defense-in-depth). No `mt5.shutdown()` on shared bridge.
+- `ACCOUNT_MODE=isolated` — two logins → `mt5-gold :18812` + `mt5-btc :18813`, two Wine prefixes, two pools. Each bot has its own bridge; per-account gates are authoritative, portfolio gate is advisory.
+
+Switching is deploy-time only:
+
+```bash
+# shared (today)
+docker compose up -d
+# isolated (after you create a second XM account)
+# 1) fill MT5_BTC_LOGIN / MT5_BTC_PASSWORD etc in .env, set ACCOUNT_MODE=isolated
+# 2) bring up second container
+docker compose --profile isolated up -d
+# 3) re-install systemd units (they read .env via EnvironmentFile)
+sudo cp services/scalper-bot.service services/scalper-btc-bot.service /etc/systemd/system/
+sudo systemctl daemon-reload && sudo systemctl restart scalper-bot
+```
+
+Both bots check the portfolio file `logs/portfolio.json` every loop; both dashboards (`:8088` gold, `:8089` btc) show the same banner and `GET /api/portfolio` (also merged into `/api/status`).
+
+See `docs/redesign_2026-10-04.md` (architecture) and `docs/btc_phase1c_hypotheses_2026-10-04.md` (next BTC hypotheses, untouched-data runbook).
 
 ---
 
@@ -198,8 +223,8 @@ systemctl daemon-reload && systemctl restart scalper-bot
 ## Forward-Test (Paper) Mode
 
 `TRADING_MODE = "FORWARD_TEST"` (default) runs the exact same strategy and
-risk gates on **real MT5 ticks**, but fills are simulated against a $200
-paper balance (`SIM_START_BALANCE`). Open simulated positions survive bot
+risk gates on **real MT5 ticks**, but fills are simulated against a $300
+paper balance (`SIM_START_BALANCE`, was $200 until 2026-10-04). Open simulated positions survive bot
 restarts (`logs/paper_account.json`), exits resolve SL-first like the gold
 bot, and every simulated close counts toward the daily trade/loss limits.
 
@@ -212,6 +237,7 @@ and restart the service — same engine, real orders.
 
 - Spread filter, position guard, ATR filter
 - Dynamic 1:2.5 R:R
+- Portfolio gate (hybrid 2026-10-04): combined `PORTFOLIO_MAX_DAILY_LOSS=38` / `TRADES=25` when `ACCOUNT_MODE=shared` (plus per-bot `30/15` & `8/15`). `logs/portfolio_KILL_SWITCH` blocks both; per-bot `KILL_SWITCH` still works.
 - Daily loss limit ($30)
 - Max trades/day (15)
 - Auto-reconnect

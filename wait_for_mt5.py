@@ -38,9 +38,12 @@ def probe_tcp(host, port, timeout=5.0):
         return False, f"connection to {host}:{port} failed: {e}"
 
 
-def probe_mt5():
+def probe_mt5(shared=None):
     """Connect via RPyC and check that MetaTrader5 initializes. Returns (ok, error)."""
+    import os
     import rpyc
+    if shared is None:
+        shared = bool(getattr(config, "SHARED_BRIDGE", False)) or os.getenv("ACCOUNT_MODE", "shared").strip().lower() == "shared"
 
     conn = None
     try:
@@ -52,10 +55,14 @@ def probe_mt5():
             except Exception:
                 err = "unknown"
             return False, f"mt5.initialize() failed: {err}"
-        try:
-            mt5.shutdown()
-        except Exception:
-            pass
+        # 2026-10-04 hybrid: in shared mode the MT5 terminal is shared (one container),
+        # so probing must NOT call mt5.shutdown() — that would kill the other bot's session.
+        # The container lifecycle owns the terminal; a TCP+initialize probe is sufficient.
+        if not shared:
+            try:
+                mt5.shutdown()
+            except Exception:
+                pass
         return True, None
     except Exception as e:
         return False, str(e)
@@ -76,8 +83,13 @@ def main():
     parser.add_argument("--tcp-only", action="store_true",
                         help="only require the TCP port to accept connections, "
                              "skip the MetaTrader5 initialize() check")
+    parser.add_argument("--shared", action="store_true", default=None,
+                        help="force shared-bridge mode (skip mt5.shutdown on probe)")
+    parser.add_argument("--no-shared", dest="shared", action="store_false",
+                        help="force isolated mode (probe does shutdown)")
     args = parser.parse_args()
 
+    shared_probe = args.shared
     print(f"[wait_for_mt5] waiting for MT5 bridge at {config.HOST}:{config.PORT} "
           f"(timeout={args.timeout}s, interval={args.interval}s)", flush=True)
 
@@ -88,7 +100,7 @@ def main():
         ok, err = probe_tcp(config.HOST, config.PORT,
                             timeout=getattr(config, "CONNECT_TIMEOUT_SECONDS", 10))
         if ok and not args.tcp_only:
-            ok, err = probe_mt5()
+            ok, err = probe_mt5(shared=shared_probe)
         if ok:
             print(f"[wait_for_mt5] MT5 bridge is ready (after {attempt} attempt(s))", flush=True)
             return 0

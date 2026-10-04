@@ -130,8 +130,8 @@ def build_fake_mt5(arr: np.ndarray, state: dict, digits: int, point: float,
 
         def account_info(self):
             return SimpleNamespace(login=1, server="FAKE", currency="USD",
-                                   leverage=500, balance=200.0, equity=200.0,
-                                   margin_free=200.0, margin_mode=0,
+                                   leverage=500, balance=300.0, equity=300.0,
+                                   margin_free=300.0, margin_mode=0,
                                    trade_allowed=True)
 
         def copy_rates_from_pos(self, s, tf, start_pos, count):

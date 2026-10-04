@@ -8,6 +8,9 @@ Type=simple
 User=root
 WorkingDirectory=/root/scalper
 Environment=PATH=/root/scalper/mt5env/bin:/usr/local/bin:/usr/bin:/bin
+# Hybrid 2026-10-04: load ACCOUNT_MODE / portfolio limits / MT5_*_PORT from .env
+# so the same file drives shared vs isolated topology (dash = optional).
+EnvironmentFile=-/root/scalper/.env
 # Wait for the MT5 Docker container / RPyC bridge before starting the engine.
 # The engine itself also retries with backoff if the bridge drops later.
 ExecStartPre=/root/scalper/mt5env/bin/python /root/scalper/wait_for_mt5.py --timeout 180

@@ -99,11 +99,56 @@
       font-size: 0.8rem;
       text-align: center;
     }
+    .portfolio-banner {
+      background: #1e293b;
+      border: 1px solid var(--border);
+      border-radius: 0.75rem;
+      padding: 0.85rem 1.1rem;
+      margin-bottom: 1.1rem;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      flex-wrap: wrap;
+      gap: 0.5rem;
+      font-size: 0.9rem;
+    }
+    .portfolio-banner.blocked {
+      background: rgba(239,68,68,0.12);
+      border-color: rgba(239,68,68,0.4);
+    }
+    .portfolio-banner .label {
+      color: var(--muted);
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+      font-size: 0.75rem;
+      font-weight: 600;
+    }
   </style>
 </head>
 <body>
   <h1>{{ title }}</h1>
   <p class="subtitle">Last refresh: {{ now }} &nbsp;•&nbsp; Auto-refresh every 15s</p>
+
+  {% if portfolio is defined and portfolio %}
+  <div class="portfolio-banner {% if portfolio.blocked %}blocked{% endif %}">
+    <div>
+      <div class="label">Portfolio • {{ portfolio.mode|upper }} • {{ portfolio.date }}</div>
+      <div>
+        Combined PnL: <strong class="{% if portfolio.pnl >= 0 %}positive{% else %}negative{% endif %}">${{ "%.2f"|format(portfolio.pnl or 0) }}</strong>
+        &nbsp;•&nbsp; {{ portfolio.trades or 0 }}/{{ portfolio.limits.max_trades if portfolio.limits else "—" }} trades
+        &nbsp;•&nbsp; {{ portfolio.wins or 0 }}W / {{ portfolio.losses or 0 }}L
+        &nbsp;<span style="color:var(--muted)">(GOLD ${{ "%.2f"|format(portfolio.per_instance.gold.pnl if portfolio.per_instance and portfolio.per_instance.gold else 0) }} / BTC ${{ "%.2f"|format(portfolio.per_instance.btc.pnl if portfolio.per_instance and portfolio.per_instance.btc else 0) }})</span>
+      </div>
+      {% if portfolio.blocked %}
+      <div style="color:var(--red);margin-top:0.25rem">⛔ PORTFOLIO GATE: {{ portfolio.block_reason }}</div>
+      {% endif %}
+    </div>
+    <div style="font-size:0.8rem;color:var(--muted)">
+      Limits: -${{ portfolio.limits.max_daily_loss if portfolio.limits else "—" }} / {{ portfolio.limits.max_trades if portfolio.limits else "—" }} trades &nbsp;•&nbsp;
+      <a href="/api/portfolio" style="color:var(--blue)">portfolio API</a>
+    </div>
+  </div>
+  {% endif %}
 
   <!-- Top metrics -->
   <div class="grid">
