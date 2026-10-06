@@ -100,6 +100,33 @@ ENTRY_BLACKOUT_WINDOWS = [
     {"name": "xm_maintenance", "start": "08:00", "minutes": 45, "days": [5]},
 ]
 
+# --- strategy family selection (2026-10-06, Phase-1c plumbing) ---
+# "scalp"      = the shipped EMA200+RSI pullback shape (strategy.ScalpStrategy),
+#                FAIL on BTC M5 (Phase 1b) - kept as the default so NOTHING
+#                changes until a pre-registered successor passes its gate.
+# "donchian"   = hypothesis C: H1 Donchian breakout (btc/strategy_btc.py),
+#                pre-registered 2026-10-04/10-06. Flipping this is a
+#                DEPLOYMENT decision and requires ALL of:
+#                  1. btc/train_select.py --family donchian PASS on untouched
+#                     XM H1 bars (net>0, PF>=1.2, n>=60 cold OOS, g > c);
+#                  2. MAX_SPREAD_POINTS re-derived from that file's TRAIN
+#                     spread p90 (1.25x rule, btc/derive_params.py);
+#                  3. BTC_TIMEFRAME=H1 where the shape was validated;
+#                  4. explicit user authorisation (Phase 2).
+#                Until then it stays "scalp"; run.py refuses donchian+LIVE.
+BTC_STRATEGY = os.getenv("BTC_STRATEGY", "scalp")
+
+# --- hypothesis C geometry (active only when BTC_STRATEGY="donchian") ---
+# Pre-registered values from docs/btc_phase1c_hypotheses_2026-10-04.md and the
+# 2026-10-06 amendment (don100/exit50/EMA200, SL grid 2.0-2.5 in
+# btc/train_select.py --family donchian). PLACEHOLDERS until that gate passes
+# on untouched H1 data - they came from proxy (Binance) screens, which are
+# explicitly non-evidence for XM BTCUSD.
+DONCHIAN_ENTRY_BARS = 100      # breakout lookback (prior-bar channel)
+DONCHIAN_EXIT_BARS = 50        # opposite-channel exit lookback (bar close)
+DONCHIAN_TREND_EMA = 200       # trend filter span; 0 = off
+DONCHIAN_TIME_STOP_BARS = 0    # 0 = off; pre-registered robustness variant: 100
+
 # PLACEHOLDER: gold's adopted levels, unvalidated on BTC. Sweep 36/64…44/56 and
 # the 30/70 baseline before adopting anything.
 RSI_BUY_LEVEL = 40

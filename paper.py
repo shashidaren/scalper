@@ -25,15 +25,26 @@ STATE_FILE = LOG_DIR / "paper_account.json"
 CONTRACT_SIZE = float(getattr(config, "CONTRACT_SIZE", 100.0))
 PRICE_DIGITS = int(getattr(config, "PRICE_DIGITS", 2))
 
+_BE_UNSET = object()   # sentinel: resolve the BE trigger from config
+
 
 class PaperAccount:
-    def __init__(self):
+    def __init__(self, be_trigger_r=_BE_UNSET):
+        """`be_trigger_r` lets a strategy force the breakeven ratchet to a
+        fixed value (None = off) for its book; unset = config.BE_TRIGGER_R,
+        which is what gold has always done."""
         self.balance = float(getattr(config, "SIM_START_BALANCE", 300.0))
         self.position = None
         self.closed = 0
         self.wins = 0
         self.losses = 0
+        self._be_override = be_trigger_r
         self._load()
+
+    def _be_trigger(self):
+        if self._be_override is not _BE_UNSET:
+            return self._be_override
+        return getattr(config, "BE_TRIGGER_R", 0.75)
 
     # ------------------------------------------------ persistence
     def _load(self):
@@ -78,10 +89,16 @@ class PaperAccount:
         price = float(price)
         sl_dist = float(sl_dist)
         tp_dist = float(tp_dist)
+        # tp_dist <= 0 means NO take-profit (the MT5 tp=0 convention): the
+        # breakout family exits on its opposite channel / time stop instead.
+        # (With tp == entry a BUY would "hit TP" on the very next tick.)
+        has_tp = tp_dist > 0
         if side == "BUY":
-            sl, tp = round(price - sl_dist, PRICE_DIGITS), round(price + tp_dist, PRICE_DIGITS)
+            sl = round(price - sl_dist, PRICE_DIGITS)
+            tp = round(price + tp_dist, PRICE_DIGITS) if has_tp else None
         else:
-            sl, tp = round(price + sl_dist, PRICE_DIGITS), round(price - tp_dist, PRICE_DIGITS)
+            sl = round(price + sl_dist, PRICE_DIGITS)
+            tp = round(price - tp_dist, PRICE_DIGITS) if has_tp else None
         self.position = {
             "side": side,
             "entry": float(price),
@@ -112,7 +129,8 @@ class PaperAccount:
         exit_price = bid if p["side"] == "BUY" else ask
 
         # Breakeven ratchet: once +BE_TRIGGER_R, move SL to entry
-        be_r = getattr(config, "BE_TRIGGER_R", 0.75)
+        # (a strategy can force it off via the constructor override)
+        be_r = self._be_trigger()
         if be_r and not p["be_armed"] and p["sl_dist"] > 0:
             fav = (exit_price - p["entry"]) if p["side"] == "BUY" else (p["entry"] - exit_price)
             if fav >= be_r * p["sl_dist"]:
@@ -122,10 +140,10 @@ class PaperAccount:
 
         if p["side"] == "BUY":
             hit_sl = bid <= p["sl"]
-            hit_tp = bid >= p["tp"]
+            hit_tp = p["tp"] is not None and bid >= p["tp"]
         else:
             hit_sl = ask >= p["sl"]
-            hit_tp = ask <= p["tp"]
+            hit_tp = p["tp"] is not None and ask <= p["tp"]
 
         if hit_sl and hit_tp:
             return self.close(p["sl"], "BE" if p["be_armed"] else "SL")  # pessimistic
@@ -174,7 +192,8 @@ class PaperAccount:
             "volume": p["volume"],
             "price_open": p["entry"],
             "sl": p["sl"],
-            "tp": p["tp"],
+            # no-TP shapes render 0.00 on the dashboard (MT5's own convention)
+            "tp": p["tp"] if p["tp"] is not None else 0.0,
             "profit": 0.0,
             "time": p["time"],
         }]

@@ -31,10 +31,18 @@ THIS IS NOT THE ENGINE AND NOT EVIDENCE
 * Proxy bars are exchange spot klines (see docs/btc_spread_edge_analysis_2026-10-06.md
   for the sources); XM CFD bars can differ. Do not quote these numbers as XM
   results and do not treat a variant that screens well as an adopted parameter.
-* If this family is pursued, it must be implemented in the engine
-  (`btc/strategy_btc.py` + a parity-tested replay path) and then go through
-  `btc/train_select.py` on **untouched** XM bars, exactly like Phase 1b.
-  Nothing here may replace that gate.
+* The family IS implemented in the engine (`btc/strategy_btc.py`) with a
+  parity-tested replay path (`research/strategy_sweep.py` family="donchian");
+  the loop below uses the identical scheduling (signal bar = last closed bar,
+  fill at that close, re-entry allowed on the exit bar) and is proven
+  trade-for-trade equivalent to that replay at zero cost by
+  `btc/strategy_btc_test.py`. Any real run still goes through
+  `btc/train_select.py --family donchian` on **untouched** XM bars, exactly
+  like Phase 1b. Nothing here may replace that gate.
+* 2026-10-06 v2: the loop was aligned to the engine convention (v1 evaluated
+  signal+entry on the loop bar itself and could not re-open on the bar a
+  position closed - a scheduling artifact no engine path has). Screen numbers
+  change slightly; the doc's §4 table carries both versions' headline results.
 
 Usage
 -----
@@ -70,54 +78,86 @@ def donchian(high, low, n: int):
     return hh, ll
 
 
+def _windowed_ema(close: np.ndarray, span: int, n: int) -> np.ndarray:
+    """EMA(span, adjust=False) over a trailing window of exactly `n` bars -
+    the same windowed recursion the live engine and the replay use
+    (research/strategy_sweep._windowed_ema_last), so the screen, the replay
+    and live all price the same EMA instead of three different seeds."""
+    n = min(int(n), len(close))
+    if n < 1 or span <= 0:
+        return np.full(len(close), np.nan)
+    alpha = 2.0 / (span + 1.0)
+    kernel = alpha * (1.0 - alpha) ** np.arange(n - 1, -1, -1)
+    kernel[0] = (1.0 - alpha) ** (n - 1)          # the seed bar gets no alpha
+    out = np.full(len(close), np.nan)
+    if len(close) >= n:
+        out[n - 1:] = np.convolve(close, kernel[::-1], mode="valid")
+    return out
+
+
 def backtest(df, entry_n: int = 100, exit_n: int | None = None, sl_mult: float = 2.0,
              trend_ema: int | None = 200, time_stop: int | None = None,
              spread_bp: float = XM_SPREAD_BP, warmup: int = 1000,
              lot: float = 0.01, contract: float = 1.0) -> dict:
-    """Bar-close Donchian breakout replay. Pessimistic SL-first, spread on close."""
+    """Bar-close Donchian breakout replay, engine-aligned.
+
+    Loop convention is identical to research/strategy_sweep.run(family=
+    "donchian") and to backtest.py's gold path: at loop bar `i` the signal is
+    read on bar `i-1` (the last *closed* bar), the fill is approximated at
+    that bar's close, and management runs from bar `i` - so a position CAN be
+    re-opened with the exit bar itself as the new signal bar (this is what the
+    live engine does on the next cycle; the pre-2026-10-06 version of this
+    screen could not, a scheduling artifact it shared with no engine path).
+    `warmup` is the first SIGNAL bar; with replay Params use warmup_bars =
+    warmup + 2. Pessimistic SL-first; one round-trip spread per trade.
+    """
     exit_n = exit_n or max(1, entry_n // 2)
     h, l, c = (df[x].to_numpy(float) for x in ("high", "low", "close"))
     atr = atr_series(df)
-    ema = ema_series(c, trend_ema) if trend_ema else None
+    # window = warmup + 1: with replay Params warmup_bars = warmup + 2 the
+    # replay's EMA recursion spans warmup_bars - 1 = warmup + 1 bars ending at
+    # the signal bar - the same values as here.
+    ema = _windowed_ema(c, trend_ema, warmup + 1) if trend_ema else None
     hh, ll = donchian(h, l, entry_n)
     hhx, llx = donchian(h, l, exit_n)
 
     trades, pos = [], None
-    for i in range(warmup, len(df)):
+    for i in range(warmup + 1, len(df)):          # signal bar = i - 1 >= warmup
         if pos is None:
-            up = c[i] > hh[i] and not np.isnan(hh[i])
-            dn = c[i] < ll[i] and not np.isnan(ll[i])
-            if ema is not None and not np.isnan(ema[i]):
-                up, dn = up and c[i] > ema[i], dn and c[i] < ema[i]
-            if not (up or dn) or np.isnan(atr[i]) or atr[i] <= 0:
-                continue
-            side = "BUY" if up else "SELL"
-            entry = c[i]
-            sl_dist = atr[i] * sl_mult
-            pos = {"side": side, "entry": entry, "sl_dist": sl_dist,
-                   "sl": entry - sl_dist if side == "BUY" else entry + sl_dist,
-                   "cost": spread_bp / 10000.0 * entry, "bar": i}
-            continue
+            si = i - 1
+            up = c[si] > hh[si] and not np.isnan(hh[si])
+            dn = c[si] < ll[si] and not np.isnan(ll[si])
+            if ema is not None and not np.isnan(ema[si]):
+                up, dn = up and c[si] > ema[si], dn and c[si] < ema[si]
+            if (up or dn) and not np.isnan(atr[si]) and atr[si] > 0:
+                side = "BUY" if up else "SELL"
+                entry = c[si]
+                sl_dist = atr[si] * sl_mult
+                pos = {"side": side, "entry": entry, "sl_dist": sl_dist,
+                       "sl": entry - sl_dist if side == "BUY" else entry + sl_dist,
+                       "cost": spread_bp / 10000.0 * entry, "bar": si}
 
-        raw = None
-        if pos["side"] == "BUY":
-            if l[i] <= pos["sl"]:
-                raw = pos["sl"] - pos["entry"]
-            elif c[i] < llx[i]:
-                raw = c[i] - pos["entry"]
-        else:
-            if h[i] >= pos["sl"]:
-                raw = pos["entry"] - pos["sl"]
-            elif c[i] > hhx[i]:
-                raw = pos["entry"] - c[i]
-        if raw is None and time_stop is not None and i - pos["bar"] >= time_stop:
-            raw = (c[i] - pos["entry"]) if pos["side"] == "BUY" else (pos["entry"] - c[i])
-        if raw is not None:
-            r = (raw - pos["cost"]) / pos["sl_dist"]
-            trades.append({"r": r, "pnl": r * pos["sl_dist"] * lot * contract,
-                           "time": df["time"].iloc[i], "sl_dist": pos["sl_dist"],
-                           "side": pos["side"]})
-            pos = None
+        if pos is not None:
+            raw = None
+            if pos["side"] == "BUY":
+                if l[i] <= pos["sl"]:
+                    raw = pos["sl"] - pos["entry"]
+                elif c[i] < llx[i]:
+                    raw = c[i] - pos["entry"]
+            else:
+                if h[i] >= pos["sl"]:
+                    raw = pos["entry"] - pos["sl"]
+                elif c[i] > hhx[i]:
+                    raw = pos["entry"] - c[i]
+            if raw is None and time_stop is not None and i - pos["bar"] >= time_stop:
+                raw = ((c[i] - pos["entry"]) if pos["side"] == "BUY"
+                       else (pos["entry"] - c[i]))
+            if raw is not None:
+                r = (raw - pos["cost"]) / pos["sl_dist"]
+                trades.append({"r": r, "pnl": r * pos["sl_dist"] * lot * contract,
+                               "time": df["time"].iloc[i], "sl_dist": pos["sl_dist"],
+                               "side": pos["side"]})
+                pos = None
 
     if not trades:
         return {"n": 0, "trades": []}

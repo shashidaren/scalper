@@ -345,16 +345,19 @@ class MT5Bridge:
                 return None
 
             digits = sym_info.digits
+            # tp_dist <= 0 means no take-profit: send tp=0.0, MT5's native
+            # "no TP" value (tp == price would be rejected as an invalid stop).
+            has_tp = tp_dist is not None and float(tp_dist) > 0
             if signal == "BUY":
                 price = tick.ask
                 order_type = self.mt5.ORDER_TYPE_BUY
                 sl = round(price - sl_dist, digits)
-                tp = round(price + tp_dist, digits)
+                tp = round(price + tp_dist, digits) if has_tp else 0.0
             else:
                 price = tick.bid
                 order_type = self.mt5.ORDER_TYPE_SELL
                 sl = round(price + sl_dist, digits)
-                tp = round(price - tp_dist, digits)
+                tp = round(price - tp_dist, digits) if has_tp else 0.0
 
             if not self._margin_ok(order_type, config.LOT_SIZE, price):
                 print(f"[ERROR] Insufficient free margin for {signal} {config.LOT_SIZE} {config.SYMBOL} - order not sent.")

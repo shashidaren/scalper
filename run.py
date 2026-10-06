@@ -27,6 +27,66 @@ def backoff_delay(failures):
     return int(min(delay, max_delay))
 
 
+def new_strategy():
+    """Instance-config strategy factory.
+
+    Gold's config has no BTC_STRATEGY key, so this returns ScalpStrategy there
+    exactly as before. The BTC instance can opt into the pre-registered
+    Phase-1c shape (btc/strategy_btc.DonchianBreakoutStrategy) via
+    btc/config.py BTC_STRATEGY="donchian" - a deployment decision that
+    btc/HANDOFF.md gates behind a passing train-select run, a derived
+    MAX_SPREAD_POINTS and explicit user authorisation.
+    """
+    name = str(getattr(config, "BTC_STRATEGY", "scalp")).strip().lower()
+    if name in ("", "scalp"):
+        return ScalpStrategy()
+    if name in ("donchian", "donchian_breakout"):
+        if config.TRADING_MODE != "FORWARD_TEST":
+            raise SystemExit(
+                "BTC_STRATEGY=donchian is FORWARD_TEST-only: its bar-close "
+                "channel/time exits are implemented for the paper book, not "
+                "for broker order management. Flip TRADING_MODE back first.")
+        from strategy_btc import DonchianBreakoutStrategy   # btc/ is on sys.path
+        return DonchianBreakoutStrategy()
+    raise SystemExit(f"unknown BTC_STRATEGY={name!r} (expected 'scalp' or 'donchian')")
+
+
+def _bar_time(bar):
+    """Timestamp of a rates row (numpy int or whatever the bridge returns)."""
+    try:
+        t = bar["time"]
+        if hasattr(t, "item"):
+            t = t.item()
+        return t
+    except Exception:
+        return None
+
+
+def maybe_bar_close_exit(strategy, rates, position, last_closed_ts, bars_in_trade):
+    """Bar-close exit step for strategies with BAR_CLOSE_EXITS (donchian).
+
+    Returns (exit_or_None, new_last_closed_ts, new_bars_in_trade). `exit` is
+    the strategy.check_exit verdict ({"reason", "price"}) or None to stay
+    open. State machine: the first sighted closed bar only baselines; each
+    *new* closed bar advances bars_in_trade and asks the strategy whether the
+    opposite channel crossed on that close or the time stop elapsed. After an
+    engine restart mid-position a time stop can therefore only fire late,
+    never early. Pure function - unit-tested in btc/strategy_btc_test.py.
+    """
+    if rates is None or len(rates) < 3:
+        return None, last_closed_ts, bars_in_trade
+    closed_ts = _bar_time(rates[-2])
+    if closed_ts is None:
+        return None, last_closed_ts, bars_in_trade
+    if last_closed_ts is None:
+        return None, closed_ts, bars_in_trade        # baseline only
+    if closed_ts == last_closed_ts:
+        return None, last_closed_ts, bars_in_trade   # same bar, no count
+    bars_in_trade += 1
+    ex = strategy.check_exit(rates, position, bars_in_trade) if position else None
+    return ex, closed_ts, bars_in_trade
+
+
 def poll_paper_position(bridge, paper, total_seconds=None, interval_seconds=None,
                         sleep_fn=time.sleep):
     """While a paper position is open, poll live ticks at a tighter cadence
@@ -83,12 +143,19 @@ def main():
                                        symbol=config.SYMBOL)
     log_system("INFO", "=== Scalper Engine Started ===")
     bridge = None
-    strategy = ScalpStrategy()
+    strategy = new_strategy()
+    log_system("INFO", f"Strategy: {type(strategy).__name__}")
+
+    # A strategy may force the breakeven ratchet for its book (the donchian
+    # shape pre-registers BE off); absent the hook, config decides (gold path).
+    paper_kwargs = {}
+    if hasattr(strategy, "BE_OVERRIDE"):
+        paper_kwargs["be_trigger_r"] = strategy.BE_OVERRIDE
 
     paper = None
     ledger = None
     if config.TRADING_MODE == "FORWARD_TEST":
-        paper = PaperAccount()
+        paper = PaperAccount(**paper_kwargs)
         log_system("INFO",
             f"TRADING MODE: FORWARD_TEST (paper) - simulated balance ${paper.balance:.2f}, "
             f"NO real orders will be sent")
@@ -105,6 +172,13 @@ def main():
     stale_tick_cycles = 0
     last_tick_msc = None
     kill_switch_active = False
+
+    # Bar-close exit bookkeeping for strategies with BAR_CLOSE_EXITS (the
+    # donchian shape's channel/time exits; gold's ScalpStrategy has none of
+    # this). bars_in_trade counts bars closed since the fill bar, matching the
+    # replay's `i - entry_bar >= time_stop` and btc/breakout_screen.py.
+    bar_exit_last_closed_ts = None
+    bar_exit_bars_in_trade = 0
 
     try:
         while True:
@@ -332,6 +406,27 @@ def main():
                 # Already in a trade? (real or simulated)
                 if bridge.has_open_position() or (paper is not None and paper.has_position()):
                     log_system("INFO", "Active position exists – waiting...")
+                    # Bar-close exits (donchian family only; ScalpStrategy has
+                    # no BAR_CLOSE_EXITS so gold never fetches rates here).
+                    # The intra-bar SL was already resolved pessimistically by
+                    # paper.on_tick earlier this loop - same order as replay.
+                    if (paper is not None and paper.has_position()
+                            and getattr(strategy, "BAR_CLOSE_EXITS", False)):
+                        try:
+                            ex_rates = bridge.get_rates(tick=tick)
+                        except Exception:
+                            ex_rates = None
+                        ex, bar_exit_last_closed_ts, bar_exit_bars_in_trade = \
+                            maybe_bar_close_exit(
+                                strategy, ex_rates, paper.position,
+                                bar_exit_last_closed_ts, bar_exit_bars_in_trade)
+                        if ex:
+                            closed_info = paper.close(ex["price"], ex["reason"])
+                            log_system("INFO",
+                                f"[PAPER] Bar-close exit ({ex['reason']} after "
+                                f"{bar_exit_bars_in_trade} bars): "
+                                f"PnL ${closed_info['profit']:+.2f} | "
+                                f"Balance ${closed_info['balance']:.2f}")
                     poll_paper_position(bridge, paper)
                     continue
 
@@ -375,6 +470,13 @@ def main():
                                 "sl_dist": round(sl_dist, 2),
                                 "tp_dist": round(tp_dist, 2)
                             })
+                            if getattr(strategy, "BAR_CLOSE_EXITS", False):
+                                # The signal bar is the one that just closed;
+                                # the next bar to close counts as bar 1.
+                                bar_exit_bars_in_trade = 0
+                                bar_exit_last_closed_ts = (
+                                    _bar_time(rates[-2])
+                                    if rates is not None and len(rates) >= 2 else None)
                         else:
                             log_trade("SIM_ENTRY_FAILED", {"reason": "paper position already open"})
                     else:

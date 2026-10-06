@@ -1,6 +1,76 @@
 # HANDOFF — Bitcoin (BTCUSD) Scalper
 
-> ## ⛔ Status 2026-10-06 (latest): **the `high_spread` the user reported is the 1,500-point placeholder gate, not a market event — and 0 trades is the correct output.** No config or strategy value was changed; the gate is now *diagnosable* instead of silent.
+> ## 🔧 Status 2026-10-06 (latest): **"do we need more components for a more successful BTC scalper?" — verified YES; the missing pieces were the engine side of hypothesis C. All built, parity-proven, and inert until gated. No BTC trade is authorised by any of it.**
+>
+> **The question answered:** *verify whether additional components are needed to
+> make a more successful bitcoin scalper, recommend them, make the changes.*
+> Verification method: everything below was checked against the two real-data
+> verdicts on record (Phase-1b FAIL on XM M5; the 10-06 g/c analysis) — a
+> component is "needed" only if the plan already says a passing hypothesis must
+> go through it, and it does not exist yet.
+>
+> **What the evidence says is missing (and why):** the only book ever measured
+> on real XM bars (EMA200+RSI pullback, M5) is FAIL — gross edge +0.02R vs cost
+> 0.23–0.26R. The 10-06 amendment therefore pre-registered ONE successor shape
+> (hypothesis C: H1 long-lookback Donchian breakout, the only family whose
+> proxy gross edge pays the measured 5.486 bp spread through 2024) and said it
+> must be *implemented in the engine with the usual live/replay parity proof*
+> before running the unchanged Phase-1 gate on untouched H1 bars. Before this
+> session, that implementation **did not exist** — `btc/strategy_btc.py` was a
+> placeholder that raised, the replay engine had no breakout family, and no
+> selector/screen could express the shape. The screen prototype
+> (`btc/breakout_screen.py`) existed but was not engine-equivalent and had its
+> own loop convention.
+>
+> **Components added this session (branch `arena/290fea33-scalper`):**
+> | component | where | what it does |
+> |---|---|---|
+> | live strategy | `btc/strategy_btc.py` `DonchianBreakoutStrategy` | same interface as `ScalpStrategy`; closed-bar Donchian break + EMA trend filter + ATR stop, **no TP** (`tp_dist=0`), **no BE**; `check_exit()` for bar-close CHANNEL/TIME exits |
+> | replay family | `research/strategy_sweep.py` | `Params.family="donchian"` + `don_entry/don_exit`, `signal_at_donchian`, `compute_donchian`, channel/time/SL-first exits, `donchian_from_config()` |
+> | selector | `btc/train_select.py --family donchian` | pre-registered grid (SL 2.0/2.5 × time-stop off/100, geometry fixed from config), TRAIN-only rank → one frozen cold-OOS read, gate now **also requires g > c** |
+> | edge screen | `btc/edge_screen.py --family donchian` | gross-vs-cost decomposition for the breakout geometry on any CSV |
+> | engine wiring | `run.py` | `new_strategy()` factory (`BTC_STRATEGY` config flag, default `scalp`), `maybe_bar_close_exit()` state machine (unit-tested), paper BE override hook |
+> | paper support | `paper.py`, `mt5_bridge.py` | `tp_dist<=0` ⇒ no TP (was: instant TP at entry price!), strategy-forced BE override, MT5 `tp=0` convention |
+> | prototype fix | `btc/breakout_screen.py` v2 | loop aligned to the engine convention (v1 could not re-open on the exit bar — an artifact no engine path has); proven ≡ replay trade-for-trade |
+> | tests | `btc/strategy_btc_test.py` | **22/22**: replay ≡ prototype (5 geometries), live ≡ replay bar-for-bar (incl. blackouts, poisoned margin), `check_exit` ≡ replay exits (n=35), engine helper over 24 driven positions, factory/paper wiring |
+> | config | `btc/config.py` | `BTC_STRATEGY="scalp"` (env-overridable) + `DONCHIAN_*` keys, all flagged PLACEHOLDER |
+>
+> **Deliberately unchanged:** `MAX_SPREAD_POINTS=1500` (still 100% veto — the
+> fix remains a passing gate, not a bigger number), `TRADING_MODE="FORWARD_TEST"`,
+> `TIMEFRAME="M5"`, no BTC service, gold values everywhere (gold has no
+> `BTC_STRATEGY` key, so the factory returns `ScalpStrategy` and none of the new
+> code paths execute for gold). `new_strategy()` **refuses donchian+LIVE**:
+> bar-close exits are paper-only so far.
+>
+> **Recommendation (the honest version):** these components do not make BTC
+> profitable — they make the one pre-registered successor *testable*. The
+> binding constraints are unchanged: (1) the XM spread (c ≈ 0.23–0.26R on M5;
+> H1 stops cut it to ~0.075R analytically), and (2) whether a gross edge exists
+> at all on untouched XM bars — which is unmeasured by definition. The next
+> action is still on `scalping` and unchanged in spirit:
+> pull **untouched H1** bars, run `edge_screen --family donchian` (require g>c),
+> then `train_select --family donchian` (gate: net>0, PF≥1.2, n≥60, g>c). Only a
+> PASS + a re-derived spread gate + explicit user authorisation flips
+> `BTC_STRATEGY`/`BTC_TIMEFRAME` and starts a paper book (§5, runbook §7a).
+>
+> **Gold regressions after every shared-code edit (local, this branch):**
+> `backtest.py` **255 / +$456.58 / PF 1.32 / 72-43-140** (identical),
+> `research/parity_test.py` **PASS** (460 signals, 0 mismatches, blackout +
+> poisoned-margin + bridge-cache checks), `research/paper_exit_test.py` **PASS**,
+> `btc/e2e_smoke.py` **ALL PASS** on the BTC instance, `btc/tool.py --check`
+> **17/17**, `tests/test_spread_gate.py` 21/21, `btc/preflight_test.py` 9/9,
+> `btc/edge_screen_test.py` 11/11, `btc/train_select_test.py` PASS,
+> `tests/test_deploy_services.sh` 3/3. Known pre-existing wart (not a
+> regression, reproduced on the clean tree): `btc/e2e_smoke.py --config-dir .`
+> (gold config) is wall-clock-dependent — gold's 07–20 UTC session filter is
+> checked against real time, so it fails outside session hours.
+>
+> **Sandbox limits:** no `ssh scalping`, no exchange APIs, `data/` holds only
+> gold CSVs — so every BTC number here is synthetic-fixture plumbing evidence
+> or the recorded 10-03 server run, never a fresh XM measurement. The untouched
+> H1 pull and the gate itself remain server-side actions (§7a).
+
+> ## ⛔ Status 2026-10-06: **the `high_spread` the user reported is the 1,500-point placeholder gate, not a market event — and 0 trades is the correct output.** No config or strategy value was changed; the gate is now *diagnosable* instead of silent.
 >
 > **The question answered:** "no trades are happening, it's saying high spread."
 > Verified in code: `run.py` computes `spread_points` (`:263`) and gates on
@@ -309,13 +379,18 @@ spread column).
   │  shared engine — every module does a plain `import config`
   data/GOLD_M5.csv   logs/                     gold instance
   btc/                                         BTC instance
-    config.py        all BTC values (placeholders flagged)
+    config.py        all BTC values (placeholders flagged; BTC_STRATEGY, DONCHIAN_*)
     _instance.py     activate(dir) / add_engine_path(root) / import_engine(name, root)
     run.py           engine entry  -> services/scalper-btc-bot.service
     dashboard.py     :8089 board   -> services/scalper-btc-dashboard.service
     tool.py          run any repo script under the instance config; --check
     e2e_smoke.py     end-to-end fake-broker smoke test (no real MT5 needed)
-    train_select.py  BTC-only TRAIN-select -> cold-OOS research screen
+    strategy_btc.py  DonchianBreakoutStrategy (Phase-1c; inert until BTC_STRATEGY=donchian)
+    strategy_btc_test.py  22-check parity/wiring suite (synthetic bars)
+    train_select.py  BTC-only TRAIN-select -> cold-OOS screen (--family scalp|donchian)
+    edge_screen.py   gross-vs-cost (g/c) screen (--family scalp|donchian)
+    breakout_screen.py  hypothesis-C prototype, v2 = engine-aligned loop
+    preflight.py     spread-gate feasibility verdict (exit 0/1/2/3)
     recon.py         read-only Phase 0 probe (btc/HANDOFF §7)
     logs/            BTC runtime files (gitignored)
   services/scalper-btc-bot.service, scalper-btc-dashboard.service
@@ -429,16 +504,26 @@ Run it on the server any time: `mt5env/bin/python btc/e2e_smoke.py`.
 
 6. **Before spending an untouched pull on any shape, prove it can pay for the
    spread** with `btc/tool.py btc/edge_screen.py --csv <file>` (or `--cost bp`
-   for proxy bars): the shape must show **gross edge > cost ratio** (g > c, in
-   R units). A shape whose gross edge is below the instrument's spread/stop
-   ratio cannot pass the gate, and reading its cold OOS is a waste of the
-   cleanest evidence available.
+   for proxy bars; `--family donchian` for the Phase-1c shape): the shape must
+   show **gross edge > cost ratio** (g > c, in R units). A shape whose gross
+   edge is below the instrument's spread/stop ratio cannot pass the gate, and
+   reading its cold OOS is a waste of the cleanest evidence available.
 7. **Before enabling any service, run `btc/tool.py btc/preflight.py`** (live
    tick sampling read-only, or `--offline --csv`). Exit 0 OK / 1 STARVED /
    2 INFEASIBLE / 3 unmeasured. `MAX_SPREAD_POINTS` must be re-derived from
    measured bars (`btc/derive_params.py`: 1.25 × spread p90 ⇒ ≈6,250 pts on the
    10-03 file) **and** the shape must have passed Phase 1b — raising the gate
    alone is forbidden (see the 10-03 status block).
+8. **Phase-1c (donchian) gate:** `btc/tool.py btc/train_select.py --family
+   donchian --csv data/BTCUSD_H1.csv` on an untouched H1 pull. The TRAIN grid
+   is the pre-registered SL/time-stop set (geometry comes from `btc/config.py`
+   `DONCHIAN_*` keys); one frozen winner is read on cold OOS and must clear
+   **net > 0, PF ≥ 1.2, n ≥ 60, and g > c** (the zero-cost rerun is done
+   automatically and the gate refuses if g ≤ c). Only a PASS justifies
+   re-deriving `MAX_SPREAD_POINTS` from that file's TRAIN spread p90, setting
+   `BTC_STRATEGY="donchian"` + `BTC_TIMEFRAME=H1`, and — with explicit user
+   authorisation — starting the paper book. A FAIL is a one-page negative
+   result and no service; do not tune on OOS.
 
 **Phase 1c amendment (2026-10-06, before any untouched data was pulled;
 proxy-screened, see `docs/btc_spread_edge_analysis_2026-10-06.md`):**
@@ -454,6 +539,26 @@ live/replay parity proof, then the unchanged Phase-1b gate — frozen TRAIN winn
 positive on cold OOS, **PF ≳ 1.2**, **n ≥ 60** (the 2026-10-04 hypotheses doc
 also requires spread/risk < 15%). Proxy screens are **not evidence** for XM
 BTCUSD and cannot select anything.
+
+**Phase 1c plumbing: BUILT + parity-proven 2026-10-06 (this branch).** The
+"implement in the engine with live/replay parity" step above is now done and
+inert: `btc/strategy_btc.py` `DonchianBreakoutStrategy` (closed-bar Donchian
+break + EMA trend filter + ATR stop, no TP, no BE, bar-close CHANNEL/TIME
+exits), `research/strategy_sweep.py` `family="donchian"` replay,
+`btc/train_select.py --family donchian` (pre-registered SL/time-stop grid +
+the g>c precondition now in the gate), `btc/edge_screen.py --family donchian`,
+engine `new_strategy()` factory behind `BTC_STRATEGY` (default `scalp`), and
+no-TP / BE-override support in `paper.py`+`mt5_bridge.py`. Parity evidence:
+`btc/strategy_btc_test.py` **22/22** (replay ≡ the v2 engine-aligned
+`btc/breakout_screen.py` prototype trade-for-trade at zero cost; live
+`check_signal` ≡ replay bar-for-bar including blackouts and the poisoned-margin
+slice; `check_exit` ≡ replay exits; the engine bar-close state machine driven
+over 24 replay positions). **Nothing here selects or adopts a parameter** and
+nothing runs until §5's gate passes on untouched H1 bars; `BTC_STRATEGY` stays
+`scalp`, `MAX_SPREAD_POINTS` stays 1500, `TRADING_MODE` stays `FORWARD_TEST`.
+`new_strategy()` refuses `donchian` + `LIVE` (bar-close exits are paper-only).
+Runbook: §7a (untouched H1 pull → `edge_screen --family donchian` g>c check →
+`train_select --family donchian`).
 
 The replay uses the CSV's per-bar spread and the live entry-spread veto (with a
 threshold fixed from TRAIN p90); it still does not model slippage, swap P&L,
@@ -591,6 +696,29 @@ reads **"NO ENTRY IS POSSIBLE WITH THIS CONFIGURATION"** — so "0 trades" is
 never again indistinguishable from "no signal". The monitor is descriptive: it
 does not change the gate, the strategy, or config.
 
+**Phase-1c (donchian) tooling added 2026-10-06 — run on `scalping` once the
+untouched H1 pull exists; every command is read-only and writes no config:**
+
+```bash
+# 0) untouched H1 bars (the ONLY data the gate may read; never re-use the
+#    inspected 2026-07-25..10-03 M5 window)
+mt5env/bin/python btc/recon.py --timeframe H1 --bars 20000 --out data/BTCUSD_H1.csv
+
+# 1) can the shape pay for the spread on those bars? (g > c precondition)
+mt5env/bin/python btc/tool.py btc/edge_screen.py --family donchian --csv data/BTCUSD_H1.csv
+
+# 2) the gate: TRAIN-only rank -> one frozen cold-OOS read (net>0, PF>=1.2, n>=60, g>c)
+mt5env/bin/python btc/tool.py btc/train_select.py --family donchian --csv data/BTCUSD_H1.csv
+
+# 3) parity/wiring evidence (no bridge, synthetic bars — safe anywhere)
+mt5env/bin/python btc/tool.py btc/strategy_btc_test.py     # 22/22 expected
+```
+
+Do **not** flip `BTC_STRATEGY`/`BTC_TIMEFRAME` or start a service on anything
+but a PASS from step 2 plus a re-derived `MAX_SPREAD_POINTS` and explicit user
+authorisation (§5 item 8). `BTC_STRATEGY=donchian` is refused in LIVE until
+bar-close exits can drive real close orders (currently paper-only).
+
 **Proxy data is never evidence.** If a public exchange CSV is used for a shape
 screen, the numbers are at most a qualitative cross-check: exchange spot bars
 have no broker spread column, different venue/regime, and XM's real feed is what
@@ -631,6 +759,7 @@ happen on `scalping` via §7 and be reported back.
 
 | Date | Change | Why |
 |---|---|---|
+| 10-06 | **Phase-1c hypothesis-C engine plumbing built + parity-proven (`arena/290fea33-scalper`)** — verified that the missing components for a more successful BTC scalper were the *engine side* of the pre-registered successor shape, then built them all inert: **`btc/strategy_btc.py`** `DonchianBreakoutStrategy` (closed-bar don100/exit50 break + EMA200 trend filter + 2.0–2.5×ATR stop, **no TP** — `tp_dist=0` now means "no take-profit" end-to-end — **no BE**, `check_exit()` for bar-close CHANNEL/TIME exits; legacy `BtcStrategyPlaceholder` kept as a loud-fail shim); **`research/strategy_sweep.py`** gained `Params.family="donchian"` (+`don_entry`/`don_exit`), `compute_donchian`, `signal_at_donchian`, channel/time/SL-first exit management, `donchian_from_config()` (BE forced off, refuses `be_trigger_r`/`h1_trend` misuse), and the time-stop now counts from the fill bar (`entry_bar`) for donchian while gold's `opened_bar` counting is untouched; **`btc/train_select.py --family donchian`** — pre-registered grid (SL 2.0/2.5 × time-stop off/100, geometry fixed from config, no ATR floor), default cold-OOS minimum raised to n≥60 per the amendment, and the **g > c precondition is now part of the gate** (zero-cost rerun, refuses if the trade list changes); **`btc/edge_screen.py --family donchian`** — same g/c decomposition + SL/CHANNEL/TIME exit column for the breakout geometry; **`run.py`** — `new_strategy()` factory keyed off `BTC_STRATEGY` (default `scalp`; gold has no such key; donchian+LIVE refused; unknown values refused) and the `maybe_bar_close_exit()` state machine (baseline → count new closed bars → `strategy.check_exit`, paper-only), extracted as a pure function; **`paper.py`** — no-TP positions (`tp_dist<=0` ⇒ `tp=None`; dashboard renders 0.00), constructor `be_trigger_r` override (strategy-forced BE off; unset = config as before), SL exits unchanged; **`mt5_bridge.py`** — sends MT5's native `tp=0` when there is no TP; **`btc/config.py`** — `BTC_STRATEGY="scalp"` (env-overridable) + `DONCHIAN_ENTRY_BARS=100 / EXIT=50 / TREND_EMA=200 / TIME_STOP=0`, all flagged PLACEHOLDER; **`btc/breakout_screen.py` v2** — loop aligned to the engine convention (signal on last closed bar, fill at that close, re-entry allowed on the exit bar; v1's same-bar signal+entry & no-reentry was a scheduling artifact no engine path has) and its EMA is now the same windowed recursion as live/replay — with a provenance note added to `docs/btc_spread_edge_analysis_2026-10-06.md` §4 since its table predates v2. **New test `btc/strategy_btc_test.py` 22/22:** replay ≡ prototype trade-for-trade (5 geometries incl. EMA200 ± time-stop, zero cost), live `check_signal` ≡ replay `signal_at_donchian` bar-for-bar (226 signals, 0 mismatches; blackout variant 37 suppressed; poisoned-margin slice invariant), `check_exit` ≡ replay on all 35 CHANNEL/TIME exits (+ silent one bar early), `maybe_bar_close_exit` driven over 24 replay positions with time-stop off and 25, factory/LIVE-refusal/paper wiring/one-shot. `btc/tool.py --check` now **17/17** (+3: `BTC_STRATEGY` default, factory returns `ScalpStrategy` under the default, donchian class present). Gold after all shared-code edits: `backtest.py` **255 / +$456.58 / PF 1.32 / 72-43-140** identical, `parity_test.py` **PASS** (460, 0 mismatches), `paper_exit_test.py` **PASS**, `e2e_smoke.py` **ALL PASS** (BTC instance), spread-gate/preflight/edge-screen/train-select/deploy tests all PASS. **Unchanged:** `MAX_SPREAD_POINTS=1500`, `TRADING_MODE="FORWARD_TEST"`, `TIMEFRAME="M5"`, no BTC service, every gold value; donchian runs nothing until §5 item 8 passes on untouched H1. Known pre-existing wart reproduced on the clean tree: `e2e_smoke.py --config-dir .` (gold) is wall-clock-dependent (gold's 07–20 UTC session filter vs real time). | User asked to verify whether additional components are needed for a more successful BTC scalper. The two real-data verdicts on record (Phase-1b FAIL; the 10-06 g/c analysis) already pre-registered exactly one successor path — hypothesis C through the engine with live/replay parity — and none of that engine side existed (`strategy_btc.py` was a placeholder, no replay family, no selector, no no-TP/no-BE support), so the plan could not even be *attempted* on untouched data. Building it inert (flag-gated, parity-proven, gold-identical regressions) is what turns the pre-registration into an executable gate; it is explicitly not evidence of edge, and the binding constraints (XM spread; unmeasured gross edge on untouched bars) are unchanged. |
 | 10-06 | **Spread-gate feasibility telemetry + three diagnostics; `high_spread` root-caused (`arena/037cb1f4-scalper`)** — user reported "no trades are happening, it's saying high spread". Code-verified: `run.py` computes `spread_points` (`:263` after this change; `:257` before), the gate at `run.py:344` `if not gate_pass` logs `SKIP {"reason":"high_spread"}` and sleeps, so `strategy.check_signal()` never runs; `btc/config.py` still has the **1,500-point placeholder** against a real feed of **mean 4,242 pts** → **100.00% veto** (the derived 1.25× TRAIN p90 = **6,250 pts** vetoed 0.00%). **No gate, config, strategy or engine value was changed; `MAX_SPREAD_POINTS` stays 1500, `TRADING_MODE` stays `FORWARD_TEST`, no BTC service.** Added **`spread_gate.py`** (stdlib-only monitor: samples/vetoes/min/median/max, verdicts `ok\|starved\|infeasible`, rate-limited `SPREAD GATE INFEASIBLE` warning + recovery INFO; `if not gate_pass` is the same comparison as before); engine now publishes `spread_gate` in `live_status.json` (`run.py`, `logger.py` with a `None` default so old writers work) and the dashboard renders a red **"NO ENTRY IS POSSIBLE WITH THIS CONFIGURATION"** banner / amber STARVED variant plus `gate N, M% vetoed` on the price card (`dashboard.py`, `templates/index.html`). New tools: **`btc/preflight.py`** (verdict + exit codes 0/1/2/3, `--offline --csv` or read-only live ticks that never `mt5.shutdown()`), **`btc/edge_screen.py`** (gross-edge vs cost-ratio per geometry; reproduces gold's 255 / +$456.58 / PF 1.32 exactly, gold g/c = +0.157R/0.051R), **`btc/breakout_screen.py`** (hypothesis-C screen, proxy-only, prints a NON-EVIDENCE banner). Tests: `tests/test_spread_gate.py` 21/21, `btc/preflight_test.py` (BTC case grades INFEASIBLE exit 2, gold OK), `btc/edge_screen_test.py`; `btc/e2e_smoke.py` gained a gate-snapshot check, `btc/tool.py --check` is **14/14** on the BTC instance. Gold after the shared-code edits: `backtest.py` **255 / +$456.58 / PF 1.32 / WR 28.2% / 72-43-140**, `parity_test.py` **PASS** (460, 0 mismatches), `paper_exit_test.py` PASS, `train_select_test.py` PASS, `e2e_smoke.py` **ALL PASS** (both dirs), `test_deploy_services.sh` 3/3. Analysis + sources: **`docs/btc_spread_edge_analysis_2026-10-06.md`**. | §5 forbids loosening the spread gate to let a losing shape trade, so the honest fix is to make the *impossibility* visible and measured (engine log, `live_status.json`, dashboard banner, `preflight.py` exit code) rather than raise 1500 to ~4,250 and start a book that the 10-03 data already shows is negative. The R-unit decomposition (gold g +0.157R > c 0.051R; BTC g +0.02R < c 0.23–0.26R) is the decision rule any new hypothesis must clear. |
 | 10-06 | **Phase-1c amendment recorded on proxy (non-)evidence (`arena/037cb1f4-scalper`)** — screens of the pullback shape on public **Binance** klines (M15 2017–2020; H1 2017–2020 and 2017–2025) and of a Donchian family, costed at the measured XM quote of **5.486 bp of price** per round trip. Pullback: gross PF by era 1.17/1.26/**0.98/0.97**/1.02 (2017-18 → 2025) with net PF 1.14/1.20/0.94/0.91/0.94; bootstrap net R −0.0045, CI [−0.081, +0.073], P(>0)=45.2%; free-of-cost the 8-year book is still PF 1.01 (+$38.87), so **cost is not the binding constraint**. Breakout don100/exit50/sl2.0: net PF **1.16**, **+$406.20**, 532 trades, positive in 2021–22 (PF 1.28, +$264.90) and 2023–24 (PF 1.13, +$110.05), negative in 2025 (n=36, PF 0.55, −$171.80 on ~6 runaway-ATR-stop trades in Jan–Feb), longer lookbacks monotonically better (don150/75 PF 1.38, don200/100 PF 1.38) — **all of it proxy, none of it evidence for XM**, recorded in `docs/btc_spread_edge_analysis_2026-10-06.md` so the next pull is spent on C (H1 Donchian, pre-registered) instead of re-testing A. A is deprioritised (gross edge ~0 after 2021); B is not binding (~0.05 PF at H1 even at zero cost). | The 10-03 verdict says "a future attempt needs a new pre-registered hypothesis and its own untouched data pull". Screening shapes *before* spending the pull keeps the untouched CSVs clean and stops the same family being re-litigated; the g > c rule (§7a) is what a candidate must satisfy before its cold OOS is even worth reading. Era buckets were also corrected to half-open windows (`btc/breakout_screen.py`) after the first draft dropped 31-Dec trades; the pullback 2023–24 bucket is −$152.22 (n=363), not −$134.12, and the buckets now sum to the −$200.93 total. |
 | 10-03 | **BTCUSD Phase 1b completed: FAIL / No-Go — negative result recorded (`arena/01a102c4-scalper`)** — ran the full §5 Phase 1b sequence on the real `data/BTCUSD_M5.csv` (20,000 bars, `2026-07-25 21:55` .. `2026-10-03 13:40` UTC, 5,600 weekend bars, 24/24 hours) on `scalping` at `2026-10-03T17:07:55+00:00`, `/root/scalper` clean at `f5e76c8`, and wrote the mandated one-page negative result to **`docs/btc_phase1_result_2026-10-03.md`**. Gate order held: `strategy_sweep.py --verify` reproduced `backtest.py` exactly (**433 trades / −$165.84 / PF 0.74 / WR 23.8% / 103W-330L / avgR −0.46 / maxDD $169.46 / 107 TP · 59 BE · 267 SL**), then `btc/train_select.py` ranked the 60-config grid on TRAIN only (floors `zero/p10/p25/p50/p75 = 0.00/19.94/40.22/65.06/113.14`; replay veto `1.25× TRAIN p90 = 6,250` pts, vetoing 0.00% of TRAIN quotes vs **100.00%** for the `MAX_SPREAD_POINTS=1500` placeholder), froze `ATR p75=113.14 SL=2.0 BE=off` (`44 tr, +$33.43, PF 1.29`), then read cold OOS: **winner `n=70, −$46.11, PF 0.75, maxDD $56.29, P(net>0)=0.138`** and **baseline `n=217, −$95.50, PF 0.72, P(net>0)=0.025`** → **FAIL** (`net < 0` and `PF < 1.2`). `derive_params.py` explains why it cannot work: median price $77,304.55, `PRICE_DIGITS=2`, $0.0100 per 1.00 move, ATR(14) p50 81.62 / p90 179.03, spread mean 4,242 pts = 42.41 px = **$0.4242** round trip at 0.01 lots → **spread/median-ATR 52.0%**, **spread/risk 26.0%**, break-even WR 28.6% → **~36.0%** with spread vs **23.8%** actual. `research/loss_analysis.py`: gross profit $465.72 / gross loss $631.55, SL 267 exits = **96.0%** of gross loss (−$606.26) vs BE 59 = 3.9% (−$24.90), **net before spread +$17.16 (+$0.04/trade) vs $183.00 spread paid (28% of gross profit, avg $0.42/trade, 1R = avg $1.82)**; all 4 months, all 4 ATR quartiles, 6/7 weekdays and both directions negative; 76 losing streaks, mean 4.34, max 20. One-variable sweeps all net-negative (SL 1.0× −$338.79 → 3.0× −$6.96; BE 0.5R −$320.29 → off −$119.42; RSI 30/70 −$129.03 … 45/55 −$177.76; spread fallback 5.00 −$4.49 PF 0.99 vs per-bar CSV −$165.84). Server state confirmed read-only: gold `scalper-bot`/`scalper-dashboard` active (`SIM: $128.62 \| SimEquity: $131.03`, open paper position undisturbed, `:8088` up), `scalper-btc-bot`/`scalper-btc-dashboard` **disabled + inactive** (`:8089` not listening; BTC bot stopped `16:50:21 UTC` after 0 trades with `high_spread` skips at ~4,000 pts), bridge `18812` listening, deploy cron `*/15 * * * * DEPLOY_BRANCH=main` with **no** `DEPLOY_SERVICES` override, last deploy line `restarted scalper-bot at f5e76c8… (was d8add56…) branch=main` (gold-only restart confirmed). **Documentation only: `config.py`, `btc/config.py`, `strategy.py`, `run.py` untouched, `TRADING_MODE` still `FORWARD_TEST` on both instances, no BTC unit installed/enabled/started.** Gold + BTC tests re-run locally: `backtest.py` **255 / +$456.58 / PF 1.32 / max DD $108.65 / 72-43-140** (identical to the §6 baseline), `parity_test.py` **PASS** (460 signals, 0 mismatches, 20× cache reduction, blackout check clean), `btc/tool.py --check` **11/11**, `btc/train_select_test.py` **PASS**, `tests/test_deploy_services.sh` **PASS 3/3**. | §5 requires that when the cold-OOS gate fails, a one-page negative result is the deliverable and there is **no service**, with no tuning on OOS. Recording the measured verdict — and its structural cause (a ~52% spread-to-ATR ratio, i.e. a ~36% required win rate against 23.8% actual) — is what stops a later session from re-litigating the same dataset, loosening the spread gate, or copying gold parameters onto an instrument where they cannot pay for the spread. |

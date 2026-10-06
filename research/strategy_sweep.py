@@ -78,6 +78,17 @@ class Params:
     be_trigger_r: float | None = 0.75
     max_bars_in_trade: int | None = None
 
+    # strategy family. "scalp" (default) is the EMA+RSI pullback above and is
+    # what gold runs; "donchian" is the BTC Phase-1c hypothesis C shape
+    # (close-break of the prior N-bar Donchian channel, EMA trend filter,
+    # fixed ATR stop, opposite-channel exit on bar close, optional time stop,
+    # NO take-profit and NO breakeven ratchet). The replay for it mirrors
+    # btc/breakout_screen.py's prototype so the two can be proven equivalent
+    # (btc/strategy_btc_test.py); the live path is btc/strategy_btc.py.
+    family: str = "scalp"
+    don_entry: int = 20          # entry channel lookback (bars before the signal bar)
+    don_exit: int = 10           # exit channel lookback (close-cross on bar close)
+
     # costs / live entry gate
     spread_price: float | None = 0.30   # None -> use the CSV's per-bar spread column
     lot_size: float = 0.01
@@ -95,7 +106,7 @@ def params_from_config(**overrides) -> Params:
     """Defaults mirroring config.py, then apply overrides."""
     base = Params(
         warmup_bars=int(getattr(config, "INDICATOR_WINDOW_BARS", 202)),
-        ema_period=int(getattr(config, "EMA_PERIOD", 200)),
+        ema_period=int(getattr(config, "EMA_PERIOD", 200)),  # trend EMA span for donchian too
         rsi_period=int(getattr(config, "RSI_PERIOD", 14)),
         atr_period=int(getattr(config, "ATR_PERIOD", 14)),
         rsi_buy=float(getattr(config, "RSI_BUY_LEVEL", 35)),
@@ -110,6 +121,26 @@ def params_from_config(**overrides) -> Params:
         lot_size=float(getattr(config, "LOT_SIZE", 0.01)),
         spread_price=None,  # per-bar from the CSV, like backtest.py
         blackouts=config_blackouts(),
+    )
+    return replace(base, **overrides)
+
+
+def donchian_from_config(**overrides) -> Params:
+    """params_from_config() plus the instance's Donchian (Phase-1c) keys.
+
+    Reads DONCHIAN_ENTRY_BARS / DONCHIAN_EXIT_BARS / DONCHIAN_TREND_EMA /
+    DONCHIAN_TIME_STOP_BARS from the active instance config; BE is forced off
+    (the pre-registered shape has no ratchet). Gold's config has none of these
+    keys, so this is only meaningful under btc/config.py.
+    """
+    entry_n = int(getattr(config, "DONCHIAN_ENTRY_BARS", 20))
+    base = params_from_config(
+        family="donchian",
+        don_entry=entry_n,
+        don_exit=int(getattr(config, "DONCHIAN_EXIT_BARS", max(1, entry_n // 2))),
+        ema_period=int(getattr(config, "DONCHIAN_TREND_EMA", 0) or 0),
+        be_trigger_r=None,
+        max_bars_in_trade=(int(getattr(config, "DONCHIAN_TIME_STOP_BARS", 0)) or None),
     )
     return replace(base, **overrides)
 
@@ -176,6 +207,75 @@ def compute_indicators(df: pd.DataFrame, p: Params):
 
     return {"close": close, "high": high, "low": low,
             "ema": ema, "rsi": rsi, "atr": atr}
+
+
+def compute_donchian(df: pd.DataFrame, p: Params) -> dict:
+    """Channel arrays for the donchian family, aligned to the df index.
+
+    Entry/exit channels are the rolling max/min of the prior N bars, evaluated
+    EXCLUDING the bar itself (`.shift(1)`) — exactly the live computation in
+    btc/strategy_btc.py (rolling on the trimmed window is window-independent
+    here, unlike the EMA, which reuses the windowed-kernel proof below).
+    """
+    close = df["close"].to_numpy(float)
+    high = df["high"].to_numpy(float)
+    low = df["low"].to_numpy(float)
+
+    if p.ema_period > 0:
+        ema = _windowed_ema_last(close, p.ema_period, p.warmup_bars - 1)
+    else:                                    # trend filter off
+        ema = np.full(len(close), np.nan)
+
+    prev_close = np.concatenate([[np.nan], close[:-1]])
+    tr = np.nanmax(
+        np.vstack([high - low, np.abs(high - prev_close), np.abs(low - prev_close)]),
+        axis=0,
+    )
+    atr = _rolling_mean(tr, p.atr_period)
+
+    hh_entry = pd.Series(high).rolling(p.don_entry).max().shift(1).to_numpy()
+    ll_entry = pd.Series(low).rolling(p.don_entry).min().shift(1).to_numpy()
+    hh_exit = pd.Series(high).rolling(max(1, p.don_exit)).max().shift(1).to_numpy()
+    ll_exit = pd.Series(low).rolling(max(1, p.don_exit)).min().shift(1).to_numpy()
+
+    return {"close": close, "high": high, "low": low, "ema": ema, "atr": atr,
+            "hh_entry": hh_entry, "ll_entry": ll_entry,
+            "hh_exit": hh_exit, "ll_exit": ll_exit}
+
+
+def signal_at_donchian(p: Params, dind: dict, hours: np.ndarray, i: int,
+                       blocked: np.ndarray | None = None):
+    """Donchian breakout signal at loop bar `i` — transcription of
+    btc/strategy_btc.DonchianBreakoutStrategy.check_signal's closed-bar branch
+    (signal bar = i-1, fill at that bar's close), matching the entry rule of
+    the btc/breakout_screen.py prototype bar-for-bar.
+    """
+    si = i - 1                          # signal bar (window index -2 live)
+    if si < 1:
+        return None
+    if blocked is not None and blocked[i]:
+        return None
+    close, atr = dind["close"], dind["atr"]
+    hh, ll = dind["hh_entry"][si], dind["ll_entry"][si]
+    a = atr[si]
+    # breakout_screen semantics: a trade needs a defined channel and a
+    # positive ATR; NaN comparisons below are False, so undefined bars skip.
+    if not (np.isfinite(a) and a > 0 and a >= p.atr_min and close[si] > 0):
+        return None
+    in_session = (not p.session_enabled) or (p.session_start <= hours[i] < p.session_end)
+    if not in_session:
+        return None
+    up = close[si] > hh if np.isfinite(hh) else False
+    dn = close[si] < ll if np.isfinite(ll) else False
+    ema_i = dind["ema"][si]
+    if p.ema_period and np.isfinite(ema_i):     # NaN EMA -> filter not applied
+        up = up and close[si] > ema_i
+        dn = dn and close[si] < ema_i
+    if up:
+        return "BUY"
+    if dn:
+        return "SELL"
+    return None
 
 
 def h1_trend_series(df: pd.DataFrame, p: Params) -> np.ndarray:
@@ -267,7 +367,17 @@ def signal_at(p: Params, ind: dict, hours: np.ndarray, h1_up, i: int,
 def run(csv_file: str, p: Params, df: pd.DataFrame | None = None) -> dict:
     if df is None:
         df = pd.read_csv(csv_file, parse_dates=["time"])
+    if p.family not in ("scalp", "donchian"):
+        raise ValueError(f"unknown strategy family: {p.family!r}")
+    if p.family == "donchian":
+        # The pre-registered hypothesis-C shape has no breakeven ratchet, no
+        # take-profit and no H1 overlay; refuse a silently-different replay.
+        if p.be_trigger_r is not None:
+            raise ValueError("donchian family pre-registers BE off (be_trigger_r=None)")
+        if p.h1_trend:
+            raise ValueError("donchian family does not use the H1 trend overlay")
     ind = compute_indicators(df, p)
+    dind = compute_donchian(df, p) if p.family == "donchian" else None
     close, high, low = ind["close"], ind["high"], ind["low"]
     ema, rsi, atr = ind["ema"], ind["rsi"], ind["atr"]
     hours = df["time"].dt.hour.to_numpy()
@@ -297,7 +407,10 @@ def run(csv_file: str, p: Params, df: pd.DataFrame | None = None) -> dict:
     for i in range(start, n):
         # --- signal (mirrors check_signal: index -2 is the last completed bar)
         if trade is None and i >= start:
-            signal = signal_at(p, ind, hours, h1_up, i, blocked)
+            if p.family == "donchian":
+                signal = signal_at_donchian(p, dind, hours, i, blocked)
+            else:
+                signal = signal_at(p, ind, hours, h1_up, i, blocked)
             if signal:
                 si = i - 1                  # signal bar
                 entry = close[si]
@@ -306,8 +419,13 @@ def run(csv_file: str, p: Params, df: pd.DataFrame | None = None) -> dict:
                 trade = {
                     "type": signal, "entry": entry, "sl_dist": sl_dist,
                     "sl": entry - sl_dist if signal == "BUY" else entry + sl_dist,
-                    "tp": entry + tp_dist if signal == "BUY" else entry - tp_dist,
+                    "tp": None if p.family == "donchian" else
+                          (entry + tp_dist if signal == "BUY" else entry - tp_dist),
                     "be_armed": False, "opened_bar": i,
+                    # donchian time-stop counts bars since the FILL bar
+                    # (= signal bar; matches btc/breakout_screen.py), whereas
+                    # the scalp time-stop counts from the loop bar of entry.
+                    "entry_bar": si if p.family == "donchian" else i,
                 }
 
         # --- manage
@@ -326,7 +444,25 @@ def run(csv_file: str, p: Params, df: pd.DataFrame | None = None) -> dict:
             spread = float(spread_col[i]) if spread_col is not None else float(p.spread_price)
 
             closed = None
-            if side == "BUY":
+            if p.family == "donchian":
+                # Hypothesis-C exits, in btc/breakout_screen.py's order:
+                # pessimistic intra-bar SL first, then the opposite Donchian
+                # channel crossed on this bar's CLOSE, then the time stop.
+                if side == "BUY":
+                    if low[i] <= sl:
+                        pnl = (sl - entry) - spread
+                        closed = "SL"
+                    elif close[i] < dind["ll_exit"][i]:
+                        pnl = (close[i] - entry) - spread
+                        closed = "CHANNEL"
+                else:
+                    if high[i] >= sl:
+                        pnl = (entry - sl) - spread
+                        closed = "SL"
+                    elif close[i] > dind["hh_exit"][i]:
+                        pnl = (entry - close[i]) - spread
+                        closed = "CHANNEL"
+            elif side == "BUY":
                 if low[i] <= sl:
                     pnl = (sl - entry) - spread
                     closed = "BE" if (trade["be_armed"] and sl == entry) else "SL"
@@ -342,7 +478,7 @@ def run(csv_file: str, p: Params, df: pd.DataFrame | None = None) -> dict:
                     closed = "TP"
 
             if closed is None and p.max_bars_in_trade is not None:
-                if i - trade["opened_bar"] >= p.max_bars_in_trade:
+                if i - trade["entry_bar"] >= p.max_bars_in_trade:
                     px = close[i]
                     pnl = ((px - entry) if side == "BUY" else (entry - px)) - spread
                     closed = "TIME"
@@ -377,6 +513,7 @@ def run(csv_file: str, p: Params, df: pd.DataFrame | None = None) -> dict:
             "be": sum(1 for t in trades if t["result"] == "BE"),
             "sl": sum(1 for t in trades if t["result"] == "SL"),
             "time_exits": sum(1 for t in trades if t["result"] == "TIME"),
+            "channel": sum(1 for t in trades if t["result"] == "CHANNEL"),  # donchian only
             "avg_bars": sum(t["bars"] for t in trades) / total,
         })
     res["trades_list"] = trades
