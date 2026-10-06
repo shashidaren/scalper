@@ -201,6 +201,21 @@ Supporting measurements on the same 8-year H1 set:
 
 ## 4. A different family: long-lookback breakout (hypothesis C prototype)
 
+> **Provenance note (added 2026-10-06, later session):** the table below was
+> computed with `btc/breakout_screen.py` **v1**, whose loop evaluated
+> signal+entry on the loop bar itself and could not re-open a position on the
+> bar the previous one closed. When hypothesis C was wired into the engine
+> (see `btc/HANDOFF.md` 10-06 Phase-1c-plumbing block), the screen was aligned
+> to the engine convention (**v2**: signal on the last *closed* bar, fill at
+> that close, re-entry allowed on the exit bar — exactly what
+> `research/strategy_sweep.py` family="donchian" and the live path do, proven
+> trade-for-trade equivalent by `btc/strategy_btc_test.py`). Re-running the
+> screen now therefore gives slightly different trade counts/net around
+> re-entry-after-exit; treat the v2/replay numbers as the reference and this
+> table as the original screen that motivated the pre-registration. The
+> conclusion (a gross edge that pays the measured spread through 2024) is
+> unchanged in direction, and none of it is XM evidence either way.
+
 Same proxy data, same cost model, `btc/breakout_screen.py` (Donchian breakout on
 the closed bar, fill at that close, fixed ATR stop, opposite Donchian channel as
 the exit, EMA200 trend filter, one spread per trade):

@@ -77,6 +77,21 @@ def check(instance_dir: str, config) -> int:
     except ImportError as e:
         print(f"  (skipping sweep checks: {e})")
 
+    try:  # Phase-1c wiring: default stays the pullback shape until gated
+        import strategy as strategy_mod
+        import _instance as inst
+        run_mod = inst.import_engine("run", ROOT)
+        checks.append(("BTC_STRATEGY defaults to 'scalp' (no behaviour change)",
+                       str(getattr(config, "BTC_STRATEGY", "scalp")).lower() == "scalp"))
+        checks.append(("engine factory returns ScalpStrategy under the default",
+                       type(run_mod.new_strategy()) is strategy_mod.ScalpStrategy))
+        import strategy_btc
+        checks.append(("donchian strategy class present (Phase-1c landing zone)",
+                       hasattr(strategy_btc, "DonchianBreakoutStrategy")
+                       and strategy_btc.DonchianBreakoutStrategy.BAR_CLOSE_EXITS is True))
+    except Exception as e:
+        print(f"  (skipping strategy-factory checks: {e})")
+
     try:
         from jinja2 import Environment, FileSystemLoader
         env = Environment(loader=FileSystemLoader(str(Path(ROOT) / "templates")))

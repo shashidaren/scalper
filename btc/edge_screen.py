@@ -148,9 +148,31 @@ def screen_one(df, sweep, base, label: str, **overrides) -> dict:
         "gross_pf": gross.get("pf", float("nan")),
         "win_rate": net.get("win_rate", 0.0),
         "tp": net.get("tp", 0), "be": net.get("be", 0), "sl": net.get("sl", 0),
-        "time_exits": net.get("time_exits", 0),
+        "time_exits": net.get("time_exits", 0), "channel": net.get("channel", 0),
         "pays": (sum(g_r) / n) > (sum(cost_r) / n),
     }
+
+
+def donchian_variants(config) -> list[tuple[str, dict]]:
+    """Diagnostic variants around the pre-registered hypothesis-C geometry.
+
+    The base geometry (entry/exit/EMA/time-stop) comes from the instance
+    config; only the pre-registered levers (SL multiple, time stop, trend
+    filter, channel lookbacks) are varied, one at a time. Screening only —
+    selection still goes through btc/train_select.py --family donchian on
+    untouched bars.
+    """
+    entry_n = int(getattr(config, "DONCHIAN_ENTRY_BARS", 20))
+    exit_n = int(getattr(config, "DONCHIAN_EXIT_BARS", max(1, entry_n // 2)))
+    v = [(f"baseline don{entry_n}/exit{exit_n} (as configured)", {})]
+    for sl in (1.5, 2.0, 2.5, 3.0):
+        v.append((f"sl {sl}xATR", {"sl_atr_mult": sl}))
+    for ts in (50, 100, 200):
+        v.append((f"time stop {ts} bars", {"max_bars_in_trade": ts}))
+    v.append(("trend EMA off", {"ema_period": 0}))
+    for ne, nx in ((50, 25), (150, 75), (200, 100)):
+        v.append((f"don{ne}/exit{nx}", {"don_entry": ne, "don_exit": nx}))
+    return v
 
 
 def default_variants(config) -> list[tuple[str, dict]]:
@@ -186,6 +208,8 @@ def fmt_row(r: dict) -> str:
     verdict = "g > c" if r["pays"] else "g < c (cannot pay)"
     star = "  POSITIVE" if r["net_r"] > 0 else ""
     exits = f"{r.get('tp', 0)}/{r.get('be', 0)}/{r.get('sl', 0)}"
+    if r.get("channel") or r.get("time_exits"):   # donchian: SL/CHANNEL/TIME
+        exits = f"{r.get('sl', 0)}/{r.get('channel', 0)}/{r.get('time_exits', 0)}*"
     return (f"{r['label']:<28}{r['trades']:>7}{r['raw_r']:>9.3f}{r['cost_r']:>8.3f}"
             f"{r['net_r']:>8.3f}{r['net_pf']:>7.2f}{r['net_net']:>10.2f}"
             f"{r['win_rate']:>7.1f}{exits:>11}  {verdict}{star}")
@@ -208,6 +232,11 @@ def report(df, sweep, base, config, variants, cost_note, csv_path, detail=False)
         lines.append(f"median ATR14 {med:,.2f} px = {10000*med/price:.2f} bp of price "
                      f"(median price {price:,.2f})")
     lines += [HEAD, "-" * 118]
+    if getattr(base, "family", "scalp") == "donchian":
+        lines.append(f"  (family=donchian: exits column is SL/CHANNEL/TIME; "
+                     f"shape {getattr(base, 'don_entry', '?')}/"
+                     f"{getattr(base, 'don_exit', '?')} EMA{base.ema_period or ' off'}, "
+                     f"no TP, no BE)")
 
     rows = []
     for label, over in variants:
@@ -243,6 +272,10 @@ def main(argv=None) -> int:
                     help="spread in basis points of price for --cost bp")
     ap.add_argument("--warmup", type=int, default=None,
                     help="warm-up bars (default: config.INDICATOR_WINDOW_BARS)")
+    ap.add_argument("--family", default="scalp", choices=("scalp", "donchian"),
+                    help="shape to screen: 'scalp' = the shipped EMA+RSI "
+                         "pullback (default), 'donchian' = the pre-registered "
+                         "Phase-1c breakout geometry from the instance config")
     ap.add_argument("--detail", action="store_true", help="print ATR context")
     ap.add_argument("--json", default=None, help="also write the rows to this file")
     args = ap.parse_args(argv)
@@ -250,10 +283,12 @@ def main(argv=None) -> int:
     config = _load_config(args.config_dir)
     import pandas as pd
 
-    csv = args.csv or os.path.join(ROOT, "data", f"{config.SYMBOL}_{config.TIMEFRAME}.csv")
+    default_tf = "H1" if args.family == "donchian" else config.TIMEFRAME
+    csv = args.csv or os.path.join(ROOT, "data", f"{config.SYMBOL}_{default_tf}.csv")
     if not os.path.exists(csv):
+        pull_tf = f" --timeframe {default_tf}" if args.family == "donchian" else ""
         print(f"ERROR: {csv} not found.\n"
-              f"Pull it first on the server: mt5env/bin/python btc/recon.py --bars 20000")
+              f"Pull it first on the server: mt5env/bin/python btc/recon.py{pull_tf} --bars 20000")
         return 2
     df = pd.read_csv(csv, parse_dates=["time"])
     df, _point, cost_note = apply_cost_model(df, args.cost, args.spread_bp, config)
@@ -263,10 +298,16 @@ def main(argv=None) -> int:
 
     warmup = args.warmup if args.warmup is not None else int(
         getattr(config, "INDICATOR_WINDOW_BARS", 202))
-    base = replace(sweep.params_from_config(), warmup_bars=warmup,
-                   spread_price=None, max_spread_points=None)
+    if args.family == "donchian":
+        base = replace(sweep.donchian_from_config(), warmup_bars=warmup,
+                       spread_price=None, max_spread_points=None)
+        variants = donchian_variants(config)
+    else:
+        base = replace(sweep.params_from_config(), warmup_bars=warmup,
+                       spread_price=None, max_spread_points=None)
+        variants = default_variants(config)
 
-    lines, rows = report(df, sweep, base, config, default_variants(config),
+    lines, rows = report(df, sweep, base, config, variants,
                          cost_note, csv, detail=args.detail)
     print("\n".join(lines))
     if args.json:
