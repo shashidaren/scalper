@@ -1,6 +1,97 @@
 # HANDOFF — Bitcoin (BTCUSD) Scalper
 
-> ## ⛔ Status 2026-10-03 (latest): **Phase 1b FAILED — No-Go.** BTC has no edge at XM's spread; there is no service and Phase 2 is blocked.
+> ## ⛔ Status 2026-10-06 (latest): **the `high_spread` the user reported is the 1,500-point placeholder gate, not a market event — and 0 trades is the correct output.** No config or strategy value was changed; the gate is now *diagnosable* instead of silent.
+>
+> **The question answered:** "no trades are happening, it's saying high spread."
+> Verified in code: `run.py` computes `spread_points` on `:257`, then
+> `if spread_points > config.MAX_SPREAD_POINTS:` logs
+> `SKIP {"reason": "high_spread"}` and sleeps, so `strategy.check_signal()` is
+> never reached. `btc/config.py:131` still carries **`MAX_SPREAD_POINTS = 1500`**
+> — the explicit *"PLACEHOLDER: derive from recon spread p90"* — while the real
+> XM BTCUSD feed quotes **mean 4,242 points** (mostly 4,000–5,000). The gate
+> therefore vetoes **100.00%** of quotes and the bot cannot take a trade at any
+> price. `btc/derive_params.py`'s 1.25 × TRAIN p90 rule gives **≈6,250 pts**,
+> which vetoed **0.00%** of TRAIN quotes. **Do not simply raise the number:**
+> the same data says the shape still loses (−$165.84, PF 0.74) *after* such a
+> gate — see the 10-03 block below. The gate was hiding nothing; it was hiding
+> the fact that it was hiding nothing.
+>
+> **Why the bot is not trading at all:** on `scalping` the BTC units are
+> `disabled`/`inactive` (stopped `2026-10-03 16:50:21 UTC`, 0 trades, `:8089`
+> not listening) and `deploy.sh` defaults to gold only. So "0 threads" is
+> expected on two counts: no service, and a gate no quote can pass.
+>
+> **Diagnosis, in the units that matter (1R = the stop):** split every result
+> into **g** (mean R with spread charged at **zero** — is there an edge?) and
+> **c** (mean spread ÷ stop — what the instrument charges). Viable ⟺ **g > c**.
+>
+> | book | g | c | net | source |
+> |---|---|---|---|---|
+> | gold M5 (real) | **+0.157R** | 0.051R | +0.106R, PF 1.32 | local re-run, `btc/edge_screen.py` |
+> | XM BTCUSD M5 (real) | **+0.02R** | 0.23–0.26R | −0.21R, PF 0.74 | server Phase 1b, 10-03 |
+>
+> So on the *only* real BTC evidence there is, the shape is **short of its own
+> spread by ~13×** and has essentially no gross edge. The spread is the larger
+> half of the problem, but not the whole problem. Full analysis (incl. the
+> proxy screens and their limits): **`docs/btc_spread_edge_analysis_2026-10-06.md`**.
+> Proxy BTC screens (Binance spot klines from public GitHub repos — **explicitly
+> non-evidence for XM**, see §7a) additionally show the pullback shape's gross
+> edge decaying to ~0 after 2021 (gross PF 0.97–1.02 per era), and identify one
+> untested family worth a pre-registered run: **H1 Donchian breakout**
+> (don100/exit50/sl2.0: net PF 1.16, +$406.20 over 2017–2025 at 0.01 lots;
+> positive 2021–2024, negative on n=36 in 2025). That is a *hypothesis*, not a
+> result, and it must go through `btc/train_select.py` on untouched XM bars.
+>
+> **What changed (all uncommitted on `arena/037cb1f4-scalper`, none of it
+> trading logic):**
+> - **`spread_gate.py` (new, shared, stdlib-only)** — counts quotes/vetoes per
+>   window and grades the gate `ok | starved | infeasible`; `infeasible` = *no
+>   quote has ever passed*, so the engine logs **one** loud
+>   `SPREAD GATE INFEASIBLE` warning (rate-limited) instead of 5,760 silent
+>   `SKIP`s a day, and one recovery INFO. **The monitor never changes the
+>   gate** — `if not gate_pass` is the identical comparison it replaced.
+> - **`run.py` / `logger.py` / `dashboard.py` / `templates/index.html`** —
+>   engine publishes a `spread_gate` snapshot in `live_status.json`; the
+>   dashboard renders a red **"⛔ NO ENTRY IS POSSIBLE WITH THIS
+>   CONFIGURATION"** banner with the observed spread distribution (amber
+>   "STARVED" variant), and the price card shows `gate N, M% vetoed`. Absent
+>   `spread_gate` ⇒ old behaviour (gold path unchanged, verified).
+> - **`btc/preflight.py` (new)** — answers *"can this gate ever pass?"* before a
+>   service is started: `--offline --csv <file>` (bar economics) or live tick
+>   sampling (read-only, **never** `mt5.shutdown()`). Exit codes **0 OK /
+>   1 STARVED / 2 INFEASIBLE / 3 unmeasured**, `--json` for the runbook. On the
+>   real BTC numbers it grades **INFEASIBLE (exit 2)**; on gold it is **OK**.
+> - **`btc/edge_screen.py` (new)** — per-geometry **gross vs cost** split for
+>   any CSV, cost from the file or in relative bp; refuses to report if the two
+>   runs' trade counts differ. Gold use reproduces `backtest.py` exactly
+>   (**255 / +$456.58 / PF 1.32 / 72-43-140**), which is what makes its BTC
+>   numbers meaningful.
+> - **`btc/breakout_screen.py` (new, prototype)** — the hypothesis-C screen
+>   (proxy bars only; prints a NON-EVIDENCE banner; not wired into the engine).
+> - Tests: `tests/test_spread_gate.py` **21/21**, `btc/preflight_test.py`,
+>   `btc/edge_screen_test.py`; `btc/e2e_smoke.py` now asserts the gate snapshot
+>   is published and `btc/tool.py --check` is **14/14** on the BTC instance.
+>
+> **Unchanged, deliberately:** `btc/config.py` (incl. `MAX_SPREAD_POINTS=1500`,
+> `SPREAD_COST_PRICE=5.0`, all strategy values), `strategy_btc.py` (still
+> inert), every gold parameter, both `TRADING_MODE="FORWARD_TEST"`, the
+> Phase-1b FAIL verdict, and **no BTC service**. Raising the gate is a
+> deployment decision that requires a passing hypothesis, not a config edit.
+>
+> **Gold regression after the shared-code edits (re-run locally on this
+> branch):** `backtest.py` **255 / +$456.58 / PF 1.32 / WR 28.2% / 72-43-140**
+> (identical), `research/parity_test.py` **PASS** (460 signals, 0 mismatches),
+> `research/paper_exit_test.py` **PASS**, `btc/train_select_test.py` **PASS**,
+> `btc/e2e_smoke.py` **ALL PASS** (both config dirs), `btc/tool.py --check`
+> **14/14**, `tests/test_deploy_services.sh` **3/3**.
+>
+> **Sandbox limits (so nobody re-runs this):** this container reaches only
+> `github.com` / `api.github.com` / `pypi.org`; `ssh scalping` still does not
+> resolve and `data/` holds only the gold CSVs, so **no fresh BTC file or
+> server observation exists here**. Every BTC number above is either the 10-03
+> server run or a public-exchange proxy, and the proxies are labelled as such.
+
+> ## ⛔ Status 2026-10-03: **Phase 1b FAILED — No-Go.** BTC has no edge at XM's spread; there is no service and Phase 2 is blocked.
 >
 > The Phase 1b decision gate — `btc/train_select.py` on the real 20,000-bar
 > `data/BTCUSD_M5.csv`, observed on `scalping` at
@@ -169,7 +260,10 @@
 2. **Do Phase 0 first if BTC data/specs are absent.** Run the read-only commands
    in §7, including the shared-bridge concurrency probe while observing the
    gold bot. `btc/recon.py` never sends orders and intentionally does not call
-   `mt5.shutdown()` because gold may share the terminal session.
+   `mt5.shutdown()` because gold may share the terminal session. If the symptom
+   is "0 trades / `high_spread`", run §7a first: `btc/preflight.py` decides in
+   one command whether the spread gate is *impossible* (then read the 2026-10-06
+   status block — the fix is a passing hypothesis, not a bigger number).
 
 3. **Respect the gates.** Phase 1 must establish that the strategy has an edge
    on real XM BTCUSD data using train-select → cold-OOS; Phase 2 is paper-only;
@@ -331,6 +425,34 @@ Run it on the server any time: `mt5env/bin/python btc/e2e_smoke.py`.
    `research/loss_analysis.py` can be used for descriptive BTC loss anatomy,
    with the same caveat about the current spread-veto placeholder.
 
+6. **Before spending an untouched pull on any shape, prove it can pay for the
+   spread** with `btc/tool.py btc/edge_screen.py --csv <file>` (or `--cost bp`
+   for proxy bars): the shape must show **gross edge > cost ratio** (g > c, in
+   R units). A shape whose gross edge is below the instrument's spread/stop
+   ratio cannot pass the gate, and reading its cold OOS is a waste of the
+   cleanest evidence available.
+7. **Before enabling any service, run `btc/tool.py btc/preflight.py`** (live
+   tick sampling read-only, or `--offline --csv`). Exit 0 OK / 1 STARVED /
+   2 INFEASIBLE / 3 unmeasured. `MAX_SPREAD_POINTS` must be re-derived from
+   measured bars (`btc/derive_params.py`: 1.25 × spread p90 ⇒ ≈6,250 pts on the
+   10-03 file) **and** the shape must have passed Phase 1b — raising the gate
+   alone is forbidden (see the 10-03 status block).
+
+**Phase 1c amendment (2026-10-06, before any untouched data was pulled;
+proxy-screened, see `docs/btc_spread_edge_analysis_2026-10-06.md`):**
+hypothesis **A** (M15/H1 same shape) is deprioritised — the pullback's *gross*
+edge is ~0 after 2021 on the proxy bars and was +0.02R on the real file;
+hypothesis **B** (Ultra-Low tier) is not the binding constraint — at H1 the
+measured spread is worth ~0.05 PF, so a cheaper tier cannot rescue a book with
+no gross edge (and the 5.486 bp measured spread is ~8.5× the web prior);
+hypothesis **C** is re-specified as the priority: **H1 long-lookback Donchian
+breakout** (pre-register one geometry: don100/exit50/sl2.0–2.5/EMA200, time-stop
+variant as robustness), wired through `btc/strategy_btc.py` with the usual
+live/replay parity proof, then the unchanged Phase-1b gate — frozen TRAIN winner
+positive on cold OOS, **PF ≳ 1.2**, **n ≥ 60** (the 2026-10-04 hypotheses doc
+also requires spread/risk < 15%). Proxy screens are **not evidence** for XM
+BTCUSD and cannot select anything.
+
 The replay uses the CSV's per-bar spread and the live entry-spread veto (with a
 threshold fixed from TRAIN p90); it still does not model slippage, swap P&L,
 daily account gates, or weekend gaps. Derive `PRICE_DIGITS` and the spread
@@ -373,7 +495,7 @@ Evidence from 2026-10-03 (all re-run after every hook was in place):
 |---|---|
 | `backtest.py` on gold | **255 / +$456.58 / PF 1.32 / max DD $108.65 / 72-43-140** — unchanged |
 | `research/parity_test.py` | **PASS** — 460 replay signals, 0 mismatches, 20× cache reduction intact |
-| `btc/tool.py --check` | 11/11 PASS: btc config wins, `btc/logs` isolated, contract size, magic, mode, template shows `BTCUSD Price` |
+| `btc/tool.py --check` | **14/14 PASS** on the BTC instance (was 11; the two new `spread_gate` checks + the conditional-banner check added 3). btc config wins, `btc/logs` isolated, contract size, magic, mode, template shows `BTCUSD Price`, gate flags `infeasible` when every quote is vetoed, banner appears only when true |
 | Instance-regression: `/tmp/inst_test` config (gold values, only `LOG_DIR` diverted) driving the hooked engine | **255 / +$456.58 / PF 1.32** — plumbing is behaviour-neutral |
 | `btc/tool.py research/strategy_sweep.py --csv data/GOLD_M5.csv --verify` under the **BTC** config | sweep engine ≡ `backtest.py` (both 377 trades / +$2.83 / PF 1.13) — numbers meaningless on gold data, equivalence is the point |
 | `btc/run.py` + `btc/dashboard.py` executed via `runpy` | engine resolved from repo root, app title "Bitcoin Scalper Dashboard", port 8089, `LOG_DIR=btc/logs` |
@@ -386,6 +508,22 @@ Evidence from 2026-10-03 (all re-run after every hook was in place):
 | `btc/train_select_test.py` (Arena follow-up) | **PASS** — 60-grid generation, no BE=0, TRAIN-only ranking, spread-veto integration and split checks |
 | `btc/tool.py btc/train_select.py --csv data/GOLD_M5.csv --bootstrap 100 --top 3` | **PASS as a plumbing smoke only** under BTC config; uses gold prices, so its P&L is explicitly not BTC evidence |
 | `tests/test_deploy_services.sh` | **PASS 3/3** — default gold-only, explicit Phase 2 opt-in includes BTC, legacy singular override preserved |
+
+Evidence added 2026-10-06 (shared-code edits for spread-gate telemetry and the
+three new tools; local harness, branch `arena/037cb1f4-scalper`):
+
+| Check | Result |
+|---|---|
+| `backtest.py` on gold, after the run.py/logger.py/dashboard.py/template edits | **255 / +$456.58 / PF 1.32 / WR 28.2% / 72-43-140 / max DD $108.65** — identical to the rule at the top of this section |
+| `research/parity_test.py` | **PASS** — 460 signals, 0 mismatches (the `if not gate_pass` rewrite is the same comparison) |
+| `research/paper_exit_test.py` | **PASS** — fake-bridge SL/BE/TP + M1/M5 wick table unchanged |
+| `btc/tool.py --check` on the BTC instance | **14/14 PASS** |
+| `btc/tool.py --check --config-dir .` (gold root) | **3 FAIL** by design — `logger.LOG_DIR != gold logs`, `MAGIC_NUMBER != gold (999111)`, `ORDER_COMMENT set`: running the *BTC* isolation checker against the *gold* instance is supposed to fail those. Not a regression; do not "fix" them. |
+| `btc/e2e_smoke.py` (default) and `--config-dir .` | **ALL PASS** — incl. the new check that the engine publishes a passing `spread_gate` snapshot (`samples 2, passed 2, vetoed 0, gate 1500`); SL exit still −$3.45 (344.7 px × 0.01 × 1 BTC); real `logs/` untouched |
+| `tests/test_spread_gate.py` (system `python3`, stdlib only) | **ALL PASS 21/21** — incl. `infeasible` only when *zero* quotes ever passed, single-pass downgrade to `starved`, None/NaN quotes vetoed |
+| `btc/preflight_test.py` | **PASS** — the real BTC 4,242-pt-spread vs 1,500-pt-gate case grades `INFEASIBLE`, exit 2; gold grades `OK`, exit 0 |
+| `btc/edge_screen_test.py` | **PASS** — reproduces `backtest.py` exactly (255 / +$456.58 / PF 1.32) and gold's g/c split (0.157R / 0.051R) |
+| `btc/breakout_screen.py` on proxy H1 2017–2025 | runs clean; **proxy, non-evidence** — don100/exit50/sl2.0 net PF 1.16, +$406.20 (see `docs/btc_spread_edge_analysis_2026-10-06.md`) |
 
 ## 7. Phase 0 commands (run on `scalping`)
 
@@ -431,6 +569,33 @@ selection: those reports hard-code gold's adopted parameters and calendar
 regime. `btc/train_select.py` is the BTC-specific train-only selector; it
 prints OOS only after freezing one winner, and never changes config.
 
+## 7a. Diagnostics added 2026-10-06 (run from the repo root; `<file>` = a CSV)
+
+```bash
+# 1) Can this spread gate ever pass? (exit 0 OK / 1 STARVED / 2 INFEASIBLE / 3 unmeasured)
+mt5env/bin/python btc/tool.py btc/preflight.py --offline --csv data/BTCUSD_M5.csv
+mt5env/bin/python btc/tool.py btc/preflight.py --seconds 60          # live ticks, read-only, no shutdown
+# 2) Gross edge vs cost ratio (must be g > c); gold check reproduces backtest.py
+mt5env/bin/python btc/tool.py btc/edge_screen.py --config-dir . --csv data/GOLD_M5.csv --detail
+# 3) Hypothesis-C screen on proxy bars only (NON-EVIDENCE; prints its own banner)
+python3 btc/breakout_screen.py --csv /tmp/proxy/btc_1h_2017_2025.csv --eras
+# 4) Unit tests (no bridge, no server)
+python3 tests/test_spread_gate.py && python3 btc/preflight_test.py && python3 btc/edge_screen_test.py
+```
+
+`spread_gate.py` also streams into the dashboard: when every quote in the
+window is vetoed, the price card shows `gate N, 100% vetoed` and a red banner
+reads **"NO ENTRY IS POSSIBLE WITH THIS CONFIGURATION"** — so "0 trades" is
+never again indistinguishable from "no signal". The monitor is descriptive: it
+does not change the gate, the strategy, or config.
+
+**Proxy data is never evidence.** If a public exchange CSV is used for a shape
+screen, the numbers are at most a qualitative cross-check: exchange spot bars
+have no broker spread column, different venue/regime, and XM's real feed is what
+the gate will run on. The sandbox can only reach `github.com` / `api.github.com`
+/ `pypi.org` (no exchange APIs, no `ssh scalping`), so any *fresh* XM pull has to
+happen on `scalping` via §7 and be reported back.
+
 ## 8. Risks / open questions
 
 1. **Edge risk (the big one).** Gold's book survives on a thin tail (top-5
@@ -464,6 +629,8 @@ prints OOS only after freezing one winner, and never changes config.
 
 | Date | Change | Why |
 |---|---|---|
+| 10-06 | **Spread-gate feasibility telemetry + three diagnostics; `high_spread` root-caused (`arena/037cb1f4-scalper`)** — user reported "no trades are happening, it's saying high spread". Code-verified: `run.py` computes `spread_points` (`:263` after this change; `:257` before), the gate at `run.py:344` `if not gate_pass` logs `SKIP {"reason":"high_spread"}` and sleeps, so `strategy.check_signal()` never runs; `btc/config.py` still has the **1,500-point placeholder** against a real feed of **mean 4,242 pts** → **100.00% veto** (the derived 1.25× TRAIN p90 = **6,250 pts** vetoed 0.00%). **No gate, config, strategy or engine value was changed; `MAX_SPREAD_POINTS` stays 1500, `TRADING_MODE` stays `FORWARD_TEST`, no BTC service.** Added **`spread_gate.py`** (stdlib-only monitor: samples/vetoes/min/median/max, verdicts `ok\|starved\|infeasible`, rate-limited `SPREAD GATE INFEASIBLE` warning + recovery INFO; `if not gate_pass` is the same comparison as before); engine now publishes `spread_gate` in `live_status.json` (`run.py`, `logger.py` with a `None` default so old writers work) and the dashboard renders a red **"NO ENTRY IS POSSIBLE WITH THIS CONFIGURATION"** banner / amber STARVED variant plus `gate N, M% vetoed` on the price card (`dashboard.py`, `templates/index.html`). New tools: **`btc/preflight.py`** (verdict + exit codes 0/1/2/3, `--offline --csv` or read-only live ticks that never `mt5.shutdown()`), **`btc/edge_screen.py`** (gross-edge vs cost-ratio per geometry; reproduces gold's 255 / +$456.58 / PF 1.32 exactly, gold g/c = +0.157R/0.051R), **`btc/breakout_screen.py`** (hypothesis-C screen, proxy-only, prints a NON-EVIDENCE banner). Tests: `tests/test_spread_gate.py` 21/21, `btc/preflight_test.py` (BTC case grades INFEASIBLE exit 2, gold OK), `btc/edge_screen_test.py`; `btc/e2e_smoke.py` gained a gate-snapshot check, `btc/tool.py --check` is **14/14** on the BTC instance. Gold after the shared-code edits: `backtest.py` **255 / +$456.58 / PF 1.32 / WR 28.2% / 72-43-140**, `parity_test.py` **PASS** (460, 0 mismatches), `paper_exit_test.py` PASS, `train_select_test.py` PASS, `e2e_smoke.py` **ALL PASS** (both dirs), `test_deploy_services.sh` 3/3. Analysis + sources: **`docs/btc_spread_edge_analysis_2026-10-06.md`**. | §5 forbids loosening the spread gate to let a losing shape trade, so the honest fix is to make the *impossibility* visible and measured (engine log, `live_status.json`, dashboard banner, `preflight.py` exit code) rather than raise 1500 to ~4,250 and start a book that the 10-03 data already shows is negative. The R-unit decomposition (gold g +0.157R > c 0.051R; BTC g +0.02R < c 0.23–0.26R) is the decision rule any new hypothesis must clear. |
+| 10-06 | **Phase-1c amendment recorded on proxy (non-)evidence (`arena/037cb1f4-scalper`)** — screens of the pullback shape on public **Binance** klines (M15 2017–2020; H1 2017–2020 and 2017–2025) and of a Donchian family, costed at the measured XM quote of **5.486 bp of price** per round trip. Pullback: gross PF by era 1.17/1.26/**0.98/0.97**/1.02 (2017-18 → 2025) with net PF 1.14/1.20/0.94/0.91/0.94; bootstrap net R −0.0045, CI [−0.081, +0.073], P(>0)=45.2%; free-of-cost the 8-year book is still PF 1.01 (+$38.87), so **cost is not the binding constraint**. Breakout don100/exit50/sl2.0: net PF **1.16**, **+$406.20**, 532 trades, positive in 2021–22 (PF 1.28, +$264.90) and 2023–24 (PF 1.13, +$110.05), negative in 2025 (n=36, PF 0.55, −$171.80 on ~6 runaway-ATR-stop trades in Jan–Feb), longer lookbacks monotonically better (don150/75 PF 1.38, don200/100 PF 1.38) — **all of it proxy, none of it evidence for XM**, recorded in `docs/btc_spread_edge_analysis_2026-10-06.md` so the next pull is spent on C (H1 Donchian, pre-registered) instead of re-testing A. A is deprioritised (gross edge ~0 after 2021); B is not binding (~0.05 PF at H1 even at zero cost). | The 10-03 verdict says "a future attempt needs a new pre-registered hypothesis and its own untouched data pull". Screening shapes *before* spending the pull keeps the untouched CSVs clean and stops the same family being re-litigated; the g > c rule (§7a) is what a candidate must satisfy before its cold OOS is even worth reading. Era buckets were also corrected to half-open windows (`btc/breakout_screen.py`) after the first draft dropped 31-Dec trades; the pullback 2023–24 bucket is −$152.22 (n=363), not −$134.12, and the buckets now sum to the −$200.93 total. |
 | 10-03 | **BTCUSD Phase 1b completed: FAIL / No-Go — negative result recorded (`arena/01a102c4-scalper`)** — ran the full §5 Phase 1b sequence on the real `data/BTCUSD_M5.csv` (20,000 bars, `2026-07-25 21:55` .. `2026-10-03 13:40` UTC, 5,600 weekend bars, 24/24 hours) on `scalping` at `2026-10-03T17:07:55+00:00`, `/root/scalper` clean at `f5e76c8`, and wrote the mandated one-page negative result to **`docs/btc_phase1_result_2026-10-03.md`**. Gate order held: `strategy_sweep.py --verify` reproduced `backtest.py` exactly (**433 trades / −$165.84 / PF 0.74 / WR 23.8% / 103W-330L / avgR −0.46 / maxDD $169.46 / 107 TP · 59 BE · 267 SL**), then `btc/train_select.py` ranked the 60-config grid on TRAIN only (floors `zero/p10/p25/p50/p75 = 0.00/19.94/40.22/65.06/113.14`; replay veto `1.25× TRAIN p90 = 6,250` pts, vetoing 0.00% of TRAIN quotes vs **100.00%** for the `MAX_SPREAD_POINTS=1500` placeholder), froze `ATR p75=113.14 SL=2.0 BE=off` (`44 tr, +$33.43, PF 1.29`), then read cold OOS: **winner `n=70, −$46.11, PF 0.75, maxDD $56.29, P(net>0)=0.138`** and **baseline `n=217, −$95.50, PF 0.72, P(net>0)=0.025`** → **FAIL** (`net < 0` and `PF < 1.2`). `derive_params.py` explains why it cannot work: median price $77,304.55, `PRICE_DIGITS=2`, $0.0100 per 1.00 move, ATR(14) p50 81.62 / p90 179.03, spread mean 4,242 pts = 42.41 px = **$0.4242** round trip at 0.01 lots → **spread/median-ATR 52.0%**, **spread/risk 26.0%**, break-even WR 28.6% → **~36.0%** with spread vs **23.8%** actual. `research/loss_analysis.py`: gross profit $465.72 / gross loss $631.55, SL 267 exits = **96.0%** of gross loss (−$606.26) vs BE 59 = 3.9% (−$24.90), **net before spread +$17.16 (+$0.04/trade) vs $183.00 spread paid (28% of gross profit, avg $0.42/trade, 1R = avg $1.82)**; all 4 months, all 4 ATR quartiles, 6/7 weekdays and both directions negative; 76 losing streaks, mean 4.34, max 20. One-variable sweeps all net-negative (SL 1.0× −$338.79 → 3.0× −$6.96; BE 0.5R −$320.29 → off −$119.42; RSI 30/70 −$129.03 … 45/55 −$177.76; spread fallback 5.00 −$4.49 PF 0.99 vs per-bar CSV −$165.84). Server state confirmed read-only: gold `scalper-bot`/`scalper-dashboard` active (`SIM: $128.62 \| SimEquity: $131.03`, open paper position undisturbed, `:8088` up), `scalper-btc-bot`/`scalper-btc-dashboard` **disabled + inactive** (`:8089` not listening; BTC bot stopped `16:50:21 UTC` after 0 trades with `high_spread` skips at ~4,000 pts), bridge `18812` listening, deploy cron `*/15 * * * * DEPLOY_BRANCH=main` with **no** `DEPLOY_SERVICES` override, last deploy line `restarted scalper-bot at f5e76c8… (was d8add56…) branch=main` (gold-only restart confirmed). **Documentation only: `config.py`, `btc/config.py`, `strategy.py`, `run.py` untouched, `TRADING_MODE` still `FORWARD_TEST` on both instances, no BTC unit installed/enabled/started.** Gold + BTC tests re-run locally: `backtest.py` **255 / +$456.58 / PF 1.32 / max DD $108.65 / 72-43-140** (identical to the §6 baseline), `parity_test.py` **PASS** (460 signals, 0 mismatches, 20× cache reduction, blackout check clean), `btc/tool.py --check` **11/11**, `btc/train_select_test.py` **PASS**, `tests/test_deploy_services.sh` **PASS 3/3**. | §5 requires that when the cold-OOS gate fails, a one-page negative result is the deliverable and there is **no service**, with no tuning on OOS. Recording the measured verdict — and its structural cause (a ~52% spread-to-ATR ratio, i.e. a ~36% required win rate against 23.8% actual) — is what stops a later session from re-litigating the same dataset, loosening the spread gate, or copying gold parameters onto an instrument where they cannot pay for the spread. |
 | 10-03 | **BTC dashboard price-card label + `server_check.py` cron output (`arena/01a102b0-scalper`)** — confirmed `ssh scalping` and `/root/scalper/data/BTCUSD_M5.csv` remain unreachable from the Arena container (`e2b.local`), so no real-file Phase 1b result or live server state is claimed from the local checkout. Audited the BTC dashboard (`btc/dashboard.py` → `dashboard.py` → `templates/index.html`) and engine (`btc/run.py` → `run.py` → `mt5_bridge.py` → `logger.py`): `live.bid`, `live.ask`, and `live.spread` on `:8089` are genuine `BTCUSD` quotes read from `btc/logs/live_status.json`, while `templates/index.html` line 132 still had `<h2>GOLD Price</h2>` hard-coded. Replaced it with `<h2>{{ config.symbol if config is defined and config.symbol else "GOLD" }} Price</h2>` (`GOLD Price` on gold, `BTCUSD Price` on BTC) and added a template check in `btc/tool.py --check` (11/11 PASS). Also fixed `btc/server_check.py` `to_markdown()` to emit the already-collected `crontab -l` (`r["cron"]`) block, and documented why the transition deploy from `a4d6ecf` → `d8add56` started the disabled `scalper-btc-bot` unit (the pre-PR-#17 `deploy.sh` bound `SERVICES` before `git pull`). All gold regressions (`backtest.py` 255 / +$456.58 / PF 1.32, `parity_test.py`, `paper_exit_test.py`) and BTC tests (`e2e_smoke.py`, `train_select_test.py`, `test_deploy_services.sh`) PASS. | Fix the hard-coded "GOLD Price" card heading on the BTC dashboard and ensure `btc/server_check.py` prints `crontab -l` in markdown mode. |
 | 10-03 | **BTC Phase 1b prep + deploy safety (`arena/01a101b6-scalper`, PR #17)** — the real BTC file/server is unavailable from this Arena checkout, so no BTC result is claimed. Added `btc/train_select.py` (fixed ATR-floor × SL × BE grid; floors and spread veto derived on TRAIN only; rank TRAIN only; then cold-read one frozen candidate + baseline) and optional `Params.max_spread_points` in the replay engine (default `None`, so gold is unchanged). Documented that generic `--oos`/`--candidates` are gold-specific. Changed `deploy.sh` default to gold-only because a restart starts a disabled-but-installed BTC unit; BTC now requires explicit Phase 2 opt-in. Verified with helper tests, gold backtest/parity/paper-exit regressions, BTC isolation/e2e, and mocked deploy-service test. Selector smoke on `GOLD_M5.csv` is plumbing-only, not evidence. | Make Phase 1b reproducible without overreading gold-specific reports, and prevent a cron deploy from unintentionally starting the not-yet-authorized BTC unit. |

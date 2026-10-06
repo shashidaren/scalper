@@ -137,7 +137,8 @@ def update_live_status(
     positions: list = None,
     connected: bool = True,
     error: str = None,
-    mode: str = None
+    mode: str = None,
+    spread_gate: dict = None
 ):
     """Write full live market + account snapshot for the dashboard."""
     status = {
@@ -151,6 +152,10 @@ def update_live_status(
         "spread": spread,
         "positions": positions or [],
         "mode": mode,
+        # Entry-gate feasibility snapshot (spread_gate.SpreadGateMonitor.status()).
+        # Absent/None on a caller that does not pass it, so old writers and the
+        # gold path keep working unchanged.
+        "spread_gate": spread_gate,
         "updated_at": _now()
     }
     with open(LIVE_STATUS_FILE, "w") as f:
@@ -170,6 +175,7 @@ def get_live_status() -> dict:
         "spread": 0,
         "positions": [],
         "mode": None,
+        "spread_gate": None,
         "updated_at": None
     }
     if not LIVE_STATUS_FILE.exists():

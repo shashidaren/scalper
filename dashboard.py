@@ -86,6 +86,7 @@ async def index(request: Request):
             name="index.html",
             context={
                 "live": live,
+                "spread_gate": (live.get("spread_gate") or None),
                 "stats": stats,
                 "conn": conn,
                 "portfolio": portfolio,

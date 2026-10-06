@@ -325,8 +325,20 @@ def main(argv=None) -> int:
     print(f"  exit reason={reason} profit=${profit} (expected ~${expected:.2f} = "
           f"{sl_dist:.1f} px x {config.LOT_SIZE} lots x {config.CONTRACT_SIZE})")
 
+    # --- spread-gate telemetry: the engine must publish the gate snapshot the
+    #     dashboard banner and btc/preflight.py rely on (spread_gate.py) ---
+    live_status_file = logs / "live_status.json"
+    live = json.loads(live_status_file.read_text()) if live_status_file.exists() else {}
+    gate_snap = live.get("spread_gate") or {}
+    gate_ok = (gate_snap.get("samples", 0) >= 1
+               and gate_snap.get("vetoed", None) == 0
+               and gate_snap.get("infeasible") is False
+               and float(gate_snap.get("gate", -1)) == float(getattr(config, "MAX_SPREAD_POINTS", -2)))
+    print(f"  live_status.spread_gate = {gate_snap}")
+
     gold_logs = ROOT / "logs" / "trades.jsonl"
     checks = [
+        ("engine publishes a passing spread-gate snapshot to live_status.json", gate_ok),
         ("engine connected to the fake bridge", ok_entry),
         ("SIM_ENTRY + SIM_EXIT in the instance log dir", ok_entry and ok_exit),
         ("exit reason == SL (pessimistic fill)", reason == "SL"),

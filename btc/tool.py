@@ -53,6 +53,21 @@ def check(instance_dir: str, config) -> int:
         ("ORDER_COMMENT set", bool(getattr(config, "ORDER_COMMENT", ""))),
     ]
 
+    try:  # spread-gate telemetry must be wired under this instance config
+        from spread_gate import SpreadGateMonitor
+        mon = SpreadGateMonitor(getattr(config, "MAX_SPREAD_POINTS", 0),
+                                symbol=getattr(config, "SYMBOL", "?"))
+        for sp in (int(getattr(config, "MAX_SPREAD_POINTS", 0)) + 1,) * 8:
+            mon.observe(sp)
+        snap = mon.status()
+        checks.append(("spread_gate flags an impossible gate (infeasible)",
+                       bool(snap["infeasible"]) and snap["veto_pct"] == 100.0
+                       and float(snap["gate"]) == float(getattr(config, "MAX_SPREAD_POINTS", -1))))
+        checks.append(("spread_gate warning names the gate and the consequence",
+                       "INFEASIBLE" in mon.warning_message() and "0 trades" in mon.warning_message()))
+    except ImportError as e:
+        print(f"  (skipping spread_gate checks: {e})")
+
     try:  # needs pandas/numpy (present in mt5env and the local test venv)
         import research.strategy_sweep as sweep
         checks.append(("sweep.CONTRACT_SIZE == config.CONTRACT_SIZE",
@@ -86,6 +101,33 @@ def check(instance_dir: str, config) -> int:
         checks.append((f"dashboard template shows '{config.SYMBOL} Price'",
                        f"<h2>{config.SYMBOL} Price</h2>" in html
                        and (config.SYMBOL == "GOLD" or "<h2>GOLD Price</h2>" not in html)))
+
+        gate = {"gate": config.MAX_SPREAD_POINTS, "samples": 40, "passed": 0, "vetoed": 40,
+                "veto_pct": 100.0, "window": 40, "min": 4242, "median": 4242, "max": 5000,
+                "infeasible": True, "starved": False, "last_pass_at": None}
+        html_blocked = env.get_template("index.html").render(
+            title="t", now="now", live={"connected": True, "bid": 1.0, "ask": 1.0, "spread": 4242,
+                                        "balance": 0.0, "equity": 0.0, "positions": [], "mode": config.TRADING_MODE},
+            stats={"pnl": 0.0, "trades": 0, "wins": 0, "losses": 0},
+            conn={"reconnect_count": 0, "last_tick_time": None}, uptime_str="0s",
+            trades=[], system_logs=[],
+            spread_gate=gate,
+            config={"symbol": config.SYMBOL, "lot_size": config.LOT_SIZE,
+                    "max_spread": config.MAX_SPREAD_POINTS, "max_daily_loss": config.MAX_DAILY_LOSS,
+                    "max_trades": config.MAX_TRADES_PER_DAY})
+        html_ok = env.get_template("index.html").render(
+            title="t", now="now", live={"connected": True, "bid": 1.0, "ask": 1.0, "spread": 10,
+                                        "balance": 0.0, "equity": 0.0, "positions": [], "mode": config.TRADING_MODE},
+            stats={"pnl": 0.0, "trades": 0, "wins": 0, "losses": 0},
+            conn={"reconnect_count": 0, "last_tick_time": None}, uptime_str="0s",
+            trades=[], system_logs=[],
+            spread_gate=dict(gate, infeasible=False, starved=False, veto_pct=0.0, passed=40, vetoed=0),
+            config={"symbol": config.SYMBOL, "lot_size": config.LOT_SIZE,
+                    "max_spread": config.MAX_SPREAD_POINTS, "max_daily_loss": config.MAX_DAILY_LOSS,
+                    "max_trades": config.MAX_TRADES_PER_DAY})
+        checks.append(("dashboard shows the impossible-gate banner only when it is true",
+                       "NO ENTRY IS POSSIBLE" in html_blocked
+                       and "NO ENTRY IS POSSIBLE" not in html_ok))
     except ImportError as e:
         print(f"  (skipping template check: {e})")
 
