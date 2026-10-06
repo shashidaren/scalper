@@ -3,9 +3,10 @@
 > ## ⛔ Status 2026-10-06 (latest): **the `high_spread` the user reported is the 1,500-point placeholder gate, not a market event — and 0 trades is the correct output.** No config or strategy value was changed; the gate is now *diagnosable* instead of silent.
 >
 > **The question answered:** "no trades are happening, it's saying high spread."
-> Verified in code: `run.py` computes `spread_points` on `:257`, then
-> `if spread_points > config.MAX_SPREAD_POINTS:` logs
-> `SKIP {"reason": "high_spread"}` and sleeps, so `strategy.check_signal()` is
+> Verified in code: `run.py` computes `spread_points` (`:263`) and gates on
+> `if not gate_pass:` (`:344` — the same comparison the old inline
+> `spread_points > config.MAX_SPREAD_POINTS` made), logging
+> `SKIP {"reason": "high_spread"}` and sleeping, so `strategy.check_signal()` is
 > never reached. `btc/config.py:131` still carries **`MAX_SPREAD_POINTS = 1500`**
 > — the explicit *"PLACEHOLDER: derive from recon spread p90"* — while the real
 > XM BTCUSD feed quotes **mean 4,242 points** (mostly 4,000–5,000). The gate
@@ -36,14 +37,15 @@
 > proxy screens and their limits): **`docs/btc_spread_edge_analysis_2026-10-06.md`**.
 > Proxy BTC screens (Binance spot klines from public GitHub repos — **explicitly
 > non-evidence for XM**, see §7a) additionally show the pullback shape's gross
-> edge decaying to ~0 after 2021 (gross PF 0.97–1.02 per era), and identify one
+> edge decaying to ~0 after 2021 (gross PF 0.96–1.02 per era), and identify one
 > untested family worth a pre-registered run: **H1 Donchian breakout**
 > (don100/exit50/sl2.0: net PF 1.16, +$406.20 over 2017–2025 at 0.01 lots;
 > positive 2021–2024, negative on n=36 in 2025). That is a *hypothesis*, not a
 > result, and it must go through `btc/train_select.py` on untouched XM bars.
 >
-> **What changed (all uncommitted on `arena/037cb1f4-scalper`, none of it
-> trading logic):**
+> **What changed (`arena/037cb1f4-scalper`, pushed 2026-10-06 as
+> [PR #22](https://github.com/shashidaren/scalper/pull/22); none of it trading
+> logic):**
 > - **`spread_gate.py` (new, shared, stdlib-only)** — counts quotes/vetoes per
 >   window and grades the gate `ok | starved | infeasible`; `infeasible` = *no
 >   quote has ever passed*, so the engine logs **one** loud
