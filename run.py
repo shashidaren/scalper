@@ -9,6 +9,7 @@ from logger import (
     LOG_DIR, log_system, log_trade, get_today_stats,
     update_connection_status, update_live_status
 )
+from spread_gate import SpreadGateMonitor
 try:
     from portfolio import portfolio_blocked
 except Exception:
@@ -75,6 +76,11 @@ def poll_paper_position(bridge, paper, total_seconds=None, interval_seconds=None
 
 
 def main():
+    # Feasibility telemetry for the entry spread gate. Purely descriptive: it
+    # counts quotes/vetoes and warns loudly when the gate cannot be passed at
+    # all (see spread_gate.py) - it never changes the gate.
+    spread_monitor = SpreadGateMonitor(getattr(config, "MAX_SPREAD_POINTS", 0),
+                                       symbol=config.SYMBOL)
     log_system("INFO", "=== Scalper Engine Started ===")
     bridge = None
     strategy = ScalpStrategy()
@@ -255,6 +261,14 @@ def main():
                     positions = []
 
                 spread_points = round((tick.ask - tick.bid) / sym.point)
+                gate_pass = spread_monitor.observe(spread_points)
+                if spread_monitor.warn_now():
+                    log_system("WARNING", spread_monitor.warning_message())
+                elif spread_monitor.recovered_now():
+                    log_system("INFO",
+                        f"Spread gate feasible again: spread {spread_points} <= "
+                        f"MAX_SPREAD_POINTS={getattr(config, 'MAX_SPREAD_POINTS', 0)} "
+                        f"(first pass after a starved/infeasible stretch)")
 
                 # In FORWARD_TEST the dashboard shows the simulated account
                 if paper is not None:
@@ -278,7 +292,8 @@ def main():
                     positions=positions,
                     connected=True,
                     error=None,
-                    mode=config.TRADING_MODE
+                    mode=config.TRADING_MODE,
+                    spread_gate=spread_monitor.status()
                 )
 
                 update_connection_status(
@@ -324,8 +339,9 @@ def main():
                     time.sleep(config.CHECK_INTERVAL_SECONDS)
                     continue
 
-                # Spread filter
-                if spread_points > config.MAX_SPREAD_POINTS:
+                # Spread filter (identical rule to before, but the decision is
+                # recorded by the monitor so an impossible gate is visible)
+                if not gate_pass:
                     log_trade("SKIP", {"reason": "high_spread", "spread": spread_points})
                     time.sleep(config.CHECK_INTERVAL_SECONDS)
                     continue

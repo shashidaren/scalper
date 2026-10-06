@@ -116,6 +116,10 @@
       background: rgba(239,68,68,0.12);
       border-color: rgba(239,68,68,0.4);
     }
+    .portfolio-banner.warn {
+      background: rgba(245,158,11,0.12);
+      border-color: rgba(245,158,11,0.4);
+    }
     .portfolio-banner .label {
       color: var(--muted);
       text-transform: uppercase;
@@ -150,6 +154,32 @@
   </div>
   {% endif %}
 
+  {% if spread_gate and (spread_gate.infeasible or spread_gate.starved) %}
+  <div class="portfolio-banner {% if spread_gate.infeasible %}blocked{% else %}warn{% endif %}">
+    <div>
+      <div class="label">Entry spread gate &bull; {{ config.symbol if config is defined and config.symbol else "GOLD" }}</div>
+      {% if spread_gate.infeasible %}
+      <div><strong>⛔ NO ENTRY IS POSSIBLE WITH THIS CONFIGURATION.</strong>
+        All {{ spread_gate.samples }} observed quotes exceeded
+        <code>MAX_SPREAD_POINTS={{ "%g"|format(spread_gate.gate) }}</code>
+        (spread min/median/max in the last {{ spread_gate.window }} quotes:
+        {{ "%g"|format(spread_gate.min or 0) }}/{{ "%g"|format(spread_gate.median or 0) }}/{{ "%g"|format(spread_gate.max or 0) }} points).
+        Zero trades here means the gate is unusable, <em>not</em> that the strategy found no signal.
+      </div>
+      {% else %}
+      <div><strong>⚠ SPREAD GATE STARVED:</strong> {{ "%.1f"|format(spread_gate.veto_pct) }}% of
+        {{ spread_gate.samples }} quotes were vetoed by
+        <code>MAX_SPREAD_POINTS={{ "%g"|format(spread_gate.gate) }}</code>
+        (median {{ "%g"|format(spread_gate.median or 0) }} points). Entries are possible in principle but essentially never happen.
+      </div>
+      {% endif %}
+    </div>
+    <div style="font-size:0.8rem;color:var(--muted)">
+      last pass: {{ spread_gate.last_pass_at or "never" }}
+    </div>
+  </div>
+  {% endif %}
+
   <!-- Top metrics -->
   <div class="grid">
     <div class="card">
@@ -176,7 +206,9 @@
     <div class="card">
       <h2>{{ config.symbol if config is defined and config.symbol else "GOLD" }} Price</h2>
       <div class="value small">{{ "%.2f"|format(live.bid or 0) }} / {{ "%.2f"|format(live.ask or 0) }}</div>
-      <div style="color:var(--muted)">Spread: {{ live.spread or 0 }} points</div>
+      <div style="color:var(--muted)">Spread: {{ live.spread or 0 }} points
+        {% if spread_gate %}(gate {{ "%g"|format(spread_gate.gate) }}, {{ "%.0f"|format(spread_gate.veto_pct) }}% vetoed){% endif %}
+      </div>
     </div>
 
     <div class="card">
