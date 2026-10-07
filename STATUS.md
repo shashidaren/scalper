@@ -3,7 +3,7 @@
 Current truth only. History lives in `docs/archive/` and the dated notes in `docs/`.
 A session may edit this file and add one changelog row. Do not paste a new status essay on top.
 
-Last consolidated: 2026-10-07. The BTC spread gate was then set to the derived 6,250. No service unit was changed.
+Last verified on `scalping`: 2026-10-07 21:57 UTC. Docs-only commits do not restart the book.
 
 ## Gold
 
@@ -15,8 +15,8 @@ Last consolidated: 2026-10-07. The BTC spread gate was then set to the derived 6
 ## BTC
 
 - Instance dir `btc/`. Same engine, `btc/config.py` swapped in via `btc/_instance.py`. Dashboard `:8089`. Units `scalper-btc-bot` and `scalper-btc-dashboard`.
-- User-verified 2026-10-07: both units are **enabled and active**, `:8089` listening. Older notes that say disabled/inactive are stale.
-- `TRADING_MODE="FORWARD_TEST"`. `MAX_SPREAD_POINTS=6250` as of 2026-10-07, the recorded 1.25× TRAIN p90 rule (p90 was 5,000). The 1,500 placeholder was vetoing the live ~4,000-point quote forever. This starts paper observation only. Phase 1 is still a fail, so a paper fill is not a go-live.
+- User-verified 2026-10-07 21:39 UTC: all three units `active`, tree clean, `spread_gate` in the running process is `6250` (13/13 quotes passed, spread 4000, state `ok`). The 1,500 placeholder is no longer what the process is enforcing.
+- `TRADING_MODE="FORWARD_TEST"`. `MAX_SPREAD_POINTS=6250` is the recorded 1.25× TRAIN p90 rule. Paper observation only. Phase 1 is still a fail, so a paper fill is not a go-live.
 - Phase 1 (M5 pullback) is a **FAIL / no-go** on real XM bars (2026-10-03): cold OOS about −$46, PF 0.75. Write-up: `docs/btc_phase1_result_2026-10-03.md`.
 - Phase 1c (Donchian on untouched H1) is **BLOCKED, not failed**. The collect has not been run. One command, on `scalping` only: `bash docs/collect-2026-10-07/collect_phase1c.sh`. Paste `/root/ops/collect-2026-10-07/collection.md` back. Fail rule: net ≤ 0, PF < 1.2, n < 60, or g ≤ c. A pass still needs an explicit user decision before any config change.
 
@@ -27,11 +27,17 @@ Last consolidated: 2026-10-07. The BTC spread gate was then set to the derived 6
 - Flip either book to `LIVE` on the shared XM account. A separate account or a hard combined risk gate is required first.
 - Re-pull or reuse the inspected 2026-07-25..2026-10-03 BTC M5 window for a new gate.
 
+## Server
+
+- Crontab installed 2026-10-08: `CRON_TZ=UTC`, deploy every 15 minutes, one paper-status line at `7 1 * * *`. The weekday duplicate is gone. Copy: `docs/ops/README.md`.
+- Live paper-status script is `/root/ops/paper_status_daily.sh` (105 lines, copied from `docs/ops/`). Token file is `/root/ops/.env.paper_status` and is not in git.
+- 2026-10-07 21:57 UTC run wrote and published the gold ledger to `status/paper`: balance `$277.99`, 13 closed, 3 wins / 10 losses, SELL open from 17:30 UTC at 4113.46. That branch is a snapshot, not `main`.
+- 2026-10-07 21:53 UTC deploy of `d44528b` logged `restart skipped` for `scalper-bot`.
+
 ## Open
 
 - Run the Phase 1c collect on `scalping` and paste `collection.md` back.
 - Rotate the MT5 and VNC passwords (they were pasted in plain text; change at the broker, update `.env`).
-- Move `paper_status_daily.sh` and its env file out of the deployed tree to `/root/ops/`. Drop the duplicate weekday cron. See `docs/cron_review_2026-10-07.md`.
 - Re-apply the two mt5linux image patches if the container is ever recreated from stock `lprett/mt5linux`. Details: `docs/archive/HANDOFF_2026-10-07.md` §4.
 - File the two upstream mt5linux bugs (fifo `mkfifo` crash, `config.sh` `return` under `set -e`).
 
@@ -43,3 +49,4 @@ Last consolidated: 2026-10-07. The BTC spread gate was then set to the derived 6
 | 2026-10-07 | BTC `MAX_SPREAD_POINTS` 1500 → 6250 (1.25× measured TRAIN p90). Paper observation only. Phase 1 still FAIL. |
 | 2026-10-08 | `deploy.sh` restarts an already-active BTC unit when its runtime path changes. A stopped unit is still not started. The 6250 gate still needs one manual `systemctl restart scalper-btc-bot` if that unit was not restarted after PR #27. |
 | 2026-10-08 | Paper-status script backed up at `docs/ops/paper_status_daily.sh`. Live copy is `/root/ops/`. Token file stays off git. |
+| 2026-10-08 | Server verified: crontab installed, BTC gate 6250 passing 4000-pt quotes, paper status published (`$277.99`, 13 closed, 3W/10L). |
