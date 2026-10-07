@@ -8,6 +8,100 @@ code, parameters, or the server must update §1 (state), §3 (changelog) and
 
 ## 1. Where things stand (as of 2026-10-07)
 
+> **Update (2026-10-07, second session, branch `arena/c0f67ece-scalper`): the
+> deploy freeze is explained and now loud; the Phase-1c gate is BLOCKED (not
+> run) because this sandbox cannot reach `scalping`. No trading parameter, no
+> config and no service was touched.**
+> - **The server is unreachable from the sandbox — nothing in this block was
+>   observed from here.** `ssh scalping` → `Could not resolve hostname`;
+>   `/root/scalper` → permission denied; `127.0.0.1:18812`/`:8088` → connection
+>   refused. Every server fact below is **user-verified on the server
+>   (2026-10-07)** and labelled as such. The `docs/collect-2026-10-07/`
+>   outputs are therefore **absent**: see that directory's `README.md` +
+>   `collect_phase1c.sh` (one read-only command to run on `scalping`, then paste
+>   `collection.md` back).
+> - **Ground truth that corrects two stale records (user-verified).**
+>   (1) A dirty tracked `docker-compose.yml` froze **every** deploy from
+>   `2026-10-04 12:30` to `2026-10-07 02:28 UTC` (~63 h, ~250 cron ticks), so
+>   the gold bot ran `a122e7a`-era code: **PRs #22/#23/#24 were on disk but not
+>   in memory**, `logs/live_status.json` has no `spread_gate` field (the
+>   confirmation that the running process predates #22, hence the :8088 gate
+>   banner was never live), and only the 2026-10-04 behaviour of anything
+>   merged since is in memory. HEAD is `b033986` with a clean tree now.
+>   (2) `scalper-btc-bot` and `scalper-btc-dashboard` are **enabled + active**
+>   with `:8089` listening — the 10-03/10-06/10-07 notes below saying
+>   "disabled/inactive" are **stale**. BTC runs `TRADING_MODE="FORWARD_TEST"`
+>   with the **1,500-pt placeholder** `MAX_SPREAD_POINTS` against a ~4,242-pt
+>   real spread ⇒ **100% veto, 0 trades**. Not dangerous, but an unrecorded
+>   state; the units are left exactly as they are until the user decides.
+> - **`deploy.sh`: a failed pull is no longer silent
+>   (`docs/cron_review_2026-10-07.md` §3a, F11).** A pre-flight
+>   `git status --porcelain` logs `DIRTY TREE: modified tracked file(s) …` with
+>   the offending files (untracked files ignored), and `git fetch` /
+>   `checkout` / `pull --ff-only` are now captured: on failure they write one
+>   `PULL FAILED: <what failed> - code NOT updated (still <sha>); reason:
+>   <git's own error line>` plus the full captured git output
+>   (`PULL FAILED detail:`) into `logs/deploy.log`, then exit 1 — nothing is
+>   restarted and no update is left half-applied. Before this, `set -e` exited
+>   *before* any log write, which is why 63 h of failed deploys left only one
+>   line per tick in `logs/deploy.cron.log` and nothing in `logs/deploy.log`.
+>   `tests/test_deploy_services.sh` is **47/47 PASS** (was 18) with the
+>   dirty-tracked, untracked-only, pull-failure, fetch-failure and
+>   failing-`git status` cases; real-git integration on scratch clones
+>   reproduced the freeze (`PULL FAILED: git pull --ff-only origin main failed …
+>   would be overwritten by merge`, exit 1, repeating identically on the next
+>   tick) and its resolution (`git stash push` → the next run fast-forwards).
+>   Server-only compose tweaks now belong in `docker-compose.override.yml`
+>   (Compose merges it automatically; keep the tracked file clean).
+> - **Phase 1c (H1 Donchian) has NOT run — the gate is blocked, not failed.**
+>   No untouched H1 bars have been pulled or read, so nothing may be said about
+>   hypothesis C. `btc/config.py` is untouched (`MAX_SPREAD_POINTS=1500`,
+>   `BTC_STRATEGY="scalp"`, M5), `TRADING_MODE` stays `FORWARD_TEST` on both
+>   books, `MAX_SPREAD_POINTS` was not raised, and gold's 100-trade clock is
+>   untouched. The fixed rule stands: **FAIL if net ≤ 0, PF < 1.2, n < 60 or
+>   g ≤ c** → one-page negative result (`docs/btc_phase1c_result_2026-10-07.md`),
+>   no BTC service change, no tuning on that file, and the next
+>   pre-registered hypothesis gets its own untouched pull. **PASS** →
+>   document, then **ask the user** before re-deriving `MAX_SPREAD_POINTS`
+>   (1.25 × TRAIN p90), setting `BTC_STRATEGY="donchian"` +
+>   `BTC_TIMEFRAME="H1"` and starting *only* the BTC paper book (donchian +
+>   LIVE is refused by design).
+> - **Two corrections to this session's own instructions.** (a)
+>   `docs/btc_data_collection_2026-10-07.md` is **not** on
+>   `arena/87d768e3-scalper` (HEAD `02cc856`) nor on any other branch/PR —
+>   checked with `git log --all --diff-filter=A` and `git ls-tree` over every
+>   `origin/*` ref plus GitHub code search (0 hits) — so it could not be
+>   committed and its content must come from the user. (b)
+>   `DEPLOY_FORCE_RESTART=1` does **not** force a restart when HEAD has not
+>   moved (it only bypasses the changed-path filter *after* a real pull), so
+>   making the running code match `b033986` requires an explicit
+>   `systemctl restart scalper-bot scalper-dashboard` while flat.
+> - **Still pending on the server, user-approved only:** the restart in the
+>   line above (verify with `ActiveEnterTimestamp`, `journalctl -u scalper-bot
+>   -n 25`, a non-null `spread_gate` in `logs/live_status.json`, and the :8088
+>   price card), and installing the reviewed crontab.
+> - **Decisions taken by the user (2026-10-07, asked before acting):**
+>   (a) **keep both BTC paper units running** (observation on) — no config
+>   change, still `FORWARD_TEST` on the 1,500-pt placeholder, 100% veto, 0
+>   trades; (b) **install the reviewed crontab with `DEPLOY_SERVICES` = all four
+>   units** and (c) **restart `scalper-bot` + `scalper-dashboard` in the same
+>   session** while flat. Because of (b), `deploy.sh` grew the two BTC units'
+>   runtime allowlists (a BTC runtime path restarts only the BTC units;
+>   `btc/dashboard.py` only the BTC dashboard; a docs-only commit restarts
+>   nothing; `config.py`/`btc/config.py` restart everything that reads a config,
+>   fail safe) — without them an "unknown" service restarts on every commit.
+>   Paste-ready commands + verifications: **`docs/server_apply_2026-10-07.md`**.
+>   Both server actions remain **to be executed on `scalping`** — nothing in
+>   this block was run from the sandbox.
+> - **Local regressions after the `deploy.sh`/test edits** (no runtime file
+>   touched, so these are unchanged-baseline checks): `backtest.py` **255 /
+>   +$456.58 / PF 1.32 / max DD $108.65 / WR 28.2% / 72 TP · 43 BE · 140 SL /
+>   avgR 0.11**, `research/parity_test.py` **PASS** (460 signals, 0
+>   mismatches), `tests/test_spread_gate.py` **21/21**,
+>   `research/paper_exit_test.py` PASS, `btc/tool.py --check` **17/17**,
+>   `btc/strategy_btc_test.py` **22/22**, `btc/train_select_test.py` PASS,
+>   `btc/preflight_test.py` **9/9**, `btc/edge_screen_test.py` **11/11**.
+
 > **Update (2026-10-07, branch `arena/87d768e3-scalper`): cron review — three
 > findings accepted, `deploy.sh` hardened; no trading parameter touched.**
 > - **Review written up: `docs/cron_review_2026-10-07.md`.** Verdicts on the
@@ -148,7 +242,11 @@ code, parameters, or the server must update §1 (state), §3 (changelog) and
 > - **Consequence: no BTC service, and Phase 2 stays blocked.** On `scalping`,
 >   `scalper-btc-bot` and `scalper-btc-dashboard` are **disabled + inactive**
 >   (`:8089` not listening; the unit that the `a4d6ecf` → `d8add56` transition
->   deploy had started was stopped at `16:50:21 UTC` after 0 trades), the deploy
+>   deploy had started was stopped at `16:50:21 UTC` after 0 trades)
+>   **[SUPERSEDED 2026-10-07: both units are `enabled` + `active` again and
+>   `:8089` is listening — user-verified on the server; see the 2026-10-07 §1
+>   block. They run `FORWARD_TEST` paper on the 1,500-pt placeholder gate:
+>   100% veto, 0 trades, no config change, still no Phase 2]**, the deploy
 >   cron is `*/15 * * * * DEPLOY_BRANCH=main /root/scalper/deploy.sh` with **no**
 >   `DEPLOY_SERVICES`/`DEPLOY_SERVICE` override, and the last deploy line reads
 >   `restarted scalper-bot at f5e76c8… (was d8add56…) branch=main` — the
@@ -585,6 +683,7 @@ stale-tick thresholds (`STALE_TICK_WARN_CYCLES=20`,
 
 | Date | Change | Why |
 |---|---|---|
+| 10-07 | **Deploy-failure visibility + the freeze explained; Phase-1c gate blocked (`arena/c0f67ece-scalper`, `docs/cron_review_2026-10-07.md` §3a/F11, `docs/collect-2026-10-07/`)**: a dirty tracked `docker-compose.yml` froze every 15-minute deploy from **2026-10-04 12:30 to 2026-10-07 02:28 UTC** (~63 h, ~250 ticks) — the gold bot ran `a122e7a`-era code, so PRs #22/#23/#24 were on disk but not in memory and `logs/live_status.json` had **no `spread_gate`** field (⇒ the running process predates #22, so PR #22's :8088 gate banner was never live); server HEAD is `b033986`, tree clean. **`deploy.sh` now makes that impossible to miss:** a pre-flight `git status --porcelain` logs `DIRTY TREE: modified tracked file(s) …` with the files (untracked paths ignored), and `git fetch`/`checkout`/`pull --ff-only` each log `PULL FAILED: <what> - code NOT updated (still <sha>); reason: <git's error line>` + the captured git output into `logs/deploy.log`, then exit 1 without restarting anything (previously `set -e` exited before any log write, so the only trace was one line/tick in `logs/deploy.cron.log`). Tests **47/47 PASS** (was 18: dirty-tracked, untracked-only, pull-failure, fetch-failure, failing-`git status`, plus the BTC units' allowlists so the user's four-unit `DEPLOY_SERVICES` cannot degenerate into restart-on-every-commit) + real-git scratch-clone reproduction of the freeze and its resolution. Server-only compose tweaks are documented to go in `docker-compose.override.yml` (F11). **Also recorded:** BTC's two units are actually **enabled + active** on `:8089` (the earlier "disabled/inactive" notes are stale) running the 1,500-pt placeholder gate against a ~4,242-pt spread ⇒ 100% veto / 0 trades, left untouched pending a user decision; Phase 1c was **not** run (this sandbox cannot reach `scalping`: no `ssh`, no MT5 bridge, no `/root/scalper`) and a read-only one-command collector (`docs/collect-2026-10-07/collect_phase1c.sh`) plus the fixed gate rule now sit ready; `docs/btc_data_collection_2026-10-07.md` exists on **no** branch/PR and could not be committed. **No trading/engine/config value changed** — `MAX_SPREAD_POINTS` 1500, `BTC_STRATEGY` `scalp`, both `TRADING_MODE`s `FORWARD_TEST`, gold untouched (`backtest.py` **255 / +$456.58 / PF 1.32 / maxDD $108.65 / 72-43-140**, `parity_test` **PASS** 460/0, `test_spread_gate` 21/21, `btc/tool.py --check` 17/17, `btc/strategy_btc_test.py` 22/22, `preflight_test` 9/9, `edge_screen_test` 11/11). | The 10-07 cron review had flagged that no alert or `deploy.log` line reports a failed pull; the server then produced a 63-hour freeze that ran old code for three days with the fix on disk. Logging the failure where the runbook looks (plus warning about dirty tracked files before the pull, and pointing server-only edits at `docker-compose.override.yml`) is the difference between a silent stop and a visible one. Recording the Phase-1c status as *blocked* avoids the two failure modes the plan warns about: treating an unrun gate as a result, and tuning or re-pulling the already inspected M5 window. |
 | 10-07 | **Cron review + deploy hardening (`arena/87d768e3-scalper`, `docs/cron_review_2026-10-07.md`; PR pending)**: reviewed the three recorded `crontab -l` lines on `scalping` and closed the decisions. **`deploy.sh` now restarts only when a runtime path changed** — `git diff --name-only BEFORE AFTER` is checked against an inert allowlist (`docs/`, `research/`, `tests/`, `*.md`, `deploy.sh`; for `scalper-bot` also `btc/*` except `btc/config.py`, plus non-runtime tooling `backtest.py`/`fetch_data.py`/`gold.py`/`balance.py`/`dashboard.py`/`templates/*`; for dashboard units only `dashboard.py`/`config.py`/`logger.py`/`portfolio.py`/`templates/*` are runtime inputs), **failing safe into a restart** on empty/failed diff or unknown path (`DEPLOY_FORCE_RESTART=1` bypasses) — because a restart re-arms in-memory-only state (`strategy._last_fired_bar_ts` one-shot-per-bar guard, spread-gate counters, stale-tick counters) and the BTC-only/docs-only commits that dominate the log were restarting the gold paper book mid-session. It also takes **`flock -n` on `logs/deploy.lock`** (`DEPLOY_LOCK_FILE`) since `ExecStartPre` (`wait_for_mt5.py --timeout 180`) can outlast the 15-minute slot, and logs a note when dashboard-relevant files changed but `scalper-dashboard` is not in `DEPLOY_SERVICES`. Restart lines keep the historical `restarted <svc> at <sha> (was <sha>) branch=<branch>` wording. **Cron recommendation:** keep `*/15 … DEPLOY_BRANCH=main` (add `mkdir -p logs &&`); keep the daily status report but at `7 1 * * *`; **delete `0 1 * * 1-5`** (weekday duplicate, 15 min after the daily one); add `SHELL`/`PATH` (mt5env)/`MAILTO`/`CRON_TZ=UTC`. **Findings not code-changed:** `scalper-dashboard` is never restarted by the cron and `dashboard.py` does not hot-reload (templates do — Jinja2 `auto_reload=True` verified in-process), so PR #22's red gate banner needs one manual dashboard restart; `/root/scalper/scripts/paper_status_daily.sh` sits inside the pull target (a future commit adding `scripts/` aborts every `git pull --ff-only`; a `.gitignore` "fix" would let git clobber it) → move ops scripts to `/root/ops/`; no `MAILTO`/alert for failed pulls; `services/*.service` edits never reach `/etc/systemd/system` (no copy, no `daemon-reload`); no logrotate. **Verification:** `tests/test_deploy_services.sh` **18/18 PASS** (was 3/3) + real-git 7-scenario integration; gold `backtest.py` **255 / +$456.58 / PF 1.32 / maxDD $108.65 / 72-43-140** (identical), `parity_test` **PASS** 460/0, `test_spread_gate` **21/21**, `paper_exit_test` PASS. **No trading/engine/config parameter changed**; `TRADING_MODE` stays `FORWARD_TEST`, `MAX_SPREAD_POINTS` stays 1500, deploy still defaults to the gold unit only, server crontab untouched (no `ssh scalping` from this container). | User asked for a review of the cron ("do we need any changes?"). The deploy cron is the only thing that ships code to the paper book that gates any LIVE decision, and it was restarting that book on every commit — including BTC-only ones — which both re-arms the one-shot-per-bar guard mid-session and adds `ExecStartPre` waits that can overlap the next tick. The status cron was double-running the same script 15 minutes apart (`§5` TODO). Recording the verdicts, the exact crontab, and the things deliberately left alone (BTC opt-in, `main`, schedule) keeps the next session from re-deriving them and from "fixing" the paper-status path in a way that breaks every future deploy. |
 | 10-06 | **BTC spread-gate telemetry + diagnostics; "high_spread / 0 trades" root-caused ([PR #22](https://github.com/shashidaren/scalper/pull/22), `arena/037cb1f4-scalper`, `btc/HANDOFF.md` §7a/§9, `docs/btc_spread_edge_analysis_2026-10-06.md`)**: new shared **`spread_gate.py`** (`SpreadGateMonitor` — counts quotes/vetoes, min/median/max spread, verdicts `ok\|starved\|infeasible`, rate-limited **one** `SPREAD GATE INFEASIBLE` warning + recovery INFO) fed by `run.py` and published as `spread_gate` in `live_status.json` (`logger.py` optional key, default `None`); dashboard banner **"⛔ NO ENTRY IS POSSIBLE WITH THIS CONFIGURATION"** / amber STARVED + `gate N, M% vetoed` on the price card (`dashboard.py`, `templates/index.html`). New tools: **`btc/preflight.py`** (exit 0 OK / 1 STARVED / 2 INFEASIBLE / 3 unmeasured; `--offline --csv` or read-only live ticks, never `mt5.shutdown()`), **`btc/edge_screen.py`** (gross-edge vs cost ratio; reproduces gold's 255 / +$456.58 / PF 1.32), **`btc/breakout_screen.py`** (hypothesis-C proxy screen). New tests `tests/test_spread_gate.py` 21/21, `btc/preflight_test.py`, `btc/edge_screen_test.py`; `btc/e2e_smoke.py` now asserts the gate snapshot, `btc/tool.py --check` **14/14** (BTC instance). **No trading/engine parameter changed** (notably `MAX_SPREAD_POINTS` stays 1500 and `TRADING_MODE` stays `FORWARD_TEST`; no BTC service). Gold unchanged: `backtest.py` **255 / +$456.58 / PF 1.32 / maxDD $108.65 / 72-43-140**, `parity_test` PASS 460/0, `paper_exit_test` PASS, `train_select_test` PASS, `e2e_smoke` ALL PASS both dirs, `test_deploy_services.sh` 3/3. | User reported the BTC bot showing `high_spread` with no trades. Measured cause: `MAX_SPREAD_POINTS=1500` placeholder vs a real 4,242-pt mean spread ⇒ **100% veto** before `strategy.check_signal` ever runs (derived gate ≈6,250 pts vetoes 0.00%). §5 forbids loosening the gate to let a losing shape trade, so the fix is to make the impossibility *visible and measured* (engine log, `live_status.json`, banner, preflight exit code) instead of silently skipping forever, and to give the next attempt the g > c decision rule. |
 | 10-06 | **BTC Phase-1c amendment recorded (proxy non-evidence) (`arena/037cb1f4-scalper`, `docs/btc_spread_edge_analysis_2026-10-06.md`)**: screening the pullback shape on public Binance klines (costed at the measured XM quote, 5.486 bp of price) shows the *gross* edge decays to ~0 after 2021 (per-era gross PF 1.17/1.26/0.98/0.96/1.02) and that even **zero cost** leaves the 8-year book at PF 1.01 — so cheaper tiers are not the binding constraint. A long-lookback **H1 Donchian breakout** (don100/exit50/sl2.0) shows net PF **1.16 / +$406.20 / 532 trades**, positive 2021–2024, negative in 2025 on n=36. A is deprioritised, B downgraded to "after a gross edge exists", **C is the pre-registered priority** for the next untouched XM pull (still gated by `btc/train_select.py` cold-OOS: net > 0, PF ≳ 1.2, n ≥ 60). Proxy numbers are **not evidence** for XM BTCUSD. | Keeps the untouched CSVs clean: screening families before spending a pull stops the same (already negative) family being re-litigated and stops a proxy result being mistaken for a Phase-1 pass. |
@@ -785,6 +884,47 @@ Note: the patched image may still carry `set -ex` tracing in
   `/root/ops/` — `/root/scalper` is the pull target, so a future commit adding
   `scripts/` would make every `git pull --ff-only` abort (and a `.gitignore`
   workaround would let git clobber it). See `docs/cron_review_2026-10-07.md` §4.
+- [ ] **Run the Phase-1c collection on `scalping` (BLOCKED from the sandbox
+  2026-10-07 — do this first).** The Arena sandbox cannot reach the server
+  (`ssh scalping` unresolved, `/root/scalper` permission denied, no bridge on
+  `:18812`), so the untouched H1 pull and the gate have **not** been run:
+  the Donchian gate is *blocked*, not failed, and no BTC result exists.
+  One read-only command runs the whole plan (state + facts + `g>c` +
+  `train_select` + derive + parity + what BTC is really running):
+  ```bash
+  cd /root/scalper && bash docs/collect-2026-10-07/collect_phase1c.sh
+  # -> /root/ops/collect-2026-10-07/collection.md   (paste this back)
+  ```
+  Decision rule (fixed, `docs/collect-2026-10-07/README.md`,
+  `btc/HANDOFF.md` §5 item 8): **net ≤ 0, PF < 1.2, n < 60 or g ≤ c ⇒ FAIL**
+  → one-page `docs/btc_phase1c_result_2026-10-07.md`, no BTC service change, no
+  tuning on that file, next pre-registered hypothesis on its own untouched pull.
+  **PASS ⇒ document, then ask the user before any config change.** Never re-pull
+  or reuse the inspected `2026-07-25..10-03` M5 window for selection.
+- [ ] **Make the running code match `b033986` (Task E — approved 2026-10-07,
+  run together with the crontab install; see `docs/server_apply_2026-10-07.md`).** The bot has been running `a122e7a`-era code since 2026-10-04 12:30;
+  restart **while flat** (`mt5env/bin/python paper.py` shows the open paper
+  position):
+  ```bash
+  systemctl show scalper-bot -p ActiveEnterTimestamp        # expect ~2026-10-04 12:3x
+  systemctl restart scalper-bot scalper-dashboard
+  systemctl show scalper-bot -p ActiveEnterTimestamp
+  journalctl -u scalper-bot -n 25 --no-pager
+  python3 -c "import json;print(json.load(open('/root/scalper/logs/live_status.json')).get('spread_gate'))"   # must be non-null now
+  ```
+  then load `:8088` and confirm the price card / gate banner.
+  **`DEPLOY_FORCE_RESTART=1` does not help** — it only bypasses the
+  changed-path filter *after* a pull, and HEAD has not moved. Do **not** run
+  `docker compose up -d` reactively (it recreates mt5 and drops ticks); only
+  apply the committed compose file deliberately, while flat.
+- [ ] **Audit the server working tree for other server-only edits to tracked
+  files** (the 10-04→10-07 freeze's root cause was a dirty tracked
+  `docker-compose.yml`). `git -C /root/scalper status --porcelain` should be
+  empty; move host-specific edits to `docker-compose.override.yml` (Compose
+  merges it automatically — `docs/cron_review_2026-10-07.md` F11) and other
+  server-only files to `/root/ops/`. `deploy.sh` now warns (`DIRTY TREE`) and
+  logs `PULL FAILED: …` when a pull cannot apply, so the next occurrence is
+  visible in `logs/deploy.log` — but the fix is to keep the tree clean.
 - [ ] **Install the reviewed crontab on `scalping`** (2026-10-07 review):
   back up `crontab -l`, add `SHELL`/`PATH`(mt5env)/`MAILTO`/`CRON_TZ=UTC`,
   prefix the deploy line with `mkdir -p /root/scalper/logs &&`, dedupe the
@@ -792,6 +932,15 @@ Note: the patched image may still carry `set -ex` tracing in
   (the dashboard is otherwise never restarted, so `dashboard.py` fixes — e.g.
   PR #22's gate banner — do not go live; templates hot-reload, modules do not).
   Checklist: `docs/cron_review_2026-10-07.md` §6.
+  **Status 2026-10-07 (second session): decided and ready to install — the user
+  chose `DEPLOY_SERVICES` = all four units** (both paper books keep running and
+  are kept in sync), with the `mkdir -p /root/scalper/logs &&` prefix and
+  `MAILTO` so a `PULL FAILED` also reaches a mailbox. Install + restart are one
+  approved server session: **`docs/server_apply_2026-10-07.md`** (exact crontab
+  heredoc, backup/rollback, restart while flat, and the four verifications).
+  `deploy.sh` now knows the two BTC units' runtime allowlists, so opting them in
+  does not degenerate into "restart on every commit"; remember that
+  `systemctl restart` also *starts* a stopped unit.
 - [ ] **Confirm the dashboard picked up PR #22:** `systemctl show
   scalper-dashboard -p ActiveEnterTimestamp` — if it predates 2026-10-06,
   `systemctl restart scalper-dashboard`, then check the `:8088` price card for
@@ -955,7 +1104,9 @@ Note: the patched image may still carry `set -ex` tracing in
   - **Server state verified read-only.** `scalper-bot` + `scalper-dashboard`
     `enabled`/`active` (`SIM: $128.62 | SimEquity: $131.03`, open paper position
     undisturbed, `:8088` up); `scalper-btc-bot` + `scalper-btc-dashboard`
-    **`disabled` + `inactive`** (`:8089` not listening) — the unit the
+    **`disabled` + `inactive`** (`:8089` not listening; **[SUPERSEDED
+    2026-10-07: both units are `enabled` + `active` again and `:8089` is
+    listening — see the 2026-10-07 §1 block]**) — the unit the
     `a4d6ecf` → `d8add56` transition deploy had started was stopped at
     `16:50:21 UTC` after **0 trades** with repeated `high_spread` skips at
     ~4,000 pts vs the 1,500-pt placeholder; bridge `18812` listening; deploy
@@ -1087,6 +1238,9 @@ tail -5 /root/scalper/logs/deploy.log
 #   <ts>; restart skipped for scalper-bot (no runtime path changed) <- inert commit (docs/btc/tests/…)
 #   <ts> already up to date (<sha>) branch=main                     <- nothing landed
 #   <ts> deploy already running (lock …) - skipped                  <- overlapping run, expected 0
+#   <ts> DIRTY TREE: modified tracked file(s) - …: <file>           <- tree not clean; pull may abort (fix: stash / override file)
+#   <ts> PULL FAILED: <git fetch|checkout|pull …> failed - code NOT updated (still <sha>); reason: …   <- deploy stopped; exit 1
+#   <ts> PULL FAILED detail: …                                      <- git's own output, one line each
 # force a restart by hand if a filter verdict is ever disputed:
 cd /root/scalper && DEPLOY_FORCE_RESTART=1 ./deploy.sh
 
@@ -1115,8 +1269,35 @@ CRON_TZ=UTC
 7 1 * * * test -x /root/ops/paper_status_daily.sh && /root/ops/paper_status_daily.sh >> /root/scalper/logs/paper_status.cron.log 2>&1 || echo "$(date -Is) paper_status missing or exited non-zero" >> /root/scalper/logs/paper_status.cron.log
 ```
 
-Optional: add `DEPLOY_SERVICES=scalper-bot scalper-dashboard` to the deploy
-line so `dashboard.py` fixes (e.g. PR #22's banner) actually reach `:8088`.
+**Optional, and now the user's choice (2026-10-07):** `DEPLOY_SERVICES` for the
+deploy line. The user chose **all four units** — both paper books keep running
+(observation on), so both are kept in sync with the code:
+
+```
+*/15 * * * * mkdir -p /root/scalper/logs && DEPLOY_BRANCH=main DEPLOY_SERVICES="scalper-bot scalper-dashboard scalper-btc-bot scalper-btc-dashboard" /root/scalper/deploy.sh >> /root/scalper/logs/deploy.cron.log 2>&1
+```
+
+With that, a commit that touches a runtime input restarts only the affected
+units (`btc/runtime*` files restart the BTC units; gold-runtime files restart
+gold; `docs/`, `research/`, `tests/`, `*.md`, `deploy.sh` and gold-only tooling
+restart nothing — `deploy.sh` now knows both BTC units instead of treating them
+as unknown services, which would have meant "restart on every commit").
+**Caveat to remember:** `systemctl restart` also *starts* a stopped unit, so if
+the BTC units are ever deliberately stopped, take them out of
+`DEPLOY_SERVICES` (or `systemctl mask` them) at the same time.
+
+Install + restart runbook with the exact commands and verifications:
+`docs/server_apply_2026-10-07.md`.
+
+**2026-10-07 follow-up (in this branch; ships on merge):** `deploy.sh` now pre-checks
+`git status --porcelain` and warns `DIRTY TREE: modified tracked file(s) …`
+(tracked files only; untracked paths like `logs/`, `data/*.csv` are ignored),
+and every failed `git fetch`/`checkout`/`pull --ff-only` writes one
+`PULL FAILED: <what> - code NOT updated (still <sha>); reason: <git's error>`
+line plus the captured git output into `logs/deploy.log` before exiting 1 —
+it never restarts anything on a failed pull. That is the visibility half of
+finding F4; `MAILTO` is still needed for the alerting half. Server-only compose
+tweaks go in `docker-compose.override.yml` (F11), never the tracked file.
 
 ## 7. Failure signatures (what each error means)
 
