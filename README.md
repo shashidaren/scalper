@@ -1,5 +1,7 @@
 # Python MT5 Gold Scalper & Backtester Framework
 
+Current state: [`STATUS.md`](STATUS.md). Layout: [`ARCHITECTURE.md`](ARCHITECTURE.md). Server commands: [`RUNBOOK.md`](RUNBOOK.md). The long session handoffs are in `docs/archive/`.
+
 An experimental algorithmic trading and backtesting framework for **GOLD / XAUUSD** using MetaTrader 5 inside a Docker container (Wine) bridged to a host Python environment via RPyC.
 
 ---
