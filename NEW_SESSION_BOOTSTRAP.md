@@ -132,6 +132,13 @@ Check that the BTC CSV exists and inspect the reported cron. `deploy.sh` now
 defaults to restarting **only** `scalper-bot`; `DEPLOY_SERVICES` must not
 include BTC before Phase 2. Then run the BTC research from the repository root:
 
+> Cron note (2026-10-07, `arena/87d768e3-scalper`): `deploy.sh` also restarts a
+> unit only when a changed path is a runtime input for it — `btc/**` is inert
+> for gold **except `btc/config.py`** (the shared portfolio gate reads BTC's
+> `MAX_DAILY_LOSS`/`MAX_TRADES_PER_DAY`) — and holds `logs/deploy.lock` so runs
+> cannot overlap. Recommended crontab (deduped status line, `SHELL`/`PATH`/
+> `MAILTO`/`CRON_TZ`, `mkdir -p logs &&`): `docs/cron_review_2026-10-07.md` §4.
+
 ```bash
 mt5env/bin/python btc/tool.py btc/derive_params.py --csv data/BTCUSD_M5.csv
 mt5env/bin/python btc/tool.py research/strategy_sweep.py --csv data/BTCUSD_M5.csv --verify

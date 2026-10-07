@@ -6,7 +6,77 @@ code, parameters, or the server must update §1 (state), §3 (changelog) and
 
 ---
 
-## 1. Where things stand (as of 2026-10-06)
+## 1. Where things stand (as of 2026-10-07)
+
+> **Update (2026-10-07, branch `arena/87d768e3-scalper`): cron review — three
+> findings accepted, `deploy.sh` hardened; no trading parameter touched.**
+> - **Review written up: `docs/cron_review_2026-10-07.md`.** Verdicts on the
+>   three recorded cron lines: keep `*/15 … DEPLOY_BRANCH=main` (`main` is the
+>   production target); keep the daily `15 1 * * *` paper-status line but move
+>   it off the quarter-hour (`7 1`) so it cannot read the book mid-restart;
+>   **drop `0 1 * * 1-5`** — on weekdays it ran the identical script 15 minutes
+>   after the daily line (the §5 "double-run on weekdays" TODO). The recommended
+>   paste-ready crontab adds `SHELL`/`PATH`/`MAILTO`/`CRON_TZ=UTC`, a
+>   `mkdir -p /root/scalper/logs &&` prefix (the shell opens the redirect
+>   *before* `deploy.sh` can create `logs/`), and a `test -x` guard on the
+>   server-only status script.
+> - **`deploy.sh` changed — the two real defects.** (1) It restarted
+>   `scalper-bot` on **any** commit, including the BTC-only/docs-only commits
+>   that dominate (`#22`, `#23`, …). A restart re-arms state that exists only in
+>   memory: `strategy._last_fired_bar_ts` (the one-shot-per-bar guard,
+>   `strategy.py:60-62,226-232`), the `SpreadGateMonitor` counters (`run.py:142`)
+>   and the stale-tick counters — so a mid-session restart can allow a **second
+>   entry on a closed bar** once that bar's first entry has exited, i.e. it can
+>   contaminate the §5 "100+ paper trades" LIVE clock. It now restarts a service
+>   only when a runtime input for it changed (`git diff --name-only BEFORE
+>   AFTER` against an inert allowlist; empty diff, failed diff and unknown paths
+>   all **fail safe into a restart**; `DEPLOY_FORCE_RESTART=1` bypasses).
+>   `btc/config.py` is deliberately *not* inert: the shared portfolio gate reads
+>   its `MAX_DAILY_LOSS`/`MAX_TRADES_PER_DAY` via `portfolio.py::_btc_config()`
+>   (`portfolio.py:40-52,108-110`), currently short-circuited by gold's own
+>   `PORTFOLIO_MAX_*` keys (`config.py:144-150`) but a real coupling. (2)
+>   `flock -n` on `logs/deploy.lock` (`DEPLOY_LOCK_FILE`) so a run cannot
+>   overlap the next 15-minute tick — `ExecStartPre` (`wait_for_mt5.py
+>   --timeout 180`) can block longer than the slot. Restart lines keep the
+>   historical `restarted <svc> at <sha> (was <sha>) branch=<branch>` wording;
+>   skips log `restart skipped for <svc> (no runtime path changed)`.
+> - **Dashboard gap found.** `deploy.sh` never restarted `scalper-dashboard`,
+>   and `dashboard.py` module changes do **not** hot-reload (Jinja templates
+>   do — `auto_reload=True` is the Jinja2 3.1.6 default and Starlette does not
+>   disable it; verified in-process). PR #22's red "NO ENTRY IS POSSIBLE WITH
+>   THIS CONFIGURATION" banner is a `dashboard.py` *context* change, so on a
+>   dashboard not restarted since 2026-10-06 the banner silently never appears.
+>   The deploy now logs a note naming dashboard-relevant files; opt in with
+>   `DEPLOY_SERVICES="scalper-bot scalper-dashboard"`. Check
+>   `systemctl show scalper-dashboard -p ActiveEnterTimestamp`.
+> - **Also flagged, deliberately not changed:** `/root/scalper/scripts/`
+>   `paper_status_daily.sh` (server-only, not in git) lives inside the directory
+>   the cron pulls into — if a future commit ever adds that path, every
+>   `git pull --ff-only` aborts with "untracked working tree files would be
+>   overwritten" and updates stop silently; "fixing" it with `.gitignore` would
+>   instead let git clobber the script. Move server-only ops scripts outside the
+>   deployed tree (`/root/ops/`). No `MAILTO`/alert exists, so a failed pull
+>   stops all deployments with only a log line. `services/*.service` edits are
+>   pulled but never copied to `/etc/systemd/system` nor `daemon-reload`ed. No
+>   logrotate for `logs/`. Cron runs with `/usr/bin:/bin` while the units run
+>   with the `mt5env` PATH — declare it in the crontab.
+> - **Verification (local; this container has no `ssh scalping`):**
+>   `tests/test_deploy_services.sh` **18/18 PASS** (was 3/3 — BTC-only ⇒ no
+>   restart, `btc/config.py` ⇒ restart, empty/failed diff ⇒ restart,
+>   `DEPLOY_FORCE_RESTART=1`, dashboard opt-in on/off, lock-held ⇒ skip) plus a
+>   real-git 7-scenario integration run on a scratch clone. Gold regressions
+>   after the edit: `backtest.py` **255 / +$456.58 / PF 1.32 / maxDD $108.65 /
+>   WR 28.2% / 72-43-140 / avgR 0.11** (identical), `research/parity_test.py`
+>   **PASS** (460 signals, 0 mismatches), `tests/test_spread_gate.py` **21/21**,
+>   `research/paper_exit_test.py` PASS. No gold-runtime file was edited and
+>   `config.py`, `btc/config.py`, `strategy.py`, `run.py`, both `TRADING_MODE`s,
+>   `MAX_SPREAD_POINTS` and every trading parameter are untouched; the gold-only
+>   deploy default stands, so BTC remains an explicit Phase-2 opt-in.
+> - **Server action (not done from here):** §6 checklist in
+>   `docs/cron_review_2026-10-07.md` — back up `crontab -l`, install the
+>   recommended block, restart `scalper-dashboard` once if its
+>   `ActiveEnterTimestamp` predates 2026-10-06, then read the next
+>   `logs/deploy.log` tick.
 
 > **Update (2026-10-06, branch `arena/037cb1f4-scalper`, pushed as
 > [PR #22](https://github.com/shashidaren/scalper/pull/22)): the BTC "no trades,
@@ -408,10 +478,21 @@ code, parameters, or the server must update §1 (state), §3 (changelog) and
   present. (`logs/live_ledger.json` staying absent in FORWARD_TEST is by design
   — LiveLedger is LIVE-only — but was not re-checked in this pass; it is covered
   by the first-LIVE-run item in §5.)
+  **Changed 2026-10-07:** the cron line gains a `mkdir -p /root/scalper/logs &&`
+  prefix, and `deploy.sh` itself now (a) holds `logs/deploy.lock` via `flock -n`
+  so runs cannot overlap an `ExecStartPre` wait, and (b) restarts a unit only
+  when a changed path is a runtime input for it — BTC-only/docs-only commits no
+  longer restart the gold book (see §1 10-07 and §3).
 - **Status script:** runs from cron on the server at **01:15 UTC daily** and
   **01:00 UTC Mon–Fri** (double-run on weekdays by design/legacy), at
   `/root/scalper/scripts/paper_status_daily.sh` — **server-only, not in git**.
   Keep `.env.paper_status` private; never commit it.
+  **2026-10-07 review:** the weekday double-run is a duplicate (same script,
+  15 min apart) → **recommended: one daily run at `7 1 * * *`** (off the
+  deploy cron's :00/:15 ticks) and delete the Mon–Fri line; move the script
+  *out* of the deployed tree (e.g. `/root/ops/`) because `/root/scalper` is what
+  the 15-minute cron pulls into — a future commit adding `scripts/` would abort
+  every `git pull --ff-only` (see `docs/cron_review_2026-10-07.md` F1/F2).
 - **Backtest verdict (2026-09-30, `data/GOLD_M5.csv`, 20,000 M5 bars ≈ Jun–Sep
   2026):** the first honest run (201 trades, PF 0.92, −$57.78, exits 29 TP /
   96 BE / 76 SL) turned out to be *flattered by two measurement bugs* — see
@@ -504,6 +585,7 @@ stale-tick thresholds (`STALE_TICK_WARN_CYCLES=20`,
 
 | Date | Change | Why |
 |---|---|---|
+| 10-07 | **Cron review + deploy hardening (`arena/87d768e3-scalper`, `docs/cron_review_2026-10-07.md`; PR pending)**: reviewed the three recorded `crontab -l` lines on `scalping` and closed the decisions. **`deploy.sh` now restarts only when a runtime path changed** — `git diff --name-only BEFORE AFTER` is checked against an inert allowlist (`docs/`, `research/`, `tests/`, `*.md`, `deploy.sh`; for `scalper-bot` also `btc/*` except `btc/config.py`, plus non-runtime tooling `backtest.py`/`fetch_data.py`/`gold.py`/`balance.py`/`dashboard.py`/`templates/*`; for dashboard units only `dashboard.py`/`config.py`/`logger.py`/`portfolio.py`/`templates/*` are runtime inputs), **failing safe into a restart** on empty/failed diff or unknown path (`DEPLOY_FORCE_RESTART=1` bypasses) — because a restart re-arms in-memory-only state (`strategy._last_fired_bar_ts` one-shot-per-bar guard, spread-gate counters, stale-tick counters) and the BTC-only/docs-only commits that dominate the log were restarting the gold paper book mid-session. It also takes **`flock -n` on `logs/deploy.lock`** (`DEPLOY_LOCK_FILE`) since `ExecStartPre` (`wait_for_mt5.py --timeout 180`) can outlast the 15-minute slot, and logs a note when dashboard-relevant files changed but `scalper-dashboard` is not in `DEPLOY_SERVICES`. Restart lines keep the historical `restarted <svc> at <sha> (was <sha>) branch=<branch>` wording. **Cron recommendation:** keep `*/15 … DEPLOY_BRANCH=main` (add `mkdir -p logs &&`); keep the daily status report but at `7 1 * * *`; **delete `0 1 * * 1-5`** (weekday duplicate, 15 min after the daily one); add `SHELL`/`PATH` (mt5env)/`MAILTO`/`CRON_TZ=UTC`. **Findings not code-changed:** `scalper-dashboard` is never restarted by the cron and `dashboard.py` does not hot-reload (templates do — Jinja2 `auto_reload=True` verified in-process), so PR #22's red gate banner needs one manual dashboard restart; `/root/scalper/scripts/paper_status_daily.sh` sits inside the pull target (a future commit adding `scripts/` aborts every `git pull --ff-only`; a `.gitignore` "fix" would let git clobber it) → move ops scripts to `/root/ops/`; no `MAILTO`/alert for failed pulls; `services/*.service` edits never reach `/etc/systemd/system` (no copy, no `daemon-reload`); no logrotate. **Verification:** `tests/test_deploy_services.sh` **18/18 PASS** (was 3/3) + real-git 7-scenario integration; gold `backtest.py` **255 / +$456.58 / PF 1.32 / maxDD $108.65 / 72-43-140** (identical), `parity_test` **PASS** 460/0, `test_spread_gate` **21/21**, `paper_exit_test` PASS. **No trading/engine/config parameter changed**; `TRADING_MODE` stays `FORWARD_TEST`, `MAX_SPREAD_POINTS` stays 1500, deploy still defaults to the gold unit only, server crontab untouched (no `ssh scalping` from this container). | User asked for a review of the cron ("do we need any changes?"). The deploy cron is the only thing that ships code to the paper book that gates any LIVE decision, and it was restarting that book on every commit — including BTC-only ones — which both re-arms the one-shot-per-bar guard mid-session and adds `ExecStartPre` waits that can overlap the next tick. The status cron was double-running the same script 15 minutes apart (`§5` TODO). Recording the verdicts, the exact crontab, and the things deliberately left alone (BTC opt-in, `main`, schedule) keeps the next session from re-deriving them and from "fixing" the paper-status path in a way that breaks every future deploy. |
 | 10-06 | **BTC spread-gate telemetry + diagnostics; "high_spread / 0 trades" root-caused ([PR #22](https://github.com/shashidaren/scalper/pull/22), `arena/037cb1f4-scalper`, `btc/HANDOFF.md` §7a/§9, `docs/btc_spread_edge_analysis_2026-10-06.md`)**: new shared **`spread_gate.py`** (`SpreadGateMonitor` — counts quotes/vetoes, min/median/max spread, verdicts `ok\|starved\|infeasible`, rate-limited **one** `SPREAD GATE INFEASIBLE` warning + recovery INFO) fed by `run.py` and published as `spread_gate` in `live_status.json` (`logger.py` optional key, default `None`); dashboard banner **"⛔ NO ENTRY IS POSSIBLE WITH THIS CONFIGURATION"** / amber STARVED + `gate N, M% vetoed` on the price card (`dashboard.py`, `templates/index.html`). New tools: **`btc/preflight.py`** (exit 0 OK / 1 STARVED / 2 INFEASIBLE / 3 unmeasured; `--offline --csv` or read-only live ticks, never `mt5.shutdown()`), **`btc/edge_screen.py`** (gross-edge vs cost ratio; reproduces gold's 255 / +$456.58 / PF 1.32), **`btc/breakout_screen.py`** (hypothesis-C proxy screen). New tests `tests/test_spread_gate.py` 21/21, `btc/preflight_test.py`, `btc/edge_screen_test.py`; `btc/e2e_smoke.py` now asserts the gate snapshot, `btc/tool.py --check` **14/14** (BTC instance). **No trading/engine parameter changed** (notably `MAX_SPREAD_POINTS` stays 1500 and `TRADING_MODE` stays `FORWARD_TEST`; no BTC service). Gold unchanged: `backtest.py` **255 / +$456.58 / PF 1.32 / maxDD $108.65 / 72-43-140**, `parity_test` PASS 460/0, `paper_exit_test` PASS, `train_select_test` PASS, `e2e_smoke` ALL PASS both dirs, `test_deploy_services.sh` 3/3. | User reported the BTC bot showing `high_spread` with no trades. Measured cause: `MAX_SPREAD_POINTS=1500` placeholder vs a real 4,242-pt mean spread ⇒ **100% veto** before `strategy.check_signal` ever runs (derived gate ≈6,250 pts vetoes 0.00%). §5 forbids loosening the gate to let a losing shape trade, so the fix is to make the impossibility *visible and measured* (engine log, `live_status.json`, banner, preflight exit code) instead of silently skipping forever, and to give the next attempt the g > c decision rule. |
 | 10-06 | **BTC Phase-1c amendment recorded (proxy non-evidence) (`arena/037cb1f4-scalper`, `docs/btc_spread_edge_analysis_2026-10-06.md`)**: screening the pullback shape on public Binance klines (costed at the measured XM quote, 5.486 bp of price) shows the *gross* edge decays to ~0 after 2021 (per-era gross PF 1.17/1.26/0.98/0.96/1.02) and that even **zero cost** leaves the 8-year book at PF 1.01 — so cheaper tiers are not the binding constraint. A long-lookback **H1 Donchian breakout** (don100/exit50/sl2.0) shows net PF **1.16 / +$406.20 / 532 trades**, positive 2021–2024, negative in 2025 on n=36. A is deprioritised, B downgraded to "after a gross edge exists", **C is the pre-registered priority** for the next untouched XM pull (still gated by `btc/train_select.py` cold-OOS: net > 0, PF ≳ 1.2, n ≥ 60). Proxy numbers are **not evidence** for XM BTCUSD. | Keeps the untouched CSVs clean: screening families before spending a pull stops the same (already negative) family being re-litigated and stops a proxy result being mistaken for a Phase-1 pass. |
 | 10-04 | **Hybrid shared/isolated LIVE redesign implemented (`arena/01a106bd-scalper`, design `docs/redesign_2026-10-04.md`, hypotheses `docs/btc_phase1c_hypotheses_2026-10-04.md`)**: `ACCOUNT_MODE=shared|isolated` in one `.env` (shared=today: one `mt5-gold` :18812 one pool; isolated: `mt5-gold` :18812 + `mt5-btc` :18813 two pools, `profiles: [isolated]`), `.env.example` v2, `docker-compose.yml` hybrid with `mt5` alias compat. `config.py`/`btc/config.py` now env-aware (`PORTFOLIO_MAX_*`, `SHARED_BRIDGE`, `BTC_TIMEFRAME` override, `MT5_BTC_PORT`). **Bridge fix:** `MT5Bridge` adds `threading.RLock`, `SHARED_BRIDGE` skip of `mt5.shutdown()` on shared, `wait_for_mt5.py` `--shared/--no-shared` and env-aware probe. **`portfolio.py` new:** combined `logs/portfolio.json` + `logs/portfolio_KILL_SWITCH` gate (`38 / 25` default, derived 30+8 / capped 25), both bots check it every loop after per-instance gates (`run.py` `portfolio_blocked()`). `services/*.service` add `EnvironmentFile=-/root/scalper/.env`. **Dashboards:** keep `:8088` gold + `:8089` btc (user choice) + portfolio banner & `GET /api/portfolio` (also merged into `/api/status`), `templates/index.html` portfolio CSS. `btc/strategy_btc.py` placeholder + per-hypothesis runbook. Verified: `backtest.py` **255 / +$456.58 PF 1.32**, `parity` **PASS 460/0**, `btc/tool --check` **11/11**, `btc/e2e_smoke` **ALL PASS** (`-$3.45` ×1 vs `-$344.72` ×100), `portfolio.py` shared/isolated & kill tests PASS, dashboards `/api/portfolio` live. | User chose `Go` on hybrid (`shared|isolated` in one `.env`), `revisit_strategy` for BTC (no reuse of inspected 20k), keep split dashboards + portfolio overlay. Makes shared-credential LIVE safe: combined loss/trades gate was the hard blocker (`btc/HANDOFF.md` §8-5) and `mt5.shutdown()` on shared bridge was the latent kill-both bug. BTC stays `FORWARD_TEST`+disabled until a Phase-1c gate (M15/H1 or Ultra Low or Donchian+sweep, on *untouched* data via `BTC_TIMEFRAME`) passes cold OOS `net>0 & PF≥1.2`. |
@@ -695,9 +777,28 @@ Note: the patched image may still carry `set -ex` tracing in
 - [ ] Restore or re-apply stashed `paper_status_daily.sh` edits from
   `/root/paper_status_daily.sh.backup` if still wanted. Status cron is
   confirmed (01:15 UTC daily + 01:00 UTC Mon–Fri, server-only
-  `/root/scalper/scripts/paper_status_daily.sh`); double-run on weekdays may be
-  intentional or a leftover — decide and clean up. Keep `.env.paper_status`
-  private — never commit it.
+  `/root/scalper/scripts/paper_status_daily.sh`); **decided 2026-10-07 — the
+  weekday line is a duplicate** (same script 15 min apart): keep one daily run
+  (`7 1 * * *`, off the deploy ticks) and delete `0 1 * * 1-5`, or if a
+  weekday-only report is really wanted make the daily line `15 1 * * 0,6`.
+  Move the script (and `.env.paper_status`) **out of the deployed tree** to
+  `/root/ops/` — `/root/scalper` is the pull target, so a future commit adding
+  `scripts/` would make every `git pull --ff-only` abort (and a `.gitignore`
+  workaround would let git clobber it). See `docs/cron_review_2026-10-07.md` §4.
+- [ ] **Install the reviewed crontab on `scalping`** (2026-10-07 review):
+  back up `crontab -l`, add `SHELL`/`PATH`(mt5env)/`MAILTO`/`CRON_TZ=UTC`,
+  prefix the deploy line with `mkdir -p /root/scalper/logs &&`, dedupe the
+  status lines, and decide on `DEPLOY_SERVICES="scalper-bot scalper-dashboard"`
+  (the dashboard is otherwise never restarted, so `dashboard.py` fixes — e.g.
+  PR #22's gate banner — do not go live; templates hot-reload, modules do not).
+  Checklist: `docs/cron_review_2026-10-07.md` §6.
+- [ ] **Confirm the dashboard picked up PR #22:** `systemctl show
+  scalper-dashboard -p ActiveEnterTimestamp` — if it predates 2026-10-06,
+  `systemctl restart scalper-dashboard`, then check the `:8088` price card for
+  the spread-gate banner/`gate N, M% vetoed`.
+- [ ] Decide whether `services/*.service` should be copied to
+  `/etc/systemd/system` + `daemon-reload` by the deploy (today a unit edit is
+  pulled but never applied; no auto-install was added deliberately).
 - [ ] Paper-test RSI 35/65 (deployed 09:36 UTC as `4a21a33`); compare with the
   30/70 baseline using trade count, net expectancy after spread, drawdown,
   and session coverage.
@@ -974,13 +1075,48 @@ mt5env/bin/python backtest.py                                        # expect 17
 grep SIGNAL logs/trades.jsonl | tail -3                              # new entries carry "reason"
 journalctl -u scalper-bot -n 20 --no-pager
 
-# hands-off deploy cron (every 15 min; only restarts when commits land)
+# hands-off deploy cron (every 15 min; restarts only when a runtime path changed)
 # crontab -e  → set DEPLOY_BRANCH to the intended production branch:
-# */15 * * * * DEPLOY_BRANCH=main /root/scalper/deploy.sh >> /root/scalper/logs/deploy.cron.log 2>&1
+# */15 * * * * mkdir -p /root/scalper/logs && DEPLOY_BRANCH=main /root/scalper/deploy.sh >> /root/scalper/logs/deploy.cron.log 2>&1
+# Full reviewed crontab (PATH/MAILTO/CRON_TZ + the deduped status line):
+#   docs/cron_review_2026-10-07.md §4
+
+# deploy decisions, newest last (restart = runtime file changed):
+tail -5 /root/scalper/logs/deploy.log
+#   restarted scalper-bot at <sha> (was <sha>) branch=main          <- runtime change
+#   <ts>; restart skipped for scalper-bot (no runtime path changed) <- inert commit (docs/btc/tests/…)
+#   <ts> already up to date (<sha>) branch=main                     <- nothing landed
+#   <ts> deploy already running (lock …) - skipped                  <- overlapping run, expected 0
+# force a restart by hand if a filter verdict is ever disputed:
+cd /root/scalper && DEPLOY_FORCE_RESTART=1 ./deploy.sh
 
 # manual deploy (if main is the intended production branch)
 cd /root/scalper && git fetch origin && git checkout main && git pull --ff-only origin main && systemctl restart scalper-bot
 ```
+
+## 6b. Cron review (2026-10-07) — what to install and check
+
+Full write-up: **`docs/cron_review_2026-10-07.md`**. Summary of the three
+recorded lines: keep the `*/15` deploy (add the `mkdir -p logs &&` prefix);
+keep one daily status report at `7 1 * * *`; **delete `0 1 * * 1-5`** (weekday
+duplicate). Recommended crontab, in full:
+
+```
+SHELL=/bin/bash
+PATH=/root/scalper/mt5env/bin:/usr/local/bin:/usr/bin:/bin
+MAILTO=root
+CRON_TZ=UTC
+
+# Deploy: pull main every 15 min. deploy.sh restarts only when a runtime path
+# changed and holds logs/deploy.lock so runs cannot overlap.
+*/15 * * * * mkdir -p /root/scalper/logs && DEPLOY_BRANCH=main /root/scalper/deploy.sh >> /root/scalper/logs/deploy.cron.log 2>&1
+
+# Paper status: ONE report per day, 7 minutes after the 01:00 deploy tick.
+7 1 * * * test -x /root/ops/paper_status_daily.sh && /root/ops/paper_status_daily.sh >> /root/scalper/logs/paper_status.cron.log 2>&1 || echo "$(date -Is) paper_status missing or exited non-zero" >> /root/scalper/logs/paper_status.cron.log
+```
+
+Optional: add `DEPLOY_SERVICES=scalper-bot scalper-dashboard` to the deploy
+line so `dashboard.py` fixes (e.g. PR #22's banner) actually reach `:8088`.
 
 ## 7. Failure signatures (what each error means)
 
