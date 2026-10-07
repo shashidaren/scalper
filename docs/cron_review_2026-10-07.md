@@ -69,7 +69,11 @@ Related: every deploy message is written both to `logs/deploy.log` (by
 There is no `MAILTO`, no alert, and `deploy.sh` is `set -euo pipefail`: a dirty
 tree, a diverged history or a network failure makes `git pull` abort, and from
 then on every 15-minute run fails the same way with only a log line. The gold
-bot keeps trading old code indefinitely. Minimum fix: `MAILTO=root` (or better,
+bot keeps trading old code indefinitely. **Fixed 2026-10-07 in §3a** for the
+log half of this finding: `deploy.sh` now warns about dirty tracked files
+before the pull and writes a distinct `PULL FAILED: …` line (reason + the sha
+still running) into `logs/deploy.log`, so the stop is visible where the runbook
+looks. Still open: `MAILTO=root` (or better,
 your real address) at the top of the crontab so cron mails stderr; optionally a
 once-a-day liveness grep, e.g.
 `0 6 * * * grep -q "$(date -u +%F)" /root/scalper/logs/deploy.log || echo "$(date -Is) deploy cron has not logged today" >> /root/scalper/logs/deploy.cron.log`.
@@ -144,6 +148,16 @@ session all day; with the path filter an in-session restart now happens only
 when gold-runtime code actually changed (a merge inside the session still
 restarts the book mid-session — see §5 "not done").
 
+### F11 — Server-only compose tweaks belong in `docker-compose.override.yml`
+Any host-specific edit to the tracked `docker-compose.yml` (ports, a shared
+mount, a service tweak) will eventually be touched by an upstream commit and
+from then on every `git pull --ff-only` aborts with *"Your local changes …
+would be overwritten by merge"* — which is exactly the 2026-10-04 12:30 →
+2026-10-07 02:28 UTC freeze (~63 h, ~250 ticks). Put server-only tweaks in
+`docker-compose.override.yml` instead: Compose merges it automatically
+(`docker compose` reads `docker-compose.yml` + `docker-compose.override.yml`),
+it is not tracked, and the tracked file stays clean so pulls always apply.
+
 ### F9 — Log rotation (low priority)
 No `logrotate` config exists for `logs/deploy.log`, `logs/deploy.cron.log`,
 `logs/paper_status.cron.log`, `logs/trades.jsonl`, `logs/system.jsonl`. Volumes
@@ -179,7 +193,8 @@ Set the PATH explicitly at the top of the crontab (see §4).
 
 Evidence (all local, this container; no server access):
 
-* `tests/test_deploy_services.sh` — **18/18 PASS** (was 3), including
+* `tests/test_deploy_services.sh` — **18/18 PASS** (was 3; now **39/39** after
+  the §3a follow-up), including
   BTC-only ⇒ no restart, `btc/config.py` ⇒ restart, empty/failed diff ⇒ restart,
   `DEPLOY_FORCE_RESTART=1`, dashboard opt-in on/off, lock-held ⇒ skip, and a
   failed `systemctl restart` ⇒ logged as `RESTART FAILED for <svc>`
@@ -195,6 +210,55 @@ Evidence (all local, this container; no server access):
   `research/parity_test.py` **PASS** (460 signals, 0 mismatches),
   `tests/test_spread_gate.py` **21/21**, `research/paper_exit_test.py` PASS.
   No gold-runtime file was edited, so these are unchanged-baseline checks.
+
+### 3a. Follow-up (2026-10-07, after PR #24): a failed pull is no longer silent
+
+**What the server showed.** From 2026-10-04 12:30 to 2026-10-07 02:28 UTC a
+dirty tracked `docker-compose.yml` made `git pull --ff-only` abort on **every**
+15-minute tick (~63 h, ~250 runs) and the gold bot kept running 2026-10-04-era
+(`a122e7a`) code: PRs #22/#23/#24 were on disk but not in memory
+(`logs/live_status.json` had no `spread_gate` field). F4 above named the
+mechanism; the fix below makes it visible in the file the runbook reads.
+
+**`deploy.sh` (the change):**
+
+* A pre-flight `git status --porcelain` (after the lock, guarded so a failing
+  `git status` cannot abort the run) logs `DIRTY TREE: modified tracked
+  file(s) …` plus the exact files when any **tracked** non-clean path exists.
+  Untracked files (`logs/`, `data/*.csv`, server-only scripts) are ignored.
+* `git fetch`, `git checkout` and `git pull --ff-only` are now each captured and
+  wrapped: on failure `pull_failed()` writes one
+  `PULL FAILED: <what failed> - code NOT updated (still <sha>); reason: <git's
+  first error/fatal line>` line **plus** every captured git line tagged
+  `PULL FAILED detail:` into `logs/deploy.log` (and stdout → the cron log), then
+  exits 1. Nothing is restarted on a failed pull, and no update is left
+  half-applied. Previously `set -e` exited before any log write, so the only
+  trace was the cron redirect.
+* Successful fetch/checkout/pull output is still echoed to stdout, so the cron
+  log carries what it did before.
+
+**Evidence (local, this container — the sandbox has no `ssh scalping`, so the
+server itself was not touched):**
+
+* `tests/test_deploy_services.sh` — **39/39 PASS** (was 18; the suite now prints
+  its own `ALL PASS: N/N` summary). New cases: dirty tracked file ⇒ `DIRTY TREE`
+  logged, pull still attempted, normal restart decision kept (exit 0);
+  untracked-only dirt ⇒ no warning; pull failure ⇒ `PULL FAILED` + git's
+  `would be overwritten` text + `code NOT updated (still …)` + **no** systemctl
+  restart + exit 1; fetch failure ⇒ `PULL FAILED` + exit 1; failing
+  `git status` ⇒ warning only, deploy still restarts (exit 0).
+* Real-git integration on scratch clones (`/tmp/deploy_int*`, disposable):
+  (a) dirty `docker-compose.yml` + an incoming commit that also touches it —
+  `PULL FAILED: git pull --ff-only origin main failed - code NOT updated (still
+  dcdf924…); reason: error: Your local changes to the following files would be
+  overwritten by merge:` and exit 1, repeated identically on the next tick;
+  after `git stash push -m deploy-preflight` the very next run fast-forwards
+  (`code updated to 468f052…`); (b) dirty file that the incoming diff does *not*
+  touch ⇒ warning but the pull succeeds (documented nuance: the pre-check warns
+  on dirt in general, git decides per file); (c) untracked-only dirt ⇒ 0
+  `DIRTY TREE` lines, normal run; (d) `git remote set-url origin
+  /nonexistent/repo.git` ⇒ `PULL FAILED: git fetch origin failed … reason:
+  fatal: '/nonexistent/repo.git' does not appear to be a git repository`, exit 1.
 
 **Not changed:** `config.py`, `btc/config.py`, `strategy.py`,
 `btc/strategy_btc.py`, `run.py`, any trading parameter, both `TRADING_MODE`s,
@@ -262,6 +326,11 @@ Options, in priority order:
    /root/scalper/logs/deploy.log` → expect `restart skipped … (no runtime path
    changed)` for inert commits and the historical `restarted …` wording when a
    runtime file changed; `grep -c "deploy already running" …` should stay 0.
-5. `systemctl cat scalper-bot | head -1` → note whether the active unit is
+5. `grep -c 'PULL FAILED' /root/scalper/logs/deploy.log` → **0** after the
+   fix. Any hit names what failed and the sha the box is still running (the
+   2026-10-04→10-07 freeze left no such line, because `set -e` exited first).
+   `git -C /root/scalper status --porcelain` → empty; server-only compose
+   tweaks go in `docker-compose.override.yml` (F11), not the tracked file.
+6. `systemctl cat scalper-bot | head -1` → note whether the active unit is
    `/etc/systemd/system/scalper-bot.service` (repo copy is a template → apply
    unit edits by hand, F7).
