@@ -85,14 +85,17 @@ No PASS exists yet, so nothing in `btc/config.py` has been touched:
 `MAX_SPREAD_POINTS` stays `1500`, `BTC_STRATEGY` stays `"scalp"`, both books
 stay `FORWARD_TEST`.
 
-## Open decisions (user's, not the agent's)
+## Decisions (answered by the user, 2026-10-07)
 
-1. Whether the two BTC units keep running while the gate is unread (they are
-   enabled + active per the 2026-10-07 ground truth, on the 1,500-pt gate that
-   vetoes 100% of quotes — not dangerous, but an unrecorded state).
-2. Whether the reviewed crontab (`docs/cron_review_2026-10-07.md` §4) is
-   installed on `scalping`, and with which `DEPLOY_SERVICES` (gold only /
-   `scalper-bot scalper-dashboard` / including the BTC units).
+1. **The two BTC units keep running** (observation on). No config change: still
+   `FORWARD_TEST` on the 1,500-pt placeholder gate, 100% veto, 0 trades. They
+   are also kept in the deploy's `DEPLOY_SERVICES` so their code stays in sync.
+2. **The reviewed crontab is installed**, with `DEPLOY_SERVICES` = all four
+   units (`scalper-bot scalper-dashboard scalper-btc-bot scalper-btc-dashboard`),
+   together with the gold + dashboard restart that makes memory match `b033986`.
+   Paste-ready commands and verifications: `docs/server_apply_2026-10-07.md`.
+   (`deploy.sh` learned both BTC units' allowlists in the same change, so an
+   unknown-service "restart on every commit" cannot happen.)
 
 ## Also missing: `docs/btc_data_collection_2026-10-07.md`
 

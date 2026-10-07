@@ -160,6 +160,30 @@ run_case dashboard_opted_in_restarts_dashboard 'scalper-dashboard' \
 run_case restart_failure_report '' GIT_DIFF=config.py SYSTEMCTL_FAIL=scalper-bot
 expect_log restart_failure_report 'RESTART FAILED for scalper-bot'
 
+# --- BTC units in DEPLOY_SERVICES (user decision 2026-10-07) ---------------
+# Both BTC units keep running (observation on), so they are kept in sync with
+# the code. They must NOT be treated as "unknown service => restart on every
+# commit": a docs-only/BTC-tool-only commit leaves both alone.
+run_case btc_runtime_commit_restarts_btc_bot_only 'scalper-btc-bot' \
+  DEPLOY_SERVICES='scalper-bot scalper-dashboard scalper-btc-bot scalper-btc-dashboard' \
+  GIT_DIFF='btc/strategy_btc.py'
+run_case btc_config_restarts_btc_bot 'scalper-btc-bot' \
+  DEPLOY_SERVICES='scalper-btc-bot' GIT_DIFF=btc/config.py
+run_case gold_config_restarts_btc_bot_failsafe 'scalper-btc-bot' \
+  DEPLOY_SERVICES='scalper-btc-bot' GIT_DIFF=config.py
+run_case gold_tooling_skips_btc_bot '' \
+  DEPLOY_SERVICES='scalper-btc-bot' GIT_DIFF='backtest.py'
+run_case btc_dashboard_file_skips_btc_bot '' \
+  DEPLOY_SERVICES='scalper-btc-bot' GIT_DIFF='btc/dashboard.py'
+run_case btc_dashboard_commit_restarts_btc_dashboard_only 'scalper-btc-dashboard' \
+  DEPLOY_SERVICES='scalper-btc-bot scalper-btc-dashboard' GIT_DIFF='btc/dashboard.py'
+run_case docs_only_commit_skips_all_four '' \
+  DEPLOY_SERVICES='scalper-bot scalper-dashboard scalper-btc-bot scalper-btc-dashboard' \
+  GIT_DIFF=$'docs/cron_review_2026-10-07.md\nREADME.md'
+run_case engine_commit_restarts_all_four 'scalper-bot scalper-dashboard scalper-btc-bot scalper-btc-dashboard' \
+  DEPLOY_SERVICES='scalper-bot scalper-dashboard scalper-btc-bot scalper-btc-dashboard' \
+  GIT_DIFF='config.py'
+
 # --- silent-freeze regressions (2026-10-04 12:30 -> 2026-10-07 02:28) ------
 # A dirty *tracked* file (server-side docker-compose.yml edit) blocked every
 # `git pull --ff-only` for ~63 h / ~250 cron ticks while `set -e` exited before

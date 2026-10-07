@@ -100,6 +100,14 @@ pull_failed() {   # reason, current sha, captured git output
 #  * scalper-dashboard is a read-only viewer: only dashboard.py, config.py,
 #    logger.py, portfolio.py and templates/ are runtime inputs (templates/ is
 #    re-read per request by Jinja; dashboard.py is NOT - uvicorn holds it).
+#  * scalper-btc-bot is the SAME engine under btc/config.py (btc/run.py): every
+#    shared engine module is a runtime input, plus btc/config.py, btc/run.py,
+#    btc/strategy_btc.py and btc/_instance.py. Gold's config.py is shadowed by
+#    btc/config.py in that process, but it is left restart-worthy on purpose
+#    (fail safe, same as btc/config.py for gold). The gold dashboard, gold-only
+#    tooling and every other btc/ tool are inert for it.
+#  * scalper-btc-dashboard mirrors scalper-dashboard under btc/ (btc/dashboard.py
+#    + btc/config.py + the shared viewer modules + templates/).
 # ---------------------------------------------------------------------------
 is_inert_for() {
   local svc="$1" path="$2"
@@ -117,6 +125,18 @@ is_inert_for() {
     scalper-dashboard)
       case "$path" in
         dashboard.py|config.py|logger.py|portfolio.py|templates/*) return 1 ;;
+        *) return 0 ;;
+      esac
+      ;;
+    scalper-btc-bot)
+      case "$path" in
+        btc/dashboard.py|dashboard.py|templates/*) return 0 ;;
+        backtest.py|fetch_data.py|gold.py|balance.py) return 0 ;;
+      esac
+      ;;
+    scalper-btc-dashboard)
+      case "$path" in
+        btc/dashboard.py|btc/config.py|dashboard.py|config.py|logger.py|portfolio.py|templates/*) return 1 ;;
         *) return 0 ;;
       esac
       ;;

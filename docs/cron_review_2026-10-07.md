@@ -193,7 +193,7 @@ Set the PATH explicitly at the top of the crontab (see §4).
 
 Evidence (all local, this container; no server access):
 
-* `tests/test_deploy_services.sh` — **18/18 PASS** (was 3; now **39/39** after
+* `tests/test_deploy_services.sh` — **18/18 PASS** (was 3; **47/47** after
   the §3a follow-up), including
   BTC-only ⇒ no restart, `btc/config.py` ⇒ restart, empty/failed diff ⇒ restart,
   `DEPLOY_FORCE_RESTART=1`, dashboard opt-in on/off, lock-held ⇒ skip, and a
@@ -240,13 +240,19 @@ mechanism; the fix below makes it visible in the file the runbook reads.
 **Evidence (local, this container — the sandbox has no `ssh scalping`, so the
 server itself was not touched):**
 
-* `tests/test_deploy_services.sh` — **39/39 PASS** (was 18; the suite now prints
-  its own `ALL PASS: N/N` summary). New cases: dirty tracked file ⇒ `DIRTY TREE`
+* `tests/test_deploy_services.sh` — **47/47 PASS** (was 18; the suite prints its
+  own `ALL PASS: N/N` summary; 39/39 before the BTC-unit allowlists below).
+  New cases: dirty tracked file ⇒ `DIRTY TREE`
   logged, pull still attempted, normal restart decision kept (exit 0);
   untracked-only dirt ⇒ no warning; pull failure ⇒ `PULL FAILED` + git's
   `would be overwritten` text + `code NOT updated (still …)` + **no** systemctl
   restart + exit 1; fetch failure ⇒ `PULL FAILED` + exit 1; failing
   `git status` ⇒ warning only, deploy still restarts (exit 0).
+* BTC units in `DEPLOY_SERVICES` (the user's 2026-10-07 decision): `btc/**`
+  runtime path ⇒ restarts **only** `scalper-btc-bot`; `btc/dashboard.py` ⇒ only
+  `scalper-btc-dashboard`; `backtest.py`/`btc/dashboard.py` are inert for the
+  BTC bot; `config.py` (gold) stays restart-worthy for it (fail safe); a
+  docs-only commit ⇒ no restart for any of the four; `config.py` ⇒ all four.
 * Real-git integration on scratch clones (`/tmp/deploy_int*`, disposable):
   (a) dirty `docker-compose.yml` + an incoming commit that also touches it —
   `PULL FAILED: git pull --ff-only origin main failed - code NOT updated (still
@@ -283,12 +289,26 @@ CRON_TZ=UTC
 7 1 * * * test -x /root/ops/paper_status_daily.sh && /root/ops/paper_status_daily.sh >> /root/scalper/logs/paper_status.cron.log 2>&1 || echo "$(date -Is) paper_status missing or exited non-zero" >> /root/scalper/logs/paper_status.cron.log
 ```
 
+**Decision taken 2026-10-07 (user):** `DEPLOY_SERVICES` includes **all four
+units** — both paper books stay running (observation on), so both are kept in
+sync with the code. `deploy.sh` grew the two BTC units' allowlists in the same
+change (a BTC runtime path restarts the BTC units; `btc/dashboard.py` restarts
+only the BTC dashboard; gold-only tooling / `docs/` / `research/` / `tests/` /
+`*.md` / `deploy.sh` restart nothing; `config.py` and `btc/config.py` restart
+everything that reads a config, fail safe). Without those allowlists an
+"unknown" service restarts on every non-empty diff — the opposite of PR #24's
+intent. **Caveat:** `systemctl restart` also starts a stopped unit, so if the
+BTC units are ever deliberately stopped, remove them from `DEPLOY_SERVICES` (or
+mask them) at the same time. Paste-ready install + restart runbook:
+`docs/server_apply_2026-10-07.md`.
+
 Options, in priority order:
 
 1. **Dashboard opt-in** (fixes F6): add
    `DEPLOY_SERVICES=scalper-bot scalper-dashboard` to the deploy line, *or* keep
    it manual and restart the dashboard once now (`systemctl restart
-   scalper-dashboard`) to pick up the PR #22 banner.
+   scalper-dashboard`) to pick up the PR #22 banner. **(Superseded by the
+   decision above: all four units opted in.)**
 2. **Move the ops script** (fixes F2): `mkdir -p /root/ops && git -C
    /root/scalper status >/dev/null && mv /root/scalper/scripts/
    paper_status_daily.sh /root/ops/` (+ `.env.paper_status` if it sits there),
