@@ -59,6 +59,14 @@ cat > "$FAKE_BIN/systemctl" <<'SH'
 set -euo pipefail
 case "${1:-}" in
   cat) exit 0 ;;
+  is-active)
+    if [[ " ${SYSTEMCTL_ACTIVE:-} " == *" $2 "* ]]; then
+      echo active
+    else
+      echo inactive
+    fi
+    exit 0
+    ;;
   restart)
     [[ "${SYSTEMCTL_FAIL:-}" == "$2" ]] && exit 1
     printf '%s\n' "$2" >> "$SYSTEMCTL_LOG" ;;
@@ -225,6 +233,15 @@ run_case status_failure_still_deploys scalper-bot \
 expect_log status_failure_still_deploys 'GIT STATUS FAILED'
 expect_log status_failure_still_deploys 'restarted scalper-bot'
 expect_exit status_failure_still_deploys 0
+
+# An already-active BTC unit follows its runtime change even when the cron
+# list is gold-only. A stopped unit is never started.
+run_case active_btc_follows_its_config 'scalper-bot scalper-btc-bot' \
+  GIT_DIFF=btc/config.py SYSTEMCTL_ACTIVE='scalper-btc-bot'
+expect_log active_btc_follows_its_config 'active unit, not in DEPLOY_SERVICES'
+run_case stopped_btc_not_started scalper-bot \
+  GIT_DIFF=btc/config.py
+expect_log stopped_btc_not_started 'stopped unit is not started'
 
 # --- lock ------------------------------------------------------------------
 if command -v flock >/dev/null 2>&1; then

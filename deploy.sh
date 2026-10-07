@@ -31,8 +31,10 @@ BRANCH="${DEPLOY_BRANCH:-main}"
 REMOTE="${DEPLOY_REMOTE:-origin}"
 # One or more services, space separated. DEPLOY_SERVICE (singular) still works
 # for back-compat with the existing cron. Default to gold only: `systemctl
-# restart` starts a disabled-but-installed unit, so BTC must be an explicit
-# opt-in after its Phase 1 gate and paper-deployment authorization.
+# restart` starts a disabled-but-installed unit, so a stopped BTC unit is never
+# started from here. An already-active BTC unit is restarted below when its
+# runtime path changed, so a config pull cannot sit on disk while the process
+# keeps the old gate.
 SERVICES="${DEPLOY_SERVICES:-${DEPLOY_SERVICE:-scalper-bot}}"
 LOG_DIR="${REPO_DIR}/logs"
 mkdir -p "$LOG_DIR"
@@ -270,6 +272,29 @@ if [ "$BEFORE" != "$AFTER" ]; then
       echo "$TS note: dashboard-relevant change (${DASH_CHANGED% }) but scalper-dashboard is not in DEPLOY_SERVICES - restart it manually or opt in" \
         | tee -a "${LOG_DIR}/deploy.log"
     fi
+
+    # A BTC unit that is already running must pick up its own runtime change.
+    # Never start a stopped or disabled unit: restart would enable it.
+    for svc in scalper-btc-bot scalper-btc-dashboard; do
+      has_service "$svc" && continue
+      restart_needed "$svc" "$CHANGED" || continue
+      if ! systemctl cat "$svc" >/dev/null 2>&1; then
+        continue
+      fi
+      state="$(systemctl is-active "$svc" 2>/dev/null || true)"
+      if [ "$state" != "active" ]; then
+        echo "$TS note: ${svc} is ${state:-not-active}; runtime path changed but a stopped unit is not started" \
+          | tee -a "${LOG_DIR}/deploy.log"
+        continue
+      fi
+      if systemctl restart "$svc"; then
+        echo "$TS restarted ${svc} at ${AFTER} (was ${BEFORE}) branch=${BRANCH}; active unit, not in DEPLOY_SERVICES" \
+          | tee -a "${LOG_DIR}/deploy.log"
+      else
+        echo "$TS RESTART FAILED for ${svc} - check systemctl status" \
+          | tee -a "${LOG_DIR}/deploy.log"
+      fi
+    done
   else
     echo "$TS code updated to ${AFTER} but systemctl not found; restart ${SERVICES} manually" | tee -a "${LOG_DIR}/deploy.log"
   fi
