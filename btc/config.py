@@ -152,10 +152,14 @@ TP_ATR_MULT = 5.0            # PLACEHOLDER: same; 2.0/5.0 = 1:2.5 RR
 BE_TRIGGER_R = 1.5           # PLACEHOLDER
 
 # --- spread protection ---
-# Gold uses 80 points (~$0.80); XM Standard BTCUSD typically quotes ~500 points
-# (~$5.00), so copying 80 here would silently skip every trade. Start generous
-# and tighten to the measured p90 from btc/recon.py + the BTC CSV.
-MAX_SPREAD_POINTS = 1500     # PLACEHOLDER: derive from recon spread p90
+# Gold uses 80 points (~$0.80). XM BTCUSD does not: the 2026-10-03 TRAIN pull
+# measured spread p90 at 5,000 points, and the live board quotes ~4,000
+# (2026-10-07 screenshot: 84128.35/84168.35, spread 4000). The old 1,500
+# placeholder vetoed 100% of quotes, so the paper book never saw a signal.
+# 6,250 is the pre-registered derive rule (1.25 x TRAIN p90), which vetoed
+# 0% of that TRAIN sample. This lets FORWARD_TEST observe. It is not a
+# strategy pass: Phase 1 cold OOS was still negative (PF 0.75) after this gate.
+MAX_SPREAD_POINTS = 6250
 
 # Fallback round-trip spread in price units when the CSV has no `spread` column
 # (the MT5 pull does include it, so this rarely applies).

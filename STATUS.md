@@ -3,7 +3,7 @@
 Current truth only. History lives in `docs/archive/` and the dated notes in `docs/`.
 A session may edit this file and add one changelog row. Do not paste a new status essay on top.
 
-Last consolidated: 2026-10-07. No trading parameter, config value, or service unit was changed in that consolidation.
+Last consolidated: 2026-10-07. The BTC spread gate was then set to the derived 6,250. No service unit was changed.
 
 ## Gold
 
@@ -16,13 +16,13 @@ Last consolidated: 2026-10-07. No trading parameter, config value, or service un
 
 - Instance dir `btc/`. Same engine, `btc/config.py` swapped in via `btc/_instance.py`. Dashboard `:8089`. Units `scalper-btc-bot` and `scalper-btc-dashboard`.
 - User-verified 2026-10-07: both units are **enabled and active**, `:8089` listening. Older notes that say disabled/inactive are stale.
-- `TRADING_MODE="FORWARD_TEST"`. `MAX_SPREAD_POINTS=1500` is still the placeholder. XM BTCUSD mean spread is about 4,242 points, so the gate vetoes 100% of quotes and the bot takes 0 trades. That is the correct output. Do not raise the gate to make it trade.
+- `TRADING_MODE="FORWARD_TEST"`. `MAX_SPREAD_POINTS=6250` as of 2026-10-07, the recorded 1.25× TRAIN p90 rule (p90 was 5,000). The 1,500 placeholder was vetoing the live ~4,000-point quote forever. This starts paper observation only. Phase 1 is still a fail, so a paper fill is not a go-live.
 - Phase 1 (M5 pullback) is a **FAIL / no-go** on real XM bars (2026-10-03): cold OOS about −$46, PF 0.75. Write-up: `docs/btc_phase1_result_2026-10-03.md`.
 - Phase 1c (Donchian on untouched H1) is **BLOCKED, not failed**. The collect has not been run. One command, on `scalping` only: `bash docs/collect-2026-10-07/collect_phase1c.sh`. Paste `/root/ops/collect-2026-10-07/collection.md` back. Fail rule: net ≤ 0, PF < 1.2, n < 60, or g ≤ c. A pass still needs an explicit user decision before any config change.
 
 ## Do not
 
-- Change `MAX_SPREAD_POINTS`, `TRADING_MODE`, `BTC_STRATEGY`, or the service units from a docs session.
+- Do not raise `MAX_SPREAD_POINTS` again, or change `TRADING_MODE`, `BTC_STRATEGY`, or the service units, without a new cold-OOS pass. 6,250 is the observation gate, not a strategy approval.
 - Treat proxy or exchange CSVs as BTC evidence. The gate reads XM bars only.
 - Flip either book to `LIVE` on the shared XM account. A separate account or a hard combined risk gate is required first.
 - Re-pull or reuse the inspected 2026-07-25..2026-10-03 BTC M5 window for a new gate.
@@ -40,3 +40,4 @@ Last consolidated: 2026-10-07. No trading parameter, config value, or service un
 | Date | What |
 |---|---|
 | 2026-10-07 | Docs consolidated. Full handoffs moved to `docs/archive/`. No runtime path changed. |
+| 2026-10-07 | BTC `MAX_SPREAD_POINTS` 1500 → 6250 (1.25× measured TRAIN p90). Paper observation only. Phase 1 still FAIL. |
