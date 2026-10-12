@@ -9,6 +9,7 @@ Last verified on `scalping`: 2026-10-07 21:57 UTC. Docs-only commits do not rest
 
 - Production book. Engine is the repo root (`run.py` + `config.py`). Dashboard `:8088`. Unit `scalper-bot`.
 - `TRADING_MODE` stays `FORWARD_TEST` until an explicit live decision. Kill switch is `logs/KILL_SWITCH` (blocks new entries only).
+- Paper track record (as of 2026-10-12 01:07 UTC, from `status/paper`): balance `$249.70` (started $300), 21 closed, 4 wins / 17 losses. Still far short of the stated launch criteria (~100+ paper trades under the current config, sustained PF > ~1.2, affordable max DD — see `docs/strategy_iteration_2026-10-01.md`). A Gold-only live flip is not yet justified; the shared-account rule also still applies.
 - Deploy freeze is explained and closed. A dirty tracked `docker-compose.yml` froze every 15-minute deploy from 2026-10-04 12:30 to 2026-10-07 02:28 UTC (~63 h). The process ran `a122e7a`-era code, so PRs #22/#23/#24 were on disk but not in memory, and `logs/live_status.json` had no `spread_gate` field. Server HEAD after the fix was `b033986` with a clean tree (user-verified 2026-10-07). `deploy.sh` now logs `DIRTY TREE` and `PULL FAILED` and exits 1 without restarting.
 - This repo's cron pulls `main` and restarts a unit only if a runtime path changed. `docs/`, `research/`, `tests/`, `*.md`, and `deploy.sh` do not restart the book.
 
@@ -32,7 +33,7 @@ Last verified on `scalping`: 2026-10-07 21:57 UTC. Docs-only commits do not rest
 
 - Crontab installed 2026-10-08: `CRON_TZ=UTC`, deploy every 15 minutes, one paper-status line at `7 1 * * *`. The weekday duplicate is gone. Copy: `docs/ops/README.md`.
 - Live paper-status script is `/root/ops/paper_status_daily.sh` (105 lines, copied from `docs/ops/`). Token file is `/root/ops/.env.paper_status` and is not in git.
-- 2026-10-07 21:57 UTC run wrote and published the gold ledger to `status/paper`: balance `$277.99`, 13 closed, 3 wins / 10 losses, SELL open from 17:30 UTC at 4113.46. That branch is a snapshot, not `main`.
+- Latest published gold paper snapshot (`status/paper`, 2026-10-12 01:07 UTC): balance `$249.70`, 21 closed, 4 wins / 17 losses. Earlier 2026-10-07 snapshot was `$277.99`, 13 closed, 3W/10L. That branch is a snapshot, not `main`.
 - 2026-10-07 21:53 UTC deploy of `d44528b` logged `restart skipped` for `scalper-bot`.
 
 ## Open
@@ -41,6 +42,7 @@ Last verified on `scalping`: 2026-10-07 21:57 UTC. Docs-only commits do not rest
 - Re-apply the two mt5linux image patches if the container is ever recreated from stock `lprett/mt5linux`. Details: `docs/archive/HANDOFF_2026-10-07.md` §4.
 - File the two upstream mt5linux bugs (fifo `mkfifo` crash, `config.sh` `return` under `set -e`).
 - A new BTC hypothesis needs its own pre-registered rule and a fresh pull. Phase 1 and Phase 1c are both closed.
+- Gold paper book needs substantially more track record (target ~100+ trades, PF > ~1.2 sustained) before any live decision. Shared-account constraint still applies even for Gold-only.
 
 ## Changelog
 
@@ -52,3 +54,4 @@ Last verified on `scalping`: 2026-10-07 21:57 UTC. Docs-only commits do not rest
 | 2026-10-08 | Paper-status script backed up at `docs/ops/paper_status_daily.sh`. Live copy is `/root/ops/`. Token file stays off git. |
 | 2026-10-08 | Server verified: crontab installed, BTC gate 6250 passing 4000-pt quotes, paper status published (`$277.99`, 13 closed, 3W/10L). |
 | 2026-10-10 | Phase 1c Donchian H1 gate recorded FAIL (`docs/btc_phase1c_result_2026-10-07.md`). Docs only. |
+| 2026-10-12 | Recorded Gold paper snapshot (`$249.70`, 21 closed, 4W/17L) and that it does not yet meet launch criteria for live (even Gold-only). Shared-account rule unchanged. Docs only. |
