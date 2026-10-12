@@ -1,19 +1,9 @@
 {
-  "balance": 222.39,
-  "closed": 20,
-  "wins": 3,
+  "balance": 249.7,
+  "closed": 21,
+  "wins": 4,
   "losses": 17,
-  "position": {
-    "side": "BUY",
-    "entry": 4177.83,
-    "sl": 4177.83,
-    "tp": 4205.14,
-    "sl_dist": 10.922857142857017,
-    "tp_dist": 27.307142857142544,
-    "volume": 0.01,
-    "be_armed": true,
-    "time": "2026-10-09 13:10:05"
-  },
-  "ts": "2026-10-11T01:07:01Z",
+  "position": null,
+  "ts": "2026-10-12T01:07:01Z",
   "source": "paper_status_daily"
 }
