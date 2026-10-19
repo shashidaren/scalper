@@ -53649,3 +53649,6 @@
 {"time": "2026-10-19 16:35:47", "event": "SIGNAL", "signal": null, "sl_dist": 0, "tp_dist": 0, "reason": "no_setup:rsi=22.8(prev 36.0),close<=ema200"}
 {"time": "2026-10-19 16:36:03", "event": "SIGNAL", "signal": null, "sl_dist": 0, "tp_dist": 0, "reason": "no_setup:rsi=22.8(prev 36.0),close<=ema200"}
 {"time": "2026-10-19 16:36:18", "event": "SIGNAL", "signal": null, "sl_dist": 0, "tp_dist": 0, "reason": "no_setup:rsi=22.8(prev 36.0),close<=ema200"}
+{"time": "2026-10-19 16:36:33", "event": "SIGNAL", "signal": null, "sl_dist": 0, "tp_dist": 0, "reason": "no_setup:rsi=22.8(prev 36.0),close<=ema200"}
+{"time": "2026-10-19 16:36:48", "event": "SIGNAL", "signal": null, "sl_dist": 0, "tp_dist": 0, "reason": "no_setup:rsi=22.8(prev 36.0),close<=ema200"}
+{"time": "2026-10-19 16:37:03", "event": "SIGNAL", "signal": null, "sl_dist": 0, "tp_dist": 0, "reason": "no_setup:rsi=22.8(prev 36.0),close<=ema200"}
