@@ -38,8 +38,12 @@
 #   SMOKE_GATE=1             0 = deploy without the smoke test (not advised)
 #   AUTOSYNC_PYTHON          interpreter for the checks (default: mt5env or python3)
 #   NOTIFY=always|quiet      quiet = no digest when nothing changed
+#   AUTOSYNC_GIT_TIMEOUT_SECONDS=120  fetch/push deadline (+10s kill grace)
 #   AUTOSYNC_STALE_MINUTES=45  --status: age at which the schedule is STALE
 # ==============================================================================
+# Bash parses the whole function before running it. A merge may replace this
+# file, but cannot replace the remaining instructions of this invocation.
+autosync_main() {
 set -uo pipefail
 
 REPO_DIR="${AUTOSYNC_REPO_DIR:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}"
@@ -144,10 +148,8 @@ status_report() {
 
     # 2. Last completed run: the newest digest block in logs/autosync.log.
     if [ -f "$LOG_FILE" ]; then
-        stamp=$(grep -a 'autosync digest ' "$LOG_FILE" 2>/dev/null | tail -n1 \
+        stamp=$(grep -aE 'autosync digest |done\. data=\[' "$LOG_FILE" 2>/dev/null | tail -n1 \
             | sed -n 's/.*\([0-9]\{4\}-[0-9]\{2\}-[0-9]\{2\} [0-9]\{2\}:[0-9]\{2\}\).*/\1/p')
-        [ -n "$stamp" ] || stamp=$(tail -n1 "$LOG_FILE" 2>/dev/null \
-            | sed -n 's/^\([0-9]\{4\}-[0-9]\{2\}-[0-9]\{2\} [0-9]\{2\}:[0-9]\{2\}\).*/\1/p')
         [ -n "$stamp" ] && epoch=$(date -u -d "$stamp UTC" +%s 2>/dev/null || true)
     fi
     if [ -z "$epoch" ]; then
@@ -163,6 +165,20 @@ status_report() {
             rc=1
         else
             printf '  last run:  OK (last run %s min ago) — %s UTC\n' "$age_min" "$stamp"
+        fi
+    fi
+
+    # Any skipped tick since the last completion deserves attention immediately.
+    # Use done as well as digest: NOTIFY=quiet legitimately omits the digest.
+    if [ -f "$LOG_FILE" ]; then
+        local skips
+        skips=$(awk '/done\. data=\[/ || /autosync digest / {n=0}
+            /another autosync run is active - skipping|deploy.sh is running - skipping this tick/ {n++}
+            END {print n+0}' "$LOG_FILE")
+        printf '  skips:     %s since last completion\n' "$skips"
+        if [ "$skips" -gt 0 ]; then
+            printf '             SKIPPED tick(s) — probe locks and inspect the holder before retrying\n'
+            rc=1
         fi
     fi
 
@@ -208,6 +224,16 @@ case "${1:-}" in
         exit 2
         ;;
 esac
+
+# Fail before taking locks if timeout is unavailable or misconfigured.
+GIT_TIMEOUT_SECONDS="${AUTOSYNC_GIT_TIMEOUT_SECONDS:-120}"
+if ! [[ "$GIT_TIMEOUT_SECONDS" =~ ^[1-9][0-9]*$ ]] || ! command -v timeout >/dev/null 2>&1; then
+    printf 'autosync: positive AUTOSYNC_GIT_TIMEOUT_SECONDS and GNU timeout required\n' >&2
+    exit 1
+fi
+network_git() {
+    timeout --signal=TERM --kill-after=10s "${GIT_TIMEOUT_SECONDS}s" git "$@"
+}
 
 mkdir -p "$LOG_DIR"
 
@@ -381,8 +407,8 @@ EXTRA=""
 STOPPED=""
 KEEP_DIR=""
 
-if ! GIT_OUT=$(git fetch "$REMOTE" "$BRANCH" 2>&1); then
-    log "WARN: git fetch failed - no deploy this run"
+if ! GIT_OUT=$(network_git fetch "$REMOTE" "$BRANCH" 2>&1); then
+    log "WARN: git fetch failed or timed out - no deploy this run"
     DEPLOY_MSG="none (fetch failed)"
     EXTRA="${EXTRA}
 ⚠️ git fetch failed - check credentials on the box"
@@ -415,7 +441,7 @@ elif [ "$NEED_MERGE" = "1" ]; then
 ⚠️ uncommitted code on the server - commit or \`git checkout -- <file>\`"
     else
         CHANGED=$(git diff --name-only HEAD "$REMOTE_SHA" 2>/dev/null || echo "")
-        CODE_CHANGED=$(printf '%s\n' "$CHANGED" | grep -cE '\.py$' || true)
+        CODE_CHANGED=$(printf '%s\n' "$CHANGED" | grep -cE '\.(py|sh)$' || true)
         PRE_MERGE=$(git rev-parse HEAD)
 
         # Stop only ACTIVE engines whose runtime code changed, and only before
@@ -463,7 +489,14 @@ elif [ "$NEED_MERGE" = "1" ]; then
 
         SMOKE="not run (no code change)"
         if [ "$MERGE_RC" = "0" ] && [ "$SMOKE_GATE" = "1" ] && [ "${CODE_CHANGED:-0}" -gt 0 ]; then
-            if AUTOSYNC_SMOKE=1 "$PYTHON" tools/smoke_test.py >"$LOG_DIR/smoke.log" 2>&1; then
+            : > "$LOG_DIR/smoke.log"
+            SHELL_OK=1
+            while IFS= read -r shell_file; do
+                case "$shell_file" in
+                    *.sh) [ ! -f "$shell_file" ] || bash -n -- "$shell_file" >>"$LOG_DIR/smoke.log" 2>&1 || SHELL_OK=0 ;;
+                esac
+            done <<< "$CHANGED"
+            if [ "$SHELL_OK" = 1 ] && AUTOSYNC_SMOKE=1 "$PYTHON" tools/smoke_test.py >"$LOG_DIR/smoke.log" 2>&1; then
                 SMOKE="ok"
             else
                 SMOKE="FAIL"
@@ -544,8 +577,8 @@ fi
 # Phase 3 — push (data and the merge commit; never force)
 # --------------------------------------------------------------------------- #
 PUSH_MSG="ok"
-if ! git push "$REMOTE" "$BRANCH" >/dev/null 2>&1; then
-    PUSH_MSG="FAILED (data is safe in a local commit; retries next run)"
+if ! network_git push "$REMOTE" "$BRANCH" >/dev/null 2>&1; then
+    PUSH_MSG="FAILED (failed or timed out; data is safe in a local commit; retries next run)"
     EXTRA="${EXTRA}
 ⚠️ push to $REMOTE failed - fix git credentials on the box"
 fi
@@ -643,3 +676,6 @@ if [ "$QUIET_SKIP" = "0" ]; then
     [ -n "$EXTRA" ] && log "$EXTRA"
 fi
 exit 0
+
+}
+autosync_main "$@"

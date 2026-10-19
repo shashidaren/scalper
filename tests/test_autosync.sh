@@ -41,6 +41,10 @@ SHIM="$(mktemp -d)/bin"
 mkdir -p "$SHIM"
 cat > "$SHIM/git" <<'SHIMEOF'
 #!/usr/bin/env bash
+if [ "${1:-}" = "${FAKE_STALL_GIT:-}" ]; then
+    sleep 30
+    exit 1
+fi
 if [ "${1:-}" = "push" ] && [ -n "${FAKE_GIT_PUSH_TARGET:-}" ]; then
     shift
     remote=""; ref=""
@@ -382,6 +386,58 @@ grep -q "STALE (last run" "$TMP/status.out" \
     && pass "--status detects a stale schedule" || fail "--status missed a stale run"
 [ "$(cat "$TMP/status.rc")" = "1" ] \
     && pass "--status exits 1 when stale" || fail "--status exits 0 when stale"
+
+# A recent successful digest must not hide one or several skipped ticks.
+setup
+touch "$TMP/svc/scalper-autosync.timer.installed"
+echo active > "$TMP/svc/scalper-autosync.timer.state"
+run_autosync
+for count in 1 2 3; do
+    echo "$(date -u '+%Y-%m-%d %H:%M:%S') another autosync run is active - skipping" >> "$TMP/server/logs/autosync.log"
+    run_status
+    [ "$(cat "$TMP/status.rc")" = 1 ] && pass "skip $count needs attention despite recent digest" || fail "skip hidden"
+done
+run_autosync
+run_status
+[ "$(cat "$TMP/status.rc")" = 0 ] && pass "completion clears skipped-tick attention" || fail "skip not cleared"
+
+setup
+printf '%s another autosync run is active - skipping\n' "$(date -u '+%Y-%m-%d %H:%M:%S')" > "$TMP/server/logs/autosync.log"
+run_status
+grep -q 'NO RUN RECORDED' "$TMP/status.out" && pass "skip-only log is not a completion" || fail "skip counted as completion"
+setup
+NOTIFY=quiet run_autosync
+run_status
+grep -q 'OK (last run' "$TMP/status.out" && pass "quiet done line counts as completion" || fail "quiet completion lost"
+
+echo "== 10. shell-only deploys are gated without restarting books"
+setup
+seed_change "tools/probe.sh" 'if then'
+run_autosync
+log_has "ROLLED BACK" "invalid shell deploy rolls back"
+not_called "stop scalper-bot" "shell rollback does not stop the book"
+setup
+seed_change "tools/probe.sh" '# valid shell'
+FAKE_SMOKE=1 run_autosync
+log_has "ROLLED BACK" "shell-only changes run the smoke gate"
+setup
+# Replace the running file completely with valid but hostile instructions.
+# The old invocation must finish from its already parsed function body.
+seed_change "tools/autosync.sh" 'exit 99'
+run_autosync
+[ "$(cat "$TMP/rc")" = 0 ] && pass "self-replacement cannot change current invocation" || fail "script read replacement"
+log_has "done. data=" "self-replacing deploy finishes its digest"
+log_has "smoke gate: ok" "self-replacing shell deploy gated"
+not_called "stop scalper-bot" "self replacement does not stop book"
+
+for op in fetch push; do
+    setup
+    AUTOSYNC_GIT_TIMEOUT_SECONDS=1 FAKE_STALL_GIT="$op" run_autosync
+    log_has "timed out" "$op timeout reported"
+    flock -n "$TMP/autosync.lock" -c true && pass "$op timeout releases autosync lock" || fail "lock leaked"
+    flock -n "$TMP/server/logs/deploy.lock" -c true && pass "$op timeout releases deploy lock" || fail "deploy lock leaked"
+    log_has "done. data=" "$op timeout still completes digest"
+done
 
 # --help must print the header only, never the script body.
 bash "$TMP/server/tools/autosync.sh" --help > "$TMP/help.out" 2>&1

@@ -251,3 +251,27 @@ harness replaces push with the equivalent fetch into the bare origin. With
 | `handoff_check.py` machine-checked doc | `STATUS.md` age advisory | no snapshot block to checksum yet |
 | `xm_quote_report.py` liveness | `live_status.json` freshness | no separate quote logger here |
 | 3-hourly cron | 15-minute cron | deploy latency matters more than commit count; only durable state is published |
+
+## Deploy hardening (2026-10-19)
+
+`--status` is read-only (exit 0 healthy / 1 attention). It counts lock skips
+since the last `done`/digest and flags even one immediately; a recent digest
+cannot hide consecutive skipped ticks. A quiet completion counts as a run;
+a log containing only skips does not. Probe locks without `fuser` using
+`flock -n logs/autosync.lock -c true` and the equivalent for `logs/deploy.lock`.
+Do not delete a lock file to clear a holder.
+
+Autosync fetch/push use GNU `timeout`: 120 seconds by default, TERM then KILL
+after 10 seconds; override with positive `AUTOSYNC_GIT_TIMEOUT_SECONDS`.
+Fetch failure prevents merging; push failure retains local commits for retry.
+This deadline covers the git process group, including SSH children.
+
+Changed `.sh` files now trigger the smoke gate just like `.py` files, with
+`bash -n` on existing changed shell files first. Docs-only changes remain
+ungated. Tools-only changes still do not stop/restart books. `SMOKE_GATE=0`
+remains an explicit opt-out, not recommended. Autosync's body is one parsed
+function: replacing its on-disk file during merge/rollback cannot change the
+instructions of the current invocation. The **first upgrade from the old
+script** must use an external snapshot of the new script with
+`AUTOSYNC_REPO_DIR=/root/scalper`; see the PR rollout commands. Do not allow
+an old running invocation to merge its own replacement.
