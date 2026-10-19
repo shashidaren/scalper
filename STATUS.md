@@ -3,7 +3,7 @@
 Current truth only. History lives in `docs/archive/` and the dated notes in `docs/`.
 A session may edit this file and add one changelog row. Do not paste a new status essay on top.
 
-Last verified on `scalping`: 2026-10-19 17:2x UTC (user-reported box verification; 17:30 tick still needs confirmation).
+Last verified on `scalping`: 2026-10-19 17:31 UTC (user-supplied box output: 17:30 timer run completed cleanly).
 
 ## Gold
 
@@ -35,7 +35,7 @@ Last verified on `scalping`: 2026-10-19 17:2x UTC (user-reported box verificatio
 
 ## Server
 
-- Timer active + enabled; autosync service disabled, no `[Install]` or boot symlink. 17:00:14 run exited 0/SUCCESS, digest `0 fail, 0 warn`, deploy none. 17:15 skipped after an interrupted manual run; user reports both locks free and no merge/rebase at 17:2x. Confirm 17:30 completion before rollout; investigate a repeated skip first. Dashboard already restarted after the config change; all five tools executable.
+- Timer active + enabled; autosync service disabled, no `[Install]` or boot symlink. 17:00:14 run exited 0/SUCCESS, digest `0 fail, 0 warn`, deploy none. 17:15 skipped after an interrupted manual run; both lock probes were free at 17:29:15. The next timer tick completed at 17:30:23 with push OK, deploy none, `0 fail, 0 warn`, both books fresh (0 min), digest written, and service exit 0/SUCCESS; next tick scheduled 17:45. No repeated skip. Dashboard already restarted after the config change; all five tools executable.
 
 - Crontab (verified 2026-10-19 17:08 UTC): `CRON_TZ=UTC`, `PATH`, `MAILTO`, and one paper-status line at `7 1 * * *`. The old `*/15 … deploy.sh` line is gone; `scalper-autosync.timer` is the only deploy trigger. Copy: `docs/ops/README.md`.
 - Live paper-status script is `/root/ops/paper_status_daily.sh` (105 lines, copied from `docs/ops/`). Token file is `/root/ops/.env.paper_status` and is not in git.
@@ -64,4 +64,4 @@ Last verified on `scalping`: 2026-10-19 17:2x UTC (user-reported box verificatio
 | 2026-10-19 | Autosync went live on the box: first `data collection` commits, smoke gate green, deploy path unchanged. `integrity: 2 fail` was a `check_data.py` false positive across the 2026-10-04 reset (fixed 10-20). Raw event log replaced by `ledger.jsonl` in the publish set. Docs: `docs/autosync_first_run_2026-10-19.md`. |
 | 2026-10-19 | Timer verified end-to-end: 17:00:14 run, service exit 0, `data collection 4` pushed, digest `0 fail`/`0 warn`, both books fresh, `deploy: none`. `--status` was never implemented (the argument started a full run) — added a read-only one; `--help` no longer leaks the script body. Removed the stray `autosync-fix-2026-10-20.patch` and ignored `*.patch`. `scalper-autosync.service` is boot-enabled; disable it (timer only). Dashboard was already restarted after the 10-19 `config.py` change (17:00:27 > 16:32:06). |
 | 2026-10-20 | Ported the operational half of `gold-trading-bot`: `tools/autosync.sh` (data publish + smoke gate + rollback + digest), `tools/smoke_test.py`, `tools/check_data.py`, `tools/repair_phantom_ledger.py`, paper geometry guards + atomic state save, LIVE-only %-risk sizing (`RISK_PCT=0`), optional `MAX_HOLD_MINUTES=0` time stop. No strategy parameter changed; paper behaviour identical by default. Assessment: `docs/port_assessment_2026-10-20.md`. Cron not switched yet. |
-| 2026-10-19 | Recorded completed raw-log untrack and PR #32 merge (59620a0), timer-only scheduling and 17:00 clean verification; 17:30 verification pending. Hardened read-only status against skipped ticks, bounded autosync network operations, gated shell deploys, and pre-parsed autosync against self-replacement. |
+| 2026-10-19 | Recorded completed raw-log untrack and PR #32 merge (59620a0), timer-only scheduling and 17:00 and 17:30 clean timer verification (17:30:23 completion, push OK, fresh books, digest, exit 0/SUCCESS). Hardened read-only status against skipped ticks, bounded autosync network operations, gated shell deploys, and pre-parsed autosync against self-replacement. |
