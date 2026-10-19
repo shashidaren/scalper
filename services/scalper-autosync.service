@@ -28,5 +28,9 @@ Nice=10
 StandardOutput=journal
 StandardError=journal
 
-[Install]
-WantedBy=multi-user.target
+# Deliberately NO [Install] section. The timer is the only trigger; this oneshot
+# unit is started on demand by scalper-autosync.timer. Enabling the service as
+# well adds a second, boot-time run on top of the timer's Persistent=true
+# catch-up (2026-10-19: it was enabled by accident; `systemctl disable
+# scalper-autosync.service` removed it). With no [Install], `systemctl enable`
+# now refuses instead of creating another trigger.

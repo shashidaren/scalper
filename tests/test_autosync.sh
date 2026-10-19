@@ -14,6 +14,7 @@
 #   5. hand-edited code on the server blocks the deploy (no merge)
 #   6. a stopped unit is never started by a deploy
 #   7. an overlapping run exits 0
+#   8. --status is read-only, reports OK for a recent run and STALE otherwise
 #
 # Run: bash tests/test_autosync.sh      # exit 0 = PASS
 set -uo pipefail
@@ -93,7 +94,11 @@ unit="\${args[0]:-}"
 echo "\$cmd \$unit" >> "$TMP/calls"
 case "\$cmd" in
   cat)      [ -f "\$S/\$unit.installed" ] && exit 0 || exit 1 ;;
-  is-active) [ "\$(cat "\$S/\$unit.state" 2>/dev/null)" = "active" ] && exit 0 || exit 3 ;;
+  is-active) if [ "\$(cat "\$S/\$unit.state" 2>/dev/null)" = "active" ]; then
+                echo active; exit 0
+            else
+                echo inactive; exit 3
+            fi ;;
   stop)     echo inactive > "\$S/\$unit.state" ;;
   start|restart) echo active > "\$S/\$unit.state" ;;
 esac
@@ -191,6 +196,17 @@ run_autosync() {   # extra env assignments get exported by the caller
         bash tools/autosync.sh >> "$TMP/run.log" 2>&1
         echo $? > "$TMP/rc"
     )
+}
+
+run_status() {
+    (
+        cd "$TMP/server"
+        PATH="$TMP/bin:$PATH"
+        AUTOSYNC_PYTHON="$TMP/bin/python3" \
+        AUTOSYNC_LOCK_FILE="$TMP/autosync.lock" \
+        bash tools/autosync.sh --status
+        echo $? > "$TMP/status.rc"
+    ) > "$TMP/status.out" 2>&1
 }
 
 log_has()     { grep -qF -- "$1" "$TMP/run.log" || fail "$2 (log lacks: $1)"; pass "$2"; }
@@ -334,6 +350,43 @@ setup
 log_has "another autosync run is active" "second run detected the lock"
 [ "$(cat "$TMP/rc")" = "0" ] && pass "overlapping run exits 0" || fail "overlapping run failed"
 not_called "restart scalper-bot" "overlapping run did nothing"
+
+# --------------------------------------------------------------------------- #
+echo "== 9. --status is read-only and says whether the schedule is firing"
+setup
+touch "$TMP/svc/scalper-autosync.timer.installed"
+echo active > "$TMP/svc/scalper-autosync.timer.state"
+run_autosync
+sha_before="$(server_sha)"
+log_bytes="$(wc -c < "$TMP/server/logs/autosync.log")"
+: > "$TMP/calls"
+
+run_status
+grep -q "OK (last run" "$TMP/status.out" \
+    && pass "--status reports a recent run" || fail "--status did not report OK"
+[ "$(cat "$TMP/status.rc")" = "0" ] \
+    && pass "--status exits 0 when the timer is active and the run is recent" \
+    || fail "--status exited $(cat "$TMP/status.rc") on a healthy box"
+[ "$(server_sha)" = "$sha_before" ] && pass "--status made no commit" || fail "--status moved HEAD"
+[ "$(wc -c < "$TMP/server/logs/autosync.log")" = "$log_bytes" ] \
+    && pass "--status did not write the digest log" || fail "--status appended to autosync.log"
+grep -qE '^(stop|start|restart) ' "$TMP/calls" \
+    && fail "--status changed a unit" || pass "--status only read unit state"
+
+# An old digest at the very end = the schedule stopped firing.
+grep -a 'autosync digest' "$TMP/server/logs/autosync.log" | tail -n1 \
+    | sed 's/[0-9]\{4\}-[0-9]\{2\}-[0-9]\{2\} [0-9]\{2\}:[0-9]\{2\}/2020-01-01 00:00/g' \
+    >> "$TMP/server/logs/autosync.log"
+run_status
+grep -q "STALE (last run" "$TMP/status.out" \
+    && pass "--status detects a stale schedule" || fail "--status missed a stale run"
+[ "$(cat "$TMP/status.rc")" = "1" ] \
+    && pass "--status exits 1 when stale" || fail "--status exits 0 when stale"
+
+# --help must print the header only, never the script body.
+bash "$TMP/server/tools/autosync.sh" --help > "$TMP/help.out" 2>&1
+grep -q '^set -uo pipefail' "$TMP/help.out" \
+    && fail "--help leaked the script body" || pass "--help prints the header only"
 
 echo
 echo "ALL PASS: ${PASSES} autosync checks"
