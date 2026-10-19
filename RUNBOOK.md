@@ -123,6 +123,7 @@ roll back. It must stay hermetic and fast.
 
 ```bash
 mt5env/bin/python tools/check_data.py                 # read-only, 0 fail = healthy
+mt5env/bin/python tools/ledger_export.py              # rebuild ledger.jsonl after a manual edit
 mt5env/bin/python tools/repair_phantom_ledger.py      # dry run: what is suspect
 mt5env/bin/python tools/repair_phantom_ledger.py --book gold --apply
 ```
@@ -131,3 +132,25 @@ mt5env/bin/python tools/repair_phantom_ledger.py --book gold --apply
 original ledger to `logs/quarantine/<timestamp>/`, then rewrites. Never run it
 against a healthy book just to "clean up": the dry run is the default for a
 reason.
+
+`check_data.py` chains the balance **inside the current book only** (the last
+`closed` exits, per `paper_account.json`). A `paper.py --reset` leaves a
+permanent, legitimate break in the raw log; it is not a failure.
+
+## One-time: stop tracking the raw event log
+
+`logs/trades.jsonl` is SIGNAL/SKIP telemetry (~11.5k rows/day) and should not be
+in git. After the first autosync run it is tracked once; untrack it by hand:
+
+```bash
+cd /root/scalper
+mkdir -p /root/scalper-eventlog
+cp logs/trades.jsonl /root/scalper-eventlog/gold-$(date -u +%F).jsonl
+cp btc/logs/trades.jsonl /root/scalper-eventlog/btc-$(date -u +%F).jsonl
+git rm --cached logs/trades.jsonl btc/logs/trades.jsonl
+git commit -m "Stop publishing the raw event log; publish ledger.jsonl instead"
+git push origin main
+```
+
+`--cached` keeps both files on disk. The bot recreates `trades.jsonl` empty on
+its next write; `ledger.jsonl` already holds every closed trade.

@@ -3,18 +3,21 @@
 Current truth only. History lives in `docs/archive/` and the dated notes in `docs/`.
 A session may edit this file and add one changelog row. Do not paste a new status essay on top.
 
-Last verified on `scalping`: 2026-10-07 21:57 UTC. Docs-only commits do not restart the book.
+Last verified on `scalping`: 2026-10-19 16:37 UTC (autosync live, first two data commits published).
 
 ## Gold
 
 - Production book. Engine is the repo root (`run.py` + `config.py`). Dashboard `:8088`. Unit `scalper-bot`.
 - `TRADING_MODE` stays `FORWARD_TEST` until an explicit live decision. Kill switch is `logs/KILL_SWITCH` (blocks new entries only).
-- Paper track record (as of 2026-10-12 01:07 UTC, from `status/paper`): balance `$249.70` (started $300), 21 closed, 4 wins / 17 losses. Still far short of the stated launch criteria (~100+ paper trades under the current config, sustained PF > ~1.2, affordable max DD — see `docs/strategy_iteration_2026-10-01.md`). A Gold-only live flip is not yet justified; the shared-account rule also still applies.
+- Paper track record (2026-10-19 16:37 UTC, `logs/paper_account.json`): balance **`$237.98`** (book started $300 on 2026-10-04), **47 closed, 10 wins / 37 losses**. Previous snapshot 2026-10-12: `$249.70`, 21 closed, 4W/17L. Still far short of the stated launch criteria (~100+ paper trades under the current config, sustained PF > ~1.2, affordable max DD — see `docs/strategy_iteration_2026-10-01.md`). A Gold-only live flip is not yet justified; the shared-account rule also still applies.
 - Deploy freeze is explained and closed. A dirty tracked `docker-compose.yml` froze every 15-minute deploy from 2026-10-04 12:30 to 2026-10-07 02:28 UTC (~63 h). The process ran `a122e7a`-era code, so PRs #22/#23/#24 were on disk but not in memory, and `logs/live_status.json` had no `spread_gate` field. Server HEAD after the fix was `b033986` with a clean tree (user-verified 2026-10-07). `deploy.sh` now logs `DIRTY TREE` and `PULL FAILED` and exits 1 without restarting.
 - This repo's cron pulls `main` and restarts a unit only if a runtime path changed. `docs/`, `research/`, `tests/`, `*.md`, `tools/`, and `deploy.sh` do not restart the book.
-- Autosync exists in the repo (`tools/autosync.sh`, `docs/AUTOSYNC.md`) but is **not on cron yet**. Until it is, the box still runs the `deploy.sh` line.
+- **Autosync is live** (`tools/autosync.sh` on the 15-minute cron, first run 2026-10-19 16:36 UTC). It publishes `logs/ledger.jsonl` + the state files as `data collection N`. The raw `logs/trades.jsonl` (SIGNAL/SKIP telemetry, ~11.5k rows/day) is local-only; the one-time untracking procedure is in `docs/autosync_first_run_2026-10-19.md`.
+- The first run reported `integrity: 2 fail`. That was a **false positive** in `tools/check_data.py` (it chained the balance across the 2026-10-04 `paper.py --reset`). Fixed 2026-10-20; the check now chains only the current book. The books were healthy.
 
 ## BTC
+
+- Paper book 2026-10-19 16:37 UTC: balance `$295.90`, 85 closed (19W/66L). Phase 1 and 1c remain FAIL; nothing here changes that.
 
 - Instance dir `btc/`. Same engine, `btc/config.py` swapped in via `btc/_instance.py`. Dashboard `:8089`. Units `scalper-btc-bot` and `scalper-btc-dashboard`.
 - User-verified 2026-10-07 21:39 UTC: all three units `active`, tree clean, `spread_gate` in the running process is `6250` (13/13 quotes passed, spread 4000, state `ok`). The 1,500 placeholder is no longer what the process is enforcing.
@@ -39,8 +42,9 @@ Last verified on `scalping`: 2026-10-07 21:57 UTC. Docs-only commits do not rest
 
 ## Open
 
-- Switch the box cron from `deploy.sh` to `tools/autosync.sh` (one line, `docs/AUTOSYNC.md` §1). After the first run, check that `data collection 1` published `logs/trades.jsonl`, `logs/daily_stats.json`, `logs/paper_account.json` and the `btc/logs/` equivalents.
-- Verify the smoke gate on the box with `mt5env/bin/python tools/smoke_test.py` **before** enabling autosync; a bare `python3` without pandas would fail it and roll back every deploy.
+- One-time, supervised: untrack the raw event log (`git rm --cached logs/trades.jsonl btc/logs/trades.jsonl`) after copying it outside the repo. Until then an upstream commit that deletes it is refused by autosync (by design). Procedure: `docs/autosync_first_run_2026-10-19.md`.
+- `systemctl restart scalper-dashboard` once: the 2026-10-19 pull changed `config.py`, which the dashboard imports, and the manual `deploy.sh` run did not restart it.
+- Confirm the cron line is `*/15` (`crontab -l`). The first two runs were manual; an every-minute entry would publish up to 1,440 commits a day.
 - Rotate the MT5 and VNC passwords (they were pasted in plain text; change at the broker, update `.env`).
 - Re-apply the two mt5linux image patches if the container is ever recreated from stock `lprett/mt5linux`. Details: `docs/archive/HANDOFF_2026-10-07.md` §4.
 - File the two upstream mt5linux bugs (fifo `mkfifo` crash, `config.sh` `return` under `set -e`).
@@ -58,4 +62,5 @@ Last verified on `scalping`: 2026-10-07 21:57 UTC. Docs-only commits do not rest
 | 2026-10-08 | Server verified: crontab installed, BTC gate 6250 passing 4000-pt quotes, paper status published (`$277.99`, 13 closed, 3W/10L). |
 | 2026-10-10 | Phase 1c Donchian H1 gate recorded FAIL (`docs/btc_phase1c_result_2026-10-07.md`). Docs only. |
 | 2026-10-12 | Recorded Gold paper snapshot (`$249.70`, 21 closed, 4W/17L) and that it does not yet meet launch criteria for live (even Gold-only). Shared-account rule unchanged. Docs only. |
+| 2026-10-19 | Autosync went live on the box: first `data collection` commits, smoke gate green, deploy path unchanged. `integrity: 2 fail` was a `check_data.py` false positive across the 2026-10-04 reset (fixed 10-20). Raw event log replaced by `ledger.jsonl` in the publish set. Docs: `docs/autosync_first_run_2026-10-19.md`. |
 | 2026-10-20 | Ported the operational half of `gold-trading-bot`: `tools/autosync.sh` (data publish + smoke gate + rollback + digest), `tools/smoke_test.py`, `tools/check_data.py`, `tools/repair_phantom_ledger.py`, paper geometry guards + atomic state save, LIVE-only %-risk sizing (`RISK_PCT=0`), optional `MAX_HOLD_MINUTES=0` time stop. No strategy parameter changed; paper behaviour identical by default. Assessment: `docs/port_assessment_2026-10-20.md`. Cron not switched yet. |

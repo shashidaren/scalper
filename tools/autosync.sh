@@ -53,16 +53,26 @@ LOG_DIR="${REPO_DIR}/logs"
 LOG_FILE="${LOG_DIR}/autosync.log"
 
 # Durable state only. live_status.json / connection_status.json / system.jsonl
-# change every 15 s and are deliberately NOT published — they would turn this
-# into ~96 commits a day. These three move only when a trade does.
+# change every 15 s and are deliberately NOT published - they would turn this
+# into ~96 commits a day for no analytical value. These move only when a trade
+# does.
+#
+# `ledger.jsonl` is the compact trade record built from trades.jsonl by
+# tools/ledger_export.py (lifecycle events only). `trades.jsonl` itself is
+# SIGNAL/SKIP telemetry at ~11,500 rows and ~1.7 MB a day - publishing it is
+# what put 187,406 rows into `data collection 1` (2026-10-19). It stays local.
+# `AUTOSYNC_PUBLISH_EVENT_LOG=1` restores the old behaviour if ever needed.
 DATA_FILES=(
-    logs/trades.jsonl
+    logs/ledger.jsonl
     logs/daily_stats.json
     logs/paper_account.json
-    btc/logs/trades.jsonl
+    btc/logs/ledger.jsonl
     btc/logs/daily_stats.json
     btc/logs/paper_account.json
 )
+if [ "${AUTOSYNC_PUBLISH_EVENT_LOG:-0}" = "1" ]; then
+    DATA_FILES+=(logs/trades.jsonl btc/logs/trades.jsonl)
+fi
 SERVICES=(scalper-bot scalper-dashboard scalper-btc-bot scalper-btc-dashboard)
 ENGINES=(scalper-bot scalper-btc-bot)
 
@@ -185,10 +195,16 @@ needs_restart() {
     return 1
 }
 
+# Everything a rollback must put back. `git reset --hard` restores *tracked*
+# files, which silently reverts a tracked-but-dirty event log to its last
+# committed state - so the live files the engine appended to are snapshotted
+# here and copied back after the reset.
+KEEP_FILES=("${DATA_FILES[@]}" logs/trades.jsonl btc/logs/trades.jsonl)
+
 snapshot_data() {
     KEEP_DIR="$(mktemp -d)"
     local f
-    for f in "${DATA_FILES[@]}"; do
+    for f in "${KEEP_FILES[@]}"; do
         [ -f "$f" ] || continue
         mkdir -p "$KEEP_DIR/$(dirname "$f")"
         cp -p "$f" "$KEEP_DIR/$f" 2>/dev/null || true
@@ -198,7 +214,7 @@ snapshot_data() {
 restore_data() {
     [ -n "${KEEP_DIR:-}" ] && [ -d "$KEEP_DIR" ] || return 0
     local f
-    for f in "${DATA_FILES[@]}"; do
+    for f in "${KEEP_FILES[@]}"; do
         [ -f "$KEEP_DIR/$f" ] && cp -p "$KEEP_DIR/$f" "$f" 2>/dev/null
     done
     rm -rf "$KEEP_DIR"
@@ -209,14 +225,19 @@ restore_data() {
 # Phase 1 — publish the durable paper state
 # --------------------------------------------------------------------------- #
 DATA_MSG="no new data"
+if [ "$PUBLISH_DATA" = "1" ] && [ -f tools/ledger_export.py ]; then
+    "$PYTHON" tools/ledger_export.py --quiet >/dev/null 2>&1 \
+        || log "WARN: ledger_export.py failed - publishing the previous ledger"
+fi
 if [ "$PUBLISH_DATA" = "1" ]; then
     for f in "${DATA_FILES[@]}"; do git add -- "$f" 2>/dev/null || true; done
     if ! git diff --cached --quiet 2>/dev/null; then
-        NEW_ROWS=$(git diff --cached -- logs/trades.jsonl btc/logs/trades.jsonl 2>/dev/null | grep -c '^+[^+]' || true)
+        NEW_ROWS=$(git diff --cached -- '*ledger.jsonl' '*trades.jsonl' 2>/dev/null \
+            | grep -cE '^\+.*"event": ?"(SIM_ENTRY|SIM_EXIT|ENTRY|EXIT)"' || true)
         LAST_N=$(git log --format=%s | sed -n 's/^data collection \([0-9][0-9]*\)$/\1/p' | sort -n | tail -n1)
         N=$(( ${LAST_N:-0} + 1 ))
         if git commit -q -m "data collection $N"; then
-            DATA_MSG="committed ${NEW_ROWS} new trade row(s) -> 'data collection $N'"
+            DATA_MSG="committed ${NEW_ROWS} new trade event(s) -> 'data collection $N'"
             log "data: $DATA_MSG"
         else
             DATA_MSG="COMMIT FAILED (will retry next run)"
@@ -305,7 +326,16 @@ elif [ "$NEED_MERGE" = "1" ]; then
                 esac
                 git add -- "$f" >/dev/null 2>&1 || true
             done
-            git commit -q -m "autosync: merge upstream (live data kept local)" >/dev/null 2>&1 || MERGE_RC=1
+            # Only a real in-progress merge may be committed. Without this guard a
+            # `git merge` that aborted BEFORE writing MERGE_HEAD (a dirty working
+            # tree, say) still had its staged leftovers committed and reported as
+            # a successful deploy - the upstream change was silently dropped.
+            if [ ! -f .git/MERGE_HEAD ]; then
+                log "merge produced no MERGE_HEAD - treating it as a failed merge"
+                MERGE_RC=1
+            elif ! git commit -q -m "autosync: merge upstream (live data kept local)" >/dev/null 2>&1; then
+                MERGE_RC=1
+            fi
         fi
 
         SMOKE="not run (no code change)"

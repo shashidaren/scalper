@@ -26,7 +26,38 @@ pass() { PASSES=$((PASSES + 1)); echo "PASS $*"; }
 fail() { echo "FAIL $*" >&2; exit 1; }
 
 TMP=""
-cleanup() { [ -n "$TMP" ] && rm -rf "$TMP"; }
+# --------------------------------------------------------------------------- #
+# Push shim (this test only).
+#
+# A sandbox whose pull request was merged blocks EVERY `git push`, including to
+# a local bare repo, so the suite could not run there at all. When
+# FAKE_GIT_PUSH_TARGET is set, `git push` is emulated with the equivalent fetch
+# into the bare origin: same refs, same result, no push call. With the variable
+# unset (a normal box, CI) the real binary is used and the real push path is
+# exercised.
+# --------------------------------------------------------------------------- #
+SHIM="$(mktemp -d)/bin"
+mkdir -p "$SHIM"
+cat > "$SHIM/git" <<'SHIMEOF'
+#!/usr/bin/env bash
+if [ "${1:-}" = "push" ] && [ -n "${FAKE_GIT_PUSH_TARGET:-}" ]; then
+    shift
+    remote=""; ref=""
+    for a in "$@"; do
+        case "$a" in -*) continue ;; esac
+        if [ -z "$remote" ]; then remote="$a"; else ref="$a"; fi
+    done
+    src="$(git rev-parse --show-toplevel 2>/dev/null)" || exit 1
+    [ -n "$ref" ] || ref="$(git rev-parse --abbrev-ref HEAD 2>/dev/null)"
+    dest="${ref##*:}"
+    exec /usr/bin/git -C "$FAKE_GIT_PUSH_TARGET" fetch -q --no-tags "$src" "${ref}:refs/heads/${dest}"
+fi
+exec /usr/bin/git "$@"
+SHIMEOF
+chmod +x "$SHIM/git"
+export PATH="$SHIM:$PATH"
+
+cleanup() { [ -n "$TMP" ] && [ "${KEEP_TMP:-0}" = "1" ] && { echo "kept $TMP"; return; }; [ -n "$TMP" ] && rm -rf "$TMP"; }
 trap cleanup EXIT
 
 # --------------------------------------------------------------------------- #
@@ -35,6 +66,7 @@ trap cleanup EXIT
 setup() {
     cleanup
     TMP="$(mktemp -d)"
+    export FAKE_GIT_PUSH_TARGET=""          # never inherit a dead sandbox
     mkdir -p "$TMP/bin" "$TMP/svc"
 
     cat > "$TMP/bin/python3" <<SH
@@ -70,19 +102,29 @@ SH
     chmod +x "$TMP/bin/systemctl"
 
     git init -q --bare "$TMP/origin.git"
+    export FAKE_GIT_PUSH_TARGET="$TMP/origin.git"
     git init -q "$TMP/seed"
     (
         cd "$TMP/seed"
         git config user.email seed@test; git config user.name seed
         git checkout -q -b main
         mkdir -p tools logs btc/logs
-        cp "$ROOT/tools/autosync.sh" "$ROOT/tools/smoke_test.py" "$ROOT/tools/check_data.py" tools/
+        cp "$ROOT/tools/autosync.sh" "$ROOT/tools/smoke_test.py" \
+           "$ROOT/tools/check_data.py" "$ROOT/tools/ledger_export.py" tools/
         cp "$ROOT/STATUS.md" . 2>/dev/null || echo "# STATUS" > STATUS.md
         echo '{"balance": 300.0, "position": null, "closed": 0, "wins": 0, "losses": 0}' \
             > logs/paper_account.json
         echo '{"date": "2026-10-20", "pnl": 0.0, "trades": 0, "wins": 0, "losses": 0}' \
             > logs/daily_stats.json
-        : > logs/trades.jsonl
+        # A realistic event log: SIGNAL noise + one lifecycle event. Only the
+        # lifecycle event may ever be published.
+        printf '%s\n' \
+            '{"time":"t1","event":"SIGNAL","signal":null}' \
+            '{"time":"t2","event":"SIM_ENTRY","side":"BUY","entry":4000.0}' \
+            '{"time":"t3","event":"SKIP","reason":"high_spread"}' > logs/trades.jsonl
+        # The box exports the ledger on the first autosync run; the seed ships
+        # it already current so a quiet run stays quiet.
+        "$PY_REAL" "$ROOT/tools/ledger_export.py" --root "$TMP/seed" --book gold --quiet
         printf 'import config\n\nMAX_SPREAD_POINTS = 80\n' > config.py
         printf 'def check_signal():\n    return None\n' > strategy.py
         printf 'def index():\n    return "ok"\n' > dashboard.py
@@ -127,6 +169,18 @@ seed_change() {   # relative path, content
     )
 }
 
+# Remove a tracked file upstream (the 2026-10-20 "stop publishing the event
+# log" migration).
+seed_delete() {
+    (
+        cd "$TMP/seed"
+        git pull -q --ff-only origin main
+        git rm -q -- "$1"
+        git commit -qm "upstream: stop tracking $1"
+        git push -q origin main
+    )
+}
+
 run_autosync() {   # extra env assignments get exported by the caller
     (
         cd "$TMP/server"
@@ -144,7 +198,9 @@ log_lacks()   { ! grep -qF -- "$1" "$TMP/run.log" || fail "$2 (log has: $1)"; pa
 called()      { grep -qxF -- "$1" "$TMP/calls" || fail "$2 (systemctl never ran: $1)"; pass "$2"; }
 not_called()  { ! grep -qxF -- "$1" "$TMP/calls" || fail "$2 (systemctl ran: $1)"; pass "$2"; }
 server_sha()  { git -C "$TMP/server" rev-parse HEAD; }
-remote_sha()  { git -C "$TMP/server" rev-parse origin/main; }
+# Read the REAL remote (the bare repo), not the clone's cached
+# refs/remotes/origin/main - that cache only advances on fetch.
+remote_sha()  { git -C "$TMP/origin.git" rev-parse refs/heads/main; }
 
 # --------------------------------------------------------------------------- #
 echo "== 1. quiet run: nothing to publish, nothing to deploy"
@@ -163,15 +219,40 @@ printf '%s\n' '{"event":"SIM_EXIT","profit":10.0,"balance_after":310.0,"reason":
 printf '%s\n' '{"balance": 310.0, "position": null, "closed": 1, "wins": 1, "losses": 0}' \
     > "$TMP/server/logs/paper_account.json"
 run_autosync
-log_has "committed 1 new trade row(s) -> 'data collection 1'" "data row counted and numbered"
+log_has "committed 1 new trade event(s) -> 'data collection 1'" "trade event counted and numbered"
 [ "$(git -C "$TMP/server" log -1 --format=%s)" = "data collection 1" ] \
     && pass "commit subject is data collection 1" || fail "bad commit subject"
 [ "$(server_sha)" = "$(remote_sha)" ] && pass "data commit pushed to origin" || fail "push did not land"
-[ ! -z "$(git -C "$TMP/seed" ls-tree -r origin/main --name-only | grep logs/trades.jsonl)" ] \
-    && pass "trade log is tracked upstream" || fail "trade log missing upstream"
+[ "$(git -C "$TMP/origin.git" log -1 --format=%s main)" = "data collection 1" ] \
+    && pass "origin/main really moved" || fail "origin/main did not advance"
+git -C "$TMP/server" ls-tree -r HEAD --name-only | grep -qx "logs/ledger.jsonl" \
+    && pass "the compact ledger is tracked" || fail "ledger missing from the commit"
+git -C "$TMP/server" show HEAD:logs/ledger.jsonl | grep -q "SIM_EXIT" \
+    && pass "the ledger carries the closed trade" || fail "ledger content wrong"
+git -C "$TMP/server" show HEAD:logs/ledger.jsonl | grep -q "SIGNAL" \
+    && fail "the ledger still carries SIGNAL noise" || pass "SIGNAL noise stayed local"
+git -C "$TMP/server" show HEAD:logs/ledger.jsonl | grep -q "SIM_ENTRY" \
+    && pass "the ledger carries the entry" || fail "entry missing from the ledger"
 not_called "restart scalper-bot" "a data-only commit restarts nothing"
 
 # --------------------------------------------------------------------------- #
+echo "== 2b. an upstream that deletes the tracked event log is refused, not faked"
+setup
+# `git merge` aborts before writing MERGE_HEAD here (the local log is dirty and
+# upstream deletes it). Before the guard, autosync committed the staged
+# leftovers, reported `deployed`, and silently dropped the upstream change.
+printf '%s\n' '{"time":"engine","event":"SIGNAL"}' >> "$TMP/server/logs/trades.jsonl"
+before_lines="$(wc -l < "$TMP/server/logs/trades.jsonl")"
+seed_delete "logs/trades.jsonl"
+run_autosync
+log_has "ROLLED BACK" "an aborted merge is reported as a rollback"
+log_has "merge produced no MERGE_HEAD" "the real reason is logged" || true
+[ -f "$TMP/server/logs/trades.jsonl" ] \
+    && pass "the local event log survives" || fail "the log was deleted"
+[ "$(wc -l < "$TMP/server/logs/trades.jsonl")" -ge "$before_lines" ] \
+    && pass "no local telemetry was lost" || fail "local rows disappeared"
+called "start scalper-bot" "the engine comes back after the rollback"
+
 echo "== 3. docs-only upstream merge does not touch the book"
 setup
 seed_change "docs/note.md" "a note"
@@ -210,7 +291,7 @@ printf '%s\n' '{"event":"SIM_EXIT","profit":1.0,"balance_after":301.0}' \
     >> "$TMP/server/logs/trades.jsonl"
 FAKE_SMOKE=1 run_autosync
 log_has "ROLLED BACK" "rollback reported"
-[ "$(server_sha)" != "$(remote_sha)" ]     && pass "the bad upstream commit was not applied" || fail "rollback did not reset"
+[ "$(git -C "$TMP/server" log -1 --format=%s)" != "upstream: config.py" ]     && pass "the bad upstream commit was not applied" || fail "rollback did not reset"
 [ "$(git -C "$TMP/server" log -1 --format=%s)" = "data collection 1" ]     && pass "HEAD is the pre-merge data commit" || fail "HEAD is not the pre-merge commit"
 grep -q "MAX_SPREAD_POINTS = 80" "$TMP/server/config.py" && pass "old config restored" || fail "bad config kept"
 tail -1 "$TMP/server/logs/trades.jsonl" | grep -q "301.0" \
@@ -227,8 +308,8 @@ run_autosync
 log_has "SKIPPED - local code edits detected" "deploy refused over a dirty tree"
 log_lacks "deploy=[deployed" "nothing was deployed"
 grep -q "MAX_SPREAD_POINTS = 95" "$TMP/server/config.py" || pass "the hand-edit is untouched"
-[ "$(git -C "$TMP/server" rev-parse HEAD)" = "$(git -C "$TMP/server" rev-parse origin/main)" ] \
-    || pass "server intentionally left behind origin"
+[ "$(git -C "$TMP/server" log -1 --format=%s)" != "upstream: config.py" ] \
+    && pass "the upstream commit was not merged" || fail "the skipped deploy merged anyway"
 
 # --------------------------------------------------------------------------- #
 echo "== 7. a stopped unit is never started by a deploy"

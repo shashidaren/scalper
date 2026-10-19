@@ -69,15 +69,33 @@ time.**
 
 | Published (`data collection N`) | Left on the box |
 |---|---|
-| `logs/trades.jsonl` | `logs/live_status.json` |
-| `logs/daily_stats.json` | `logs/connection_status.json` |
-| `logs/paper_account.json` | `logs/system.jsonl` |
-| `btc/logs/{trades.jsonl,daily_stats.json,paper_account.json}` | `logs/deploy.log`, `logs/autosync.log`, locks, `KILL_SWITCH`, `quarantine/` |
+| `logs/ledger.jsonl` | `logs/trades.jsonl` (the raw event log) |
+| `logs/daily_stats.json` | `logs/live_status.json` |
+| `logs/paper_account.json` | `logs/connection_status.json` |
+| `btc/logs/{ledger.jsonl,daily_stats.json,paper_account.json}` | `logs/system.jsonl`, logs, locks, `KILL_SWITCH`, `quarantine/` |
 
-The three published files move only when a trade does (~5–30 commits/day). The
+The published files move only when a trade does (~5–30 commits/day). The
 unpublished ones change every 15 seconds and would turn this into 96 commits a
 day for no analytical value. `.gitignore` enforces the split; `logs/*` (not
 `logs/`) so the negations work.
+
+### `ledger.jsonl` is not `trades.jsonl`
+
+`run.py` writes a `SIGNAL` row on **every loop iteration** (~4/min per book,
+24/7) plus `SKIP` rows, so `trades.jsonl` reached 187,406 rows (~20–30 MB) by
+2026-10-19 and grows ~11,500 rows / ~1.7 MB a day. Publishing that is what made
+`data collection 1` enormous.
+
+`tools/ledger_export.py` distils the lifecycle events into `ledger.jsonl`
+(a few hundred bytes a day, clean diffs) and autosync publishes that. The raw
+log stays on the box as telemetry. `AUTOSYNC_PUBLISH_EVENT_LOG=1` restores the
+old behaviour.
+
+The first run already committed the raw log once. See
+[`autosync_first_run_2026-10-19.md`](autosync_first_run_2026-10-19.md) §"One-time
+cleanup" for the supervised `git rm --cached` procedure that stops it being
+tracked. Until that is done, an upstream commit that deletes the file will be
+**refused** by autosync (correctly) rather than merged.
 
 ---
 
@@ -122,12 +140,13 @@ One block per run in `logs/autosync.log` (and on stdout, if cron redirects it):
 | Line | Meaning | Action |
 |---|---|---|
 | `data: no changes` | no trade moved since the last run | none |
-| `data: committed N new trade row(s)` | a trade opened/closed and was published | none |
+| `data: committed N new trade event(s)` | a trade opened/closed and was published | none |
 | `deploy: none` | `origin/main` did not move | none |
 | `deploy: deployed <sha>` | merged, smoke passed | **note the time** (§3) |
 | `deploy: SKIPPED (AUTO_DEPLOY=0)` | data-only mode | expected if you set it |
 | `deploy: SKIPPED - local code edits detected` | someone hand-edited code on the box | `git status`, commit or `git checkout -- <file>` |
 | `deploy: ROLLED BACK (smoke=FAIL)` + 🚨 | the smoke gate failed; code was reset to the pre-merge SHA, live data restored | read `logs/smoke.log`, fix, re-merge |
+| `deploy: ROLLED BACK` with `merge produced no MERGE_HEAD` in the log | `git merge` aborted before it started (a dirty tracked file the merge wanted to touch). Before 2026-10-20 this was **silently reported as a deploy** and the upstream change was lost | resolve the dirty path by hand, then re-run |
 | `push: FAILED` + ⚠️ | data is safe in a local commit and retried next run | fix git credentials |
 | `integrity: … fail` + 🚨 | `check_data.py` found a broken ledger | `python3 tools/check_data.py`, then `tools/repair_phantom_ledger.py` |
 | `freshness: gold: STALE (N min…)` + 🛑 | the unit is up but has not written `live_status.json` for 30+ min — the 2026-09-29 "alive but starving" failure | `journalctl -u scalper-bot -n 50` |
@@ -146,6 +165,7 @@ makes that false, so `always` is the honest default here.
 | `AUTOSYNC_REPO_DIR` | script's parent | repo location |
 | `AUTOSYNC_REMOTE` / `AUTOSYNC_BRANCH` | `origin` / `main` | what to sync against |
 | `AUTOSYNC_PUBLISH_DATA` | `1` | `0` = never commit/push data (deploy-only, like `deploy.sh`) |
+| `AUTOSYNC_PUBLISH_EVENT_LOG` | `0` | `1` = also publish the raw `trades.jsonl` (grows ~1.7 MB/day; see above) |
 | `AUTO_DEPLOY` | `1` | `0` = publish data only, never merge or restart |
 | `SMOKE_GATE` | `1` | `0` = deploy without the smoke test (**not advised**) |
 | `AUTOSYNC_PYTHON` | `mt5env/bin/python`, else `python3` | interpreter for the checks |
@@ -175,16 +195,22 @@ changes merge and deploy without it.
 ## 7. Testing the script itself
 
 ```bash
-bash tests/test_autosync.sh          # 39 checks, ~3 s, no network
+bash tests/test_autosync.sh          # 48 checks, ~5 s, no network
 python3 tools/smoke_test.py          # includes the above
 ```
 
 The test builds a real bare origin, a "seed" clone that plays the PR author and
 a "server" clone that plays the box, with a fake `systemctl` and a fake
-interpreter for the smoke gate. It covers: quiet run, data commit + push,
-docs-only merge, engine-only change, dashboard-relevant change, smoke failure
-rollback (including "data written during the failed merge survives"), the
-hand-edit refusal, the stopped-unit rule and the lock.
+interpreter for the smoke gate. It covers: quiet run, data commit + push (the
+ledger, never the event log), docs-only merge, engine-only change,
+dashboard-relevant change, smoke failure rollback (including "data written
+during the failed merge survives"), an upstream that deletes the tracked event
+log (must roll back, not fake a deploy), the hand-edit refusal, the stopped-unit
+rule and the lock.
+
+If the sandbox running the test blocks `git push` (a merged/closed PR does), the
+harness replaces push with the equivalent fetch into the bare origin. With
+`FAKE_GIT_PUSH_TARGET` unset — a normal box — the real push path is used.
 
 ---
 

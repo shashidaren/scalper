@@ -28,13 +28,16 @@ data/*.csv
 # `logs/` (with the trailing slash) would ignore the directory itself and make
 # every `!` negation below a no-op - it has to be `logs/*`.
 logs/*
-!logs/trades.jsonl
+!logs/ledger.jsonl
 !logs/daily_stats.json
 !logs/paper_account.json
 btc/logs/*
-!btc/logs/trades.jsonl
+!btc/logs/ledger.jsonl
 !btc/logs/daily_stats.json
 !btc/logs/paper_account.json
+# logs/trades.jsonl is deliberately NOT published: run.py writes a SIGNAL row
+# every loop (~11,500 rows / ~1.7 MB a day). tools/ledger_export.py distils the
+# trade lifecycle into ledger.jsonl; the raw log stays on the box.
 
 # Secrets / local config
 .env

@@ -16,6 +16,7 @@ deploy.sh                      manual deploy: git pull --ff-only; restart only i
 tools/autosync.sh              cron: publish paper state, merge origin/main behind a smoke gate
 tools/smoke_test.py            the deploy gate (hermetic suites + engine imports)
 tools/check_data.py            read-only ledger/state integrity
+tools/ledger_export.py         distils logger's event log into logs/ledger.jsonl (published)
 tools/repair_phantom_ledger.py quarantine + restore (dry run by default)
 risk_sizer.py                  LIVE %-risk lot sizing (RISK_PCT=0 disables it)
 

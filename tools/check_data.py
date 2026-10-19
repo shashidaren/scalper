@@ -4,11 +4,14 @@
 Ported in spirit from gold-trading-bot's `tools/check_data.py`. That repo keeps
 a CSV ledger; this one keeps JSONL + JSON state, so the checks are:
 
-  * every line of `trades.jsonl` is a valid JSON object (NaN/Infinity rejected —
+  * every line of `ledger.jsonl` (or `trades.jsonl` when no ledger exists yet)
+    is a valid JSON object (NaN/Infinity rejected —
     Python's json accepts them by default, which is how a `NaN` balance can
     reach a state file unnoticed);
   * every `SIM_EXIT` row has a finite numeric `profit` and `balance_after`;
-  * the running balance in `trades.jsonl` chains: `balance_after == prev + profit`;
+  * the running balance chains inside the CURRENT book (a `paper.py --reset`
+    legitimately breaks the chain in the raw log, so only the last `closed`
+    exits, as reported by the state file, are chained);
   * `paper_account.json` parses, its balance is finite, and any open position has
     positive, finite geometry (entry/sl/sl_dist/volume, tp absent-or-positive);
   * `daily_stats.json` parses and its counters are numeric;
@@ -88,27 +91,37 @@ class Report:
 
 def check_book(name: str, book: Path, rep: Report):
     logs = book / "logs"
-    trades = logs / "trades.jsonl"
+    # The durable record is the compact ledger (lifecycle events only). The raw
+    # event log is 11k+ rows/day of SIGNAL/SKIP telemetry; when a ledger exists
+    # it is the authority, and the event log is only checked for shape.
+    ledger = logs / "ledger.jsonl"
+    trades = ledger if ledger.exists() else logs / "trades.jsonl"
     rows, errors = _read_jsonl(trades)
     for err in errors:
         rep.fail(f"{name}: {err}")
+    if ledger.exists() and (logs / "trades.jsonl").exists():
+        _, raw_errors = _read_jsonl(logs / "trades.jsonl", tail=500)
+        if raw_errors:
+            rep.warn(f"{name}: {raw_errors[0]} (in trades.jsonl; not the durable record)")
 
     exits = [r for r in rows if r.get("event") == "SIM_EXIT"]
-    prev_balance = None
+    # Shape checks on every exit ever logged (cheap, and a NaN row is an
+    # incident whether or not it belongs to the current book).
     for i, r in enumerate(exits):
-        profit, bal = r.get("profit"), r.get("balance_after")
-        if not _finite(profit):
-            rep.fail(f"{name}: SIM_EXIT #{i} has non-finite profit {profit!r}")
-            continue
-        if not _finite(bal):
-            rep.fail(f"{name}: SIM_EXIT #{i} has non-finite balance_after {bal!r}")
-            continue
-        if prev_balance is not None:
-            expected = round(prev_balance + float(profit), 2)
-            if abs(expected - float(bal)) > 0.01:
-                rep.fail(f"{name}: balance chain breaks at SIM_EXIT #{i}: "
-                         f"{prev_balance} + {profit} != {bal}")
-        prev_balance = float(bal)
+        if not _finite(r.get("profit")):
+            rep.fail(f"{name}: SIM_EXIT #{i} has non-finite profit {r.get('profit')!r}")
+        if not _finite(r.get("balance_after")):
+            rep.fail(f"{name}: SIM_EXIT #{i} has non-finite balance_after "
+                     f"{r.get('balance_after')!r}")
+
+    # The balance chain is only meaningful inside ONE book. `paper.py --reset`
+    # zeroes the counters and the balance but deliberately leaves trades.jsonl
+    # alone, so a reset leaves a permanent, legitimate break in the file. The
+    # state file says how many exits the CURRENT book has (`closed`), so chain
+    # -check exactly those. Checking from the beginning of time produced two
+    # phantom failures on the box (2026-10-19: both books were reset 10-04).
+    prev_balance = None
+    state_closed = None
 
     state = logs / "paper_account.json"
     state_balance = None
@@ -138,12 +151,59 @@ def check_book(name: str, book: Path, rep: Report):
             for key in ("closed", "wins", "losses", "time_exits"):
                 if key in data and not isinstance(data[key], int):
                     rep.fail(f"{name}: paper_account {key} is not an int ({data[key]!r})")
+            if isinstance(data.get("closed"), int):
+                state_closed = data["closed"]
+
+            # --- chain over the current book only ---------------------------
+            if state_closed is not None:
+                if state_closed > len(exits):
+                    rep.fail(f"{name}: state says {state_closed} closed trades but the "
+                             f"log only has {len(exits)} exits (ledger truncated?)")
+                book = exits[-state_closed:] if state_closed else []
+                for i, r in enumerate(book):
+                    profit, bal = r.get("profit"), r.get("balance_after")
+                    if not _finite(profit) or not _finite(bal):
+                        continue          # already reported above
+                    if prev_balance is not None:
+                        expected = round(prev_balance + float(profit), 2)
+                        if abs(expected - float(bal)) > 0.01:
+                            rep.fail(f"{name}: balance chain breaks {len(book) - i} "
+                                     f"trade(s) from the end: {prev_balance} + "
+                                     f"{profit} != {bal}")
+                    prev_balance = float(bal)
+
+                # Counters must describe the same book as the chain.
+                if book:
+                    wins = sum(1 for r in book
+                               if r.get("reason") != "TIME" and float(r.get("profit", 0)) > 0)
+                    losses = sum(1 for r in book
+                                 if r.get("reason") != "TIME" and float(r.get("profit", 0)) <= 0)
+                    times = sum(1 for r in book if r.get("reason") == "TIME")
+                    got = (wins, losses, times)
+                    want = (data.get("wins"), data.get("losses"), data.get("time_exits", 0))
+                    if all(isinstance(v, int) for v in want) and got != want:
+                        rep.fail(f"{name}: state counters {want} disagree with the last "
+                                 f"{len(book)} exits {got}")
+            elif exits:
+                # No usable counter: fall back to the whole file, and treat a
+                # break as a warning (it may be a historical reset).
+                for i, r in enumerate(exits):
+                    profit, bal = r.get("profit"), r.get("balance_after")
+                    if not _finite(profit) or not _finite(bal):
+                        continue
+                    if prev_balance is not None and \
+                            abs(round(prev_balance + float(profit), 2) - float(bal)) > 0.01:
+                        rep.warn(f"{name}: balance chain breaks at SIM_EXIT #{i} "
+                                 f"({prev_balance} + {profit} != {bal}) - reset, or an edit?")
+                    prev_balance = float(bal)
+
             if (state_balance is not None and prev_balance is not None
                     and abs(state_balance - prev_balance) > 0.01):
-                # Legitimate after `paper.py --reset` (which does not rewrite the
-                # trade log), so this is a warning that asks a human to look.
-                rep.warn(f"{name}: state balance ${state_balance:.2f} != last ledger "
-                         f"balance ${prev_balance:.2f} (reset, or a ledger edit?)")
+                rep.fail(f"{name}: state balance ${state_balance:.2f} != the last exit's "
+                         f"${prev_balance:.2f} - the ledger and the state disagree")
+            if state_closed == 0 and exits:
+                rep.warn(f"{name}: state says 0 closed but the log has {len(exits)} exits "
+                         f"(book reset since the log was started - expected)")
     elif rows:
         rep.warn(f"{name}: trades.jsonl exists but paper_account.json does not")
 
@@ -190,7 +250,8 @@ def check_book(name: str, book: Path, rep: Report):
         except Exception:
             position_open = False
 
-    print(f"== {name}: {len(rows)} trade rows, {len(exits)} exits, "
+    closed_note = f", {state_closed} in the current book" if state_closed is not None else ""
+    print(f"== {name}: {len(rows)} ledger rows, {len(exits)} exits{closed_note}, "
           f"balance {('%.2f' % state_balance) if state_balance is not None else 'n/a'}"
           f"{' (position open)' if position_open else ''}")
 
