@@ -188,6 +188,11 @@ run_case btc_dashboard_commit_restarts_btc_dashboard_only 'scalper-btc-dashboard
 run_case docs_only_commit_skips_all_four '' \
   DEPLOY_SERVICES='scalper-bot scalper-dashboard scalper-btc-bot scalper-btc-dashboard' \
   GIT_DIFF=$'docs/cron_review_2026-10-07.md\nREADME.md'
+# tools/ holds the deploy machinery (autosync, smoke gate, repair) and is never
+# imported by a service, so publishing a fix to it must not restart the book.
+run_case tools_only_commit_skips_all_four '' \
+  DEPLOY_SERVICES='scalper-bot scalper-dashboard scalper-btc-bot scalper-btc-dashboard' \
+  GIT_DIFF=$'tools/autosync.sh\ntools/smoke_test.py'
 run_case engine_commit_restarts_all_four 'scalper-bot scalper-dashboard scalper-btc-bot scalper-btc-dashboard' \
   DEPLOY_SERVICES='scalper-bot scalper-dashboard scalper-btc-bot scalper-btc-dashboard' \
   GIT_DIFF='config.py'

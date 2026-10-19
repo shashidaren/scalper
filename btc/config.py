@@ -151,6 +151,15 @@ TP_ATR_MULT = 5.0            # PLACEHOLDER: same; 2.0/5.0 = 1:2.5 RR
 # is unmeasured; sweep before trusting it.
 BE_TRIGGER_R = 1.5           # PLACEHOLDER
 
+# Time stop: 0 = off. Explicit here because paper.py is shared with gold; a
+# non-zero value would silently change the BTC book by closing open positions
+# on a wall-clock rule that no BTC document has pre-registered.
+MAX_HOLD_MINUTES = 0
+
+# %-risk sizing is LIVE-only and off by default. btc/run.py currently refuses
+# LIVE (HANDOFF gates it), so this stays 0 until a separate account exists.
+RISK_PCT = 0.0
+
 # --- spread protection ---
 # Gold uses 80 points (~$0.80). XM BTCUSD does not: the 2026-10-03 TRAIN pull
 # measured spread p90 at 5,000 points, and the live board quotes ~4,000

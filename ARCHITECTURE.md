@@ -7,11 +7,17 @@ run.py                         engine loop (risk gates, kill switch, stale-tick,
   mt5_bridge.MT5Bridge         RPyC :18812 → mt5server.exe (Wine) → MT5
   strategy.ScalpStrategy       gold shape: M5 EMA200, RSI pullback, ATR, session, closed bar
   paper.PaperAccount           FORWARD_TEST fills, logs/paper_account.json
+                               (geometry guards, atomic save, optional TIME exit)
   live_ledger.LiveLedger       LIVE realized PnL, logs/live_ledger.json
   spread_gate.py               entry veto + dashboard banner (does not change the gate)
   logger.py                    logs/{system,trades}.jsonl, live_status.json, …
 dashboard.py                   reads those files only, :8088
-deploy.sh                      git pull --ff-only; restart only if a runtime path changed
+deploy.sh                      manual deploy: git pull --ff-only; restart only if a runtime path changed
+tools/autosync.sh              cron: publish paper state, merge origin/main behind a smoke gate
+tools/smoke_test.py            the deploy gate (hermetic suites + engine imports)
+tools/check_data.py            read-only ledger/state integrity
+tools/repair_phantom_ledger.py quarantine + restore (dry run by default)
+risk_sizer.py                  LIVE %-risk lot sizing (RISK_PCT=0 disables it)
 
 btc/run.py                     shim: btc/config.py becomes `config`, then root run.main()
 btc/dashboard.py               same shim, :8089

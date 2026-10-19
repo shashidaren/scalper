@@ -11,7 +11,8 @@ Last verified on `scalping`: 2026-10-07 21:57 UTC. Docs-only commits do not rest
 - `TRADING_MODE` stays `FORWARD_TEST` until an explicit live decision. Kill switch is `logs/KILL_SWITCH` (blocks new entries only).
 - Paper track record (as of 2026-10-12 01:07 UTC, from `status/paper`): balance `$249.70` (started $300), 21 closed, 4 wins / 17 losses. Still far short of the stated launch criteria (~100+ paper trades under the current config, sustained PF > ~1.2, affordable max DD — see `docs/strategy_iteration_2026-10-01.md`). A Gold-only live flip is not yet justified; the shared-account rule also still applies.
 - Deploy freeze is explained and closed. A dirty tracked `docker-compose.yml` froze every 15-minute deploy from 2026-10-04 12:30 to 2026-10-07 02:28 UTC (~63 h). The process ran `a122e7a`-era code, so PRs #22/#23/#24 were on disk but not in memory, and `logs/live_status.json` had no `spread_gate` field. Server HEAD after the fix was `b033986` with a clean tree (user-verified 2026-10-07). `deploy.sh` now logs `DIRTY TREE` and `PULL FAILED` and exits 1 without restarting.
-- This repo's cron pulls `main` and restarts a unit only if a runtime path changed. `docs/`, `research/`, `tests/`, `*.md`, and `deploy.sh` do not restart the book.
+- This repo's cron pulls `main` and restarts a unit only if a runtime path changed. `docs/`, `research/`, `tests/`, `*.md`, `tools/`, and `deploy.sh` do not restart the book.
+- Autosync exists in the repo (`tools/autosync.sh`, `docs/AUTOSYNC.md`) but is **not on cron yet**. Until it is, the box still runs the `deploy.sh` line.
 
 ## BTC
 
@@ -38,6 +39,8 @@ Last verified on `scalping`: 2026-10-07 21:57 UTC. Docs-only commits do not rest
 
 ## Open
 
+- Switch the box cron from `deploy.sh` to `tools/autosync.sh` (one line, `docs/AUTOSYNC.md` §1). After the first run, check that `data collection 1` published `logs/trades.jsonl`, `logs/daily_stats.json`, `logs/paper_account.json` and the `btc/logs/` equivalents.
+- Verify the smoke gate on the box with `mt5env/bin/python tools/smoke_test.py` **before** enabling autosync; a bare `python3` without pandas would fail it and roll back every deploy.
 - Rotate the MT5 and VNC passwords (they were pasted in plain text; change at the broker, update `.env`).
 - Re-apply the two mt5linux image patches if the container is ever recreated from stock `lprett/mt5linux`. Details: `docs/archive/HANDOFF_2026-10-07.md` §4.
 - File the two upstream mt5linux bugs (fifo `mkfifo` crash, `config.sh` `return` under `set -e`).
@@ -55,3 +58,4 @@ Last verified on `scalping`: 2026-10-07 21:57 UTC. Docs-only commits do not rest
 | 2026-10-08 | Server verified: crontab installed, BTC gate 6250 passing 4000-pt quotes, paper status published (`$277.99`, 13 closed, 3W/10L). |
 | 2026-10-10 | Phase 1c Donchian H1 gate recorded FAIL (`docs/btc_phase1c_result_2026-10-07.md`). Docs only. |
 | 2026-10-12 | Recorded Gold paper snapshot (`$249.70`, 21 closed, 4W/17L) and that it does not yet meet launch criteria for live (even Gold-only). Shared-account rule unchanged. Docs only. |
+| 2026-10-20 | Ported the operational half of `gold-trading-bot`: `tools/autosync.sh` (data publish + smoke gate + rollback + digest), `tools/smoke_test.py`, `tools/check_data.py`, `tools/repair_phantom_ledger.py`, paper geometry guards + atomic state save, LIVE-only %-risk sizing (`RISK_PCT=0`), optional `MAX_HOLD_MINUTES=0` time stop. No strategy parameter changed; paper behaviour identical by default. Assessment: `docs/port_assessment_2026-10-20.md`. Cron not switched yet. |

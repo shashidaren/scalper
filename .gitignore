@@ -20,8 +20,21 @@ Thumbs.db
 # Data (large CSVs – download on demand instead)
 data/*.csv
 
-# Runtime logs / status files
-logs/
+# Runtime logs / status files.
+# The durable paper state is PUBLISHED by tools/autosync.sh as `data collection N`
+# commits, so those three files must stay trackable per book. Everything else in
+# logs/ (live_status, connection_status, system.jsonl, deploy/autosync logs,
+# locks, KILL_SWITCH, quarantine) is machine-local and ignored.
+# `logs/` (with the trailing slash) would ignore the directory itself and make
+# every `!` negation below a no-op - it has to be `logs/*`.
+logs/*
+!logs/trades.jsonl
+!logs/daily_stats.json
+!logs/paper_account.json
+btc/logs/*
+!btc/logs/trades.jsonl
+!btc/logs/daily_stats.json
+!btc/logs/paper_account.json
 
 # Secrets / local config
 .env
