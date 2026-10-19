@@ -1,0 +1,32 @@
+[Unit]
+Description=Scalper autosync (publish paper state, deploy merged code)
+Documentation=file:/root/scalper/docs/AUTOSYNC.md
+After=network-online.target
+Wants=network-online.target
+# Deliberately NOT Wants=/After= scalper-bot.service: this unit stops and starts
+# the bot as part of a deploy, and a dependency on it would make the job part of
+# the bot's own transaction.
+
+[Service]
+Type=oneshot
+User=root
+WorkingDirectory=/root/scalper
+# mt5env first so the smoke gate imports pandas/rpyc; autosync.sh also
+# auto-detects mt5env/bin/python when this is absent.
+Environment=PATH=/root/scalper/mt5env/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+Environment=AUTOSYNC_PYTHON=/root/scalper/mt5env/bin/python
+# Optional: AUTO_DEPLOY / AUTOSYNC_PUBLISH_DATA / NOTIFY / AUTOSYNC_BRANCH.
+# Put them in a drop-in instead of editing this file:
+#   systemctl edit scalper-autosync.service
+EnvironmentFile=-/root/scalper/.env
+ExecStart=/root/scalper/tools/autosync.sh
+# The smoke gate (up to 5 min) plus a stop/start cycle fits comfortably; a run
+# that exceeds this is wedged, and the next tick is blocked by the lock anyway.
+TimeoutStartSec=20min
+Nice=10
+# The digest goes to journald: journalctl -u scalper-autosync
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

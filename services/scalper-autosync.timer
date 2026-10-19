@@ -1,0 +1,17 @@
+[Unit]
+Description=Run scalper autosync every 15 minutes
+
+[Timer]
+# :00, :15, :30, :45 — the same cadence as the old deploy.sh cron line.
+OnCalendar=*:0/15
+# Wait exactly for the slot: a run that starts late still reports the right
+# minute, and 30 s of slack keeps :00 runs from bunching with other cron jobs.
+AccuracySec=30s
+RandomizedDelaySec=20
+# After a reboot or downtime, run once immediately instead of waiting for the
+# next slot. The engine may already be minutes behind.
+Persistent=true
+Unit=scalper-autosync.service
+
+[Install]
+WantedBy=timers.target
