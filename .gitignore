@@ -17,6 +17,10 @@ mt5env/
 .DS_Store
 Thumbs.db
 
+# Patch artefacts. Applying a .patch on the box used to leave the patch
+# file in the tree (`autosync-fix-2026-10-20.patch`); it is not an input.
+*.patch
+
 # Data (large CSVs – download on demand instead)
 data/*.csv
 

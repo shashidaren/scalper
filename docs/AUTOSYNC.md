@@ -25,13 +25,22 @@ its per-service restart rules are better than gold's. `autosync.sh` keeps them.
 | cron user is **root** | `systemctl stop/start` the units | `crontab -l` (root) |
 | the interpreter has `pandas`/`numpy`/`rpyc` | the smoke gate imports the engine | `mt5env/bin/python tools/smoke_test.py` |
 | no uncommitted **code** edits on the box | the script refuses to deploy over them | `git status --short` |
+| exactly one trigger (timer **or** cron) | two schedulers double-deploy | `./tools/autosync.sh --status` |
 
 The interpreter is auto-detected: `mt5env/bin/python` if it exists, else
 `python3`. Override with `AUTOSYNC_PYTHON`. A bare `python3` without pandas
 would fail the smoke gate for the wrong reason and roll back every deploy, so
 the `mt5env/` default matters.
 
-### Cron
+### The trigger: a systemd timer, or cron — exactly one
+
+`services/scalper-autosync.{timer,service}` are the installed trigger. The timer
+fires every 15 minutes and starts the oneshot service; install it with
+`systemctl enable --now scalper-autosync.timer`. Never `enable` the **service**
+as well — that is a second, boot-time trigger — and never add a cron line beside
+the timer.
+
+Cron is the fallback when systemd is not in use:
 
 ```cron
 */15 * * * * cd /root/scalper && ./tools/autosync.sh >> /root/scalper/logs/autosync.cron.log 2>&1
@@ -39,7 +48,9 @@ the `mt5env/` default matters.
 
 Remove the old `*/15 … deploy.sh` line. Both scripts take the same
 `logs/deploy.lock`, so they cannot corrupt each other, but whichever loses the
-race logs a skip every tick — noise, not a bug.
+race logs a skip every tick — noise, not a bug. Two *different* schedulers are
+still wrong: `./tools/autosync.sh --status` prints `TWO TRIGGERS` when a timer
+and a cron line are both present.
 
 `.env` is **not** read by this script (there is no Telegram digest yet); it is
 never committed.
@@ -152,6 +163,19 @@ One block per run in `logs/autosync.log` (and on stdout, if cron redirects it):
 | `freshness: gold: STALE (N min…)` + 🛑 | the unit is up but has not written `live_status.json` for 30+ min — the 2026-09-29 "alive but starving" failure | `journalctl -u scalper-bot -n 50` |
 | `docs: N day(s) since STATUS.md was verified` | advisory only; docs drift | update `STATUS.md` at the next session |
 
+### `--status`
+
+`./tools/autosync.sh --status` is the read-only answer to "is the 15-minute
+schedule actually firing?". It prints the trigger (timer/cron), the age of the
+last digest — `OK (last run N min ago)` or `STALE (last run N min ago)` — the
+last digest lines, the repo and unit state, then `result: OK` or
+`result: ATTENTION NEEDED`. Exit 0 = OK, 1 = attention.
+
+It never takes the lock, never writes, never fetches and never restarts a unit,
+so it is safe to run while a deploy is in progress. A completed run older than
+45 minutes is `STALE` (`AUTOSYNC_STALE_MINUTES` overrides), and a rollback or a
+failed push in the last digest is attention too.
+
 `NOTIFY=quiet` suppresses a digest only when nothing at all changed (no data,
 no deploy, push ok, no 🚨/⚠️/🛑). During market hours a closed trade usually
 makes that false, so `always` is the honest default here.
@@ -172,6 +196,7 @@ makes that false, so `always` is the honest default here.
 | `AUTOSYNC_SETTLE_SECONDS` | `20` | wait after a restart before judging liveness |
 | `NOTIFY` | `always` | `quiet` = skip the digest when nothing changed |
 | `AUTOSYNC_LOCK_FILE` | `logs/autosync.lock` | the `flock` guard; overlapping runs exit 0 |
+| `AUTOSYNC_STALE_MINUTES` | `45` | `--status` reports `STALE` after this many minutes without a completed run |
 
 ---
 
@@ -195,7 +220,7 @@ changes merge and deploy without it.
 ## 7. Testing the script itself
 
 ```bash
-bash tests/test_autosync.sh          # 48 checks, ~5 s, no network
+bash tests/test_autosync.sh          # 56 checks, ~5 s, no network
 python3 tools/smoke_test.py          # includes the above
 ```
 
