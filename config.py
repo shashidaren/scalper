@@ -22,8 +22,34 @@ SIM_START_BALANCE = 300.0   # dummy balance to emulate with
 # the plateau (some protection, no reliable loss). Re-tune after more data.
 BE_TRIGGER_R = 1.5
 
+# Time stop (opt-in, default OFF). Close any open paper trade at market once it
+# has been held this many minutes, reason "TIME" (neutral bucket: own counter,
+# P&L-signed into the balance, excluded from the win/loss tally). Ported from
+# gold-trading-bot, where MAX_HOLD_MINUTES=240 closed exactly one trade in its
+# first 14 days - but that one trade had ridden a 49-hour weekend gap, which is
+# the case this guards against. 0 disables it, so the current gold book is
+# byte-for-byte unchanged until an explicit decision to enable it.
+# Paper path only: the LIVE path leaves the exit to the broker-side SL/TP.
+MAX_HOLD_MINUTES = 0
+
 # Position sizing (testing size)
 LOT_SIZE = 0.01
+
+# --- %-risk position sizing (LIVE only) ---
+# RISK_PCT = 0 keeps the old fixed LOT_SIZE behaviour (default). Any positive
+# value makes the LIVE path size off the broker balance:
+#     lots = balance * RISK_PCT/100 / (stop_distance * CONTRACT_SIZE)
+# and SKIP the trade when the required lot is below the broker volume_min,
+# instead of silently sending a lot that risks more than the budget.
+# FORWARD_TEST never uses this: gold's 2026-10-17 correction showed that sizing
+# the paper book off its own ledger skipped 76-91% of setups and confounded the
+# experiment. See risk_sizer.py and docs/port_assessment_2026-10-20.md.
+RISK_PCT = 0.0
+# Broker lot constraints. None = read symbol_info (volume_step/volume_min/
+# volume_max) at order time; the values here are the fallback.
+VOLUME_STEP = 0.01
+VOLUME_MIN = None
+VOLUME_MAX = None
 
 # Spread protection (raised for current broker conditions)
 MAX_SPREAD_POINTS = 80

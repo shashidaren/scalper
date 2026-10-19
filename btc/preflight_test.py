@@ -5,8 +5,10 @@ Three things are asserted:
   1. the bar-file economics match the documented gold facts (spread/1R ~5.7%,
      break-even WR 28.6%) - i.e. the maths that tells you whether a shape can
      pay for the spread is right;
-  2. the BTC failure mode is reproduced: a 4,242-point spread against the
-     1500-point placeholder grades INFEASIBLE with exit code 2;
+  2. the BTC failure mode is reproduced: quotes far above the CONFIGURED
+     MAX_SPREAD_POINTS grade INFEASIBLE with exit code 2. Asserted relative
+     to the config value, not the old 1500 placeholder - the gate moved to
+     6250 on 2026-10-08 and a hard-coded number goes red for no reason;
   3. exit codes are meaningful (0 OK / 2 INFEASIBLE / 3 unknown) so a runbook
      can gate on the command.
 
@@ -75,13 +77,24 @@ def main() -> int:
         print("  (skipping gold economics: data/GOLD_M5.csv not present)")
 
     # --- 2. the BTC failure mode grades INFEASIBLE ------------------------
+    # The subprocess reads btc/config.py, so derive the synthetic spreads from
+    # the configured gate instead of hard-coding the retired 1500 placeholder.
+    # Read btc/config.py directly: `sys.modules["config"]` is whichever instance
+    # this test process activated, not necessarily the BTC one.
+    import importlib.util
+    _spec = importlib.util.spec_from_file_location("_btc_gate_config", HERE / "config.py")
+    btc_config = importlib.util.module_from_spec(_spec)
+    _spec.loader.exec_module(btc_config)
+    gate = float(getattr(btc_config, "MAX_SPREAD_POINTS", 0) or 0)
+    infeasible_pts = int(gate * 3) if gate > 0 else 4242
+    ok_pts = max(1, int(gate / 10)) if gate > 0 else 200
     with tempfile.TemporaryDirectory() as td:
-        btc_csv = btc_shaped_csv(Path(td) / "BTCUSD_synth_M5.csv")
+        btc_csv = btc_shaped_csv(Path(td) / "BTCUSD_synth_M5.csv", spread_pts=infeasible_pts)
         proc = subprocess.run(
             [sys.executable, str(HERE / "preflight.py"), "--offline", "--csv", str(btc_csv)],
             capture_output=True, text=True, cwd=str(ROOT), timeout=300)
         out = proc.stdout
-        check("4,242-pt quotes vs the 1500-pt placeholder -> INFEASIBLE",
+        check(f"{infeasible_pts}-pt quotes vs the {gate:g}-pt gate -> INFEASIBLE",
               proc.returncode == 2 and "INFEASIBLE" in out,
               f"exit={proc.returncode}")
         check("the verdict explains that 0 trades is a config problem",
@@ -90,11 +103,11 @@ def main() -> int:
               "spread / 1R" in out and "just to break even" in out)
 
         # --- 3. exit code 0 when the gate clears the file ------------------
-        ok_csv = btc_shaped_csv(Path(td) / "BTCUSD_ok_M5.csv", spread_pts=200)
+        ok_csv = btc_shaped_csv(Path(td) / "BTCUSD_ok_M5.csv", spread_pts=ok_pts)
         proc2 = subprocess.run(
             [sys.executable, str(HERE / "preflight.py"), "--offline", "--csv", str(ok_csv)],
             capture_output=True, text=True, cwd=str(ROOT), timeout=300)
-        check("a 200-pt quote file against the 1500-pt gate -> OK, exit 0",
+        check(f"a {ok_pts}-pt quote file against the {gate:g}-pt gate -> OK, exit 0",
               proc2.returncode == 0 and "VERDICT: OK" in proc2.stdout,
               f"exit={proc2.returncode}")
 

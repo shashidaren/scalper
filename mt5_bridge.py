@@ -306,12 +306,16 @@ class MT5Bridge:
                 return True
             return float(required) <= free
 
-    def open_trade(self, signal, sl_dist, tp_dist, max_attempts=3):
-        """Thread-safe wrapper — serializes on the shared MT5 global."""
-        with self._lock:
-            return self._open_trade_locked(signal, sl_dist, tp_dist, max_attempts)
+    def open_trade(self, signal, sl_dist, tp_dist, max_attempts=3, volume=None):
+        """Thread-safe wrapper — serializes on the shared MT5 global.
 
-    def _open_trade_locked(self, signal, sl_dist, tp_dist, max_attempts=3):
+        `volume` defaults to config.LOT_SIZE; a caller that sized the trade
+        (risk_sizer.size_lots on the LIVE path) passes its own lots.
+        """
+        with self._lock:
+            return self._open_trade_locked(signal, sl_dist, tp_dist, max_attempts, volume)
+
+    def _open_trade_locked(self, signal, sl_dist, tp_dist, max_attempts=3, volume=None):
         """Execute a market trade with dynamic ATR-based SL/TP distances.
 
         Retries transient failures (requotes, price moved/off) up to
@@ -320,6 +324,16 @@ class MT5Bridge:
         the margin pre-flight failed.
         """
         if signal not in ("BUY", "SELL"):
+            return None
+
+        # Fixed-lot default keeps every pre-2026-10-20 caller byte-identical.
+        try:
+            volume = float(volume if volume is not None else config.LOT_SIZE)
+        except (TypeError, ValueError):
+            print(f"[ERROR] Invalid order volume {volume!r} - order not sent.")
+            return None
+        if not (volume > 0) or volume != volume or abs(volume) == float("inf"):
+            print(f"[ERROR] Invalid order volume {volume!r} - order not sent.")
             return None
 
         retriable = set()
@@ -359,14 +373,14 @@ class MT5Bridge:
                 sl = round(price + sl_dist, digits)
                 tp = round(price - tp_dist, digits) if has_tp else 0.0
 
-            if not self._margin_ok(order_type, config.LOT_SIZE, price):
-                print(f"[ERROR] Insufficient free margin for {signal} {config.LOT_SIZE} {config.SYMBOL} - order not sent.")
+            if not self._margin_ok(order_type, volume, price):
+                print(f"[ERROR] Insufficient free margin for {signal} {volume} {config.SYMBOL} - order not sent.")
                 return None
 
             request = {
                 "action": self.mt5.TRADE_ACTION_DEAL,
                 "symbol": config.SYMBOL,
-                "volume": float(config.LOT_SIZE),
+                "volume": float(volume),
                 "type": order_type,
                 "price": float(price),
                 "sl": float(sl),

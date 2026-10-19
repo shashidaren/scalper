@@ -22,13 +22,42 @@ touch /root/scalper/logs/KILL_SWITCH
 rm    /root/scalper/logs/KILL_SWITCH
 ```
 
-## Deploy
+## Autosync (the cron path)
+
+`tools/autosync.sh` publishes the paper state and deploys merged code behind a
+smoke gate. Full reference: [`docs/AUTOSYNC.md`](docs/AUTOSYNC.md).
+
+```bash
+crontab -l | grep autosync                       # the cron line
+tail -60 logs/autosync.log                       # digests, one block per run
+tail -20 logs/smoke.log                          # only when a deploy was rolled back
+sudo -H /root/scalper/tools/autosync.sh          # force a run now
+AUTOSYNC_PUBLISH_DATA=0 tools/autosync.sh        # deploy only, publish nothing
+AUTO_DEPLOY=0 tools/autosync.sh                  # publish only, deploy nothing
+```
+
+What it does each run: commit `logs/{trades.jsonl,daily_stats.json,paper_account.json}`
+(+ `btc/logs/…`) as `data collection N` and push → merge `origin/main` if it
+advanced (data conflicts = server wins) → `tools/smoke_test.py` → roll back on
+failure → restart only the units that were active and whose runtime paths
+changed → integrity, freshness and docs advisories.
+
+The deploy **time**, not the PR merge time, is the era cutover:
+
+```bash
+git log --grep 'autosync: merge upstream' --format='%H %cI' -1
+```
+
+`deploy.sh` is still here for a manual, deploy-only pull. Do not run both cron
+lines; they share `logs/deploy.lock` and the loser logs a skip every tick.
+
+## Deploy (manual)
 
 ```bash
 cd /root/scalper && DEPLOY_BRANCH=main ./deploy.sh
 ```
 
-Cron is `DEPLOY_BRANCH=main` every 15 minutes. Log lines that matter:
+Log lines that matter:
 
 - `restarted scalper-bot at <sha>` — a runtime path changed
 - `restart skipped` — docs, research, tests, or markdown only
@@ -75,9 +104,30 @@ Fail the gate when net ≤ 0, PF < 1.2, n < 60, or g ≤ c. A pass is a document
 ## Tests that do not need the bridge
 
 ```bash
+mt5env/bin/python tools/smoke_test.py        # the deploy gate: everything below
 python3 tests/test_spread_gate.py
+python3 tests/test_risk_sizer.py
+python3 tests/test_paper_guards.py
+python3 tests/test_repair_phantom_ledger.py
 python3 btc/preflight_test.py
 python3 btc/edge_screen_test.py
 python3 btc/strategy_btc_test.py
 bash tests/test_deploy_services.sh
+bash tests/test_autosync.sh
 ```
+
+`tools/smoke_test.py` is what `autosync.sh` reads: exit 0 = deploy, non-zero =
+roll back. It must stay hermetic and fast.
+
+## Ledger integrity
+
+```bash
+mt5env/bin/python tools/check_data.py                 # read-only, 0 fail = healthy
+mt5env/bin/python tools/repair_phantom_ledger.py      # dry run: what is suspect
+mt5env/bin/python tools/repair_phantom_ledger.py --book gold --apply
+```
+
+`--apply` refuses while `scalper-bot` is active (stop it first), copies the
+original ledger to `logs/quarantine/<timestamp>/`, then rewrites. Never run it
+against a healthy book just to "clean up": the dry run is the default for a
+reason.

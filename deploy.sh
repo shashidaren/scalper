@@ -95,6 +95,7 @@ pull_failed() {   # reason, current sha, captured git output
 # restart the gold book mid-session.
 #
 #  * docs/, research/, tests/, *.md  - never imported by a service
+#  * tools/                          - checks/repair/autosync, never imported
 #  * deploy.sh                       - the cron's own script, not runtime
 #  * scalper-bot (gold engine): btc/ is a separate instance with its own
 #    config/sys.path, EXCEPT btc/config.py: the shared portfolio gate reads its
@@ -114,7 +115,7 @@ pull_failed() {   # reason, current sha, captured git output
 is_inert_for() {
   local svc="$1" path="$2"
   case "$path" in
-    docs/*|research/*|tests/*|*.md|deploy.sh) return 0 ;;
+    docs/*|research/*|tests/*|tools/*|*.md|deploy.sh) return 0 ;;
   esac
   case "$svc" in
     scalper-bot)

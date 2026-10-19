@@ -10,6 +10,7 @@ from logger import (
     update_connection_status, update_live_status
 )
 from spread_gate import SpreadGateMonitor
+from risk_sizer import size_lots
 try:
     from portfolio import portfolio_blocked
 except Exception:
@@ -145,6 +146,11 @@ def main():
     bridge = None
     strategy = new_strategy()
     log_system("INFO", f"Strategy: {type(strategy).__name__}")
+    if (config.TRADING_MODE != "FORWARD_TEST"
+            and float(getattr(config, "MAX_HOLD_MINUTES", 0) or 0) > 0):
+        log_system("WARNING",
+            "MAX_HOLD_MINUTES is set, but the time stop is implemented for the "
+            "paper book only - LIVE exits stay with the broker-side SL/TP.")
 
     # A strategy may force the breakeven ratchet for its book (the donchian
     # shape pre-registers BE off); absent the hook, config decides (gold path).
@@ -334,8 +340,21 @@ def main():
                 except Exception:
                     positions = []
 
-                spread_points = round((tick.ask - tick.bid) / sym.point)
-                gate_pass = spread_monitor.observe(spread_points)
+                # A missing/zero `point` used to raise ZeroDivisionError inside
+                # the broad handler; fail the gate CLOSED instead of trading on
+                # a spread we cannot measure.
+                try:
+                    point = float(sym.point)
+                except (TypeError, ValueError):
+                    point = 0.0
+                if point > 0:
+                    spread_points = round((tick.ask - tick.bid) / point)
+                    gate_pass = spread_monitor.observe(spread_points)
+                else:
+                    spread_points = 0
+                    gate_pass = False
+                    log_system("WARNING",
+                        "symbol_info.point missing/zero - spread gate fails closed this loop")
                 if spread_monitor.warn_now():
                     log_system("WARNING", spread_monitor.warning_message())
                 elif spread_monitor.recovered_now():
@@ -481,19 +500,57 @@ def main():
                             log_trade("SIM_ENTRY_FAILED", {"reason": "paper position already open"})
                     else:
                         log_system("INFO", f"Executing {signal} order...")
-                        res = bridge.open_trade(signal, sl_dist, tp_dist)
-
-                        if res and res.retcode == bridge.mt5.TRADE_RETCODE_DONE:
-                            log_trade("ENTRY", {
-                                "side": signal,
-                                "ticket": res.order,
-                                "volume": config.LOT_SIZE,
-                                "sl_dist": round(sl_dist, 2),
-                                "tp_dist": round(tp_dist, 2)
+                        # LIVE sizing: fixed LOT_SIZE unless RISK_PCT > 0, in
+                        # which case the lot count is derived from the broker
+                        # balance and a stop that is too wide for the budget is
+                        # SKIPPED rather than sent oversized. The paper path
+                        # above never comes here (gold 2026-10-17 correction).
+                        volume = float(getattr(config, "LOT_SIZE", 0.01))
+                        sizing = None
+                        risk_pct = float(getattr(config, "RISK_PCT", 0.0) or 0.0)
+                        if risk_pct > 0:
+                            sym_step = (getattr(sym, "volume_step", None)
+                                        or getattr(config, "VOLUME_STEP", 0.01))
+                            sym_min = (getattr(config, "VOLUME_MIN", None)
+                                       or getattr(sym, "volume_min", None) or sym_step)
+                            sym_max = (getattr(config, "VOLUME_MAX", None)
+                                       or getattr(sym, "volume_max", None))
+                            sizing = size_lots(
+                                balance=float(acc.balance),
+                                stop_price_distance=sl_dist,
+                                contract_size=float(getattr(config, "CONTRACT_SIZE", 100.0)),
+                                risk_pct=risk_pct,
+                                volume_step=sym_step,
+                                volume_min=sym_min,
+                                volume_max=sym_max,
+                            )
+                        if sizing is not None and sizing.lots is None:
+                            log_trade("ENTRY_SKIPPED", {
+                                "reason": f"risk_sizer:{sizing.reason}",
+                                "risk_pct": risk_pct,
+                                "stop_distance": round(sl_dist, 2),
+                                "risk_per_lot": round(sizing.risk_per_lot_usd, 2),
                             })
                         else:
-                            comment = res.comment if res else "No response"
-                            log_trade("ENTRY_FAILED", {"reason": comment})
+                            if sizing is not None:
+                                volume = sizing.lots
+                                log_system("INFO",
+                                    f"[LIVE] Sized {volume} lots at RISK_PCT={risk_pct:g}% "
+                                    f"(budget ${sizing.risk_usd:.2f}, "
+                                    f"actual ${sizing.actual_risk_usd:.2f})")
+                            res = bridge.open_trade(signal, sl_dist, tp_dist, volume=volume)
+
+                            if res and res.retcode == bridge.mt5.TRADE_RETCODE_DONE:
+                                log_trade("ENTRY", {
+                                    "side": signal,
+                                    "ticket": res.order,
+                                    "volume": volume,
+                                    "sl_dist": round(sl_dist, 2),
+                                    "tp_dist": round(tp_dist, 2)
+                                })
+                            else:
+                                comment = res.comment if res else "No response"
+                                log_trade("ENTRY_FAILED", {"reason": comment})
 
                 consecutive_errors = 0
                 poll_paper_position(bridge, paper)
