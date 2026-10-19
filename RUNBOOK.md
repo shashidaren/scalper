@@ -22,13 +22,15 @@ touch /root/scalper/logs/KILL_SWITCH
 rm    /root/scalper/logs/KILL_SWITCH
 ```
 
-## Autosync (the cron path)
+## Autosync (the timer path)
 
 `tools/autosync.sh` publishes the paper state and deploys merged code behind a
 smoke gate. Full reference: [`docs/AUTOSYNC.md`](docs/AUTOSYNC.md).
 
 ```bash
-crontab -l | grep autosync                       # the cron line
+tools/autosync.sh --status                       # trigger, last run age, last digest
+systemctl list-timers scalper-autosync.timer     # NEXT / LAST
+crontab -l | grep -E '(autosync|deploy)\.sh'     # must be empty while the timer runs
 tail -60 logs/autosync.log                       # digests, one block per run
 tail -20 logs/smoke.log                          # only when a deploy was rolled back
 sudo -H /root/scalper/tools/autosync.sh          # force a run now
@@ -36,7 +38,7 @@ AUTOSYNC_PUBLISH_DATA=0 tools/autosync.sh        # deploy only, publish nothing
 AUTO_DEPLOY=0 tools/autosync.sh                  # publish only, deploy nothing
 ```
 
-What it does each run: commit `logs/{trades.jsonl,daily_stats.json,paper_account.json}`
+What it does each run: commit `logs/{ledger.jsonl,daily_stats.json,paper_account.json}`
 (+ `btc/logs/…`) as `data collection N` and push → merge `origin/main` if it
 advanced (data conflicts = server wins) → `tools/smoke_test.py` → roll back on
 failure → restart only the units that were active and whose runtime paths

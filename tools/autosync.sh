@@ -1,7 +1,10 @@
 #!/usr/bin/env bash
 # ==============================================================================
 # tools/autosync.sh — unattended data publish + safe auto-deploy for the scalper
-# Runs from cron (root). Full documentation: docs/AUTOSYNC.md
+# Runs from the systemd timer (or cron), as root. Full documentation: docs/AUTOSYNC.md
+#
+#   ./tools/autosync.sh --status   read-only health summary (exit 1 = attention)
+#   ./tools/autosync.sh --help     this text
 #
 # This is the scalper's port of gold-trading-bot's tools/autosync.sh. It keeps
 # the part the scalper already had right (deploy.sh's rule that a *dashboard* or
@@ -35,6 +38,7 @@
 #   SMOKE_GATE=1             0 = deploy without the smoke test (not advised)
 #   AUTOSYNC_PYTHON          interpreter for the checks (default: mt5env or python3)
 #   NOTIFY=always|quiet      quiet = no digest when nothing changed
+#   AUTOSYNC_STALE_MINUTES=45  --status: age at which the schedule is STALE
 # ==============================================================================
 set -uo pipefail
 
@@ -76,17 +80,136 @@ fi
 SERVICES=(scalper-bot scalper-dashboard scalper-btc-bot scalper-btc-dashboard)
 ENGINES=(scalper-bot scalper-btc-bot)
 
-mkdir -p "$LOG_DIR"
-
 log() {
     printf '%s %s\n' "$(date -u '+%Y-%m-%d %H:%M:%S')" "$*" | tee -a "$LOG_FILE"
 }
 
 usage() {
-    sed -n '2,45p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'
+    # Lines 2.. up to the closing '# ====' banner. A fixed line range leaked
+    # the variable assignments into --help once the header grew.
+    awk 'NR==1 {next}
+         /^# =+$/ {n++; if (n==1) next; exit}
+         {sub(/^# ?/, ""); print}' "${BASH_SOURCE[0]}"
 }
 
-if [ "${1:-}" = "--help" ] || [ "${1:-}" = "-h" ]; then usage; exit 0; fi
+# --------------------------------------------------------------------------- #
+# --status — read-only operator summary. Never takes the lock, never writes,
+# never fetches, never restarts anything. Exit 0 = OK, 1 = needs attention.
+#
+# The point is the first line: "OK (last run N min ago)" is the answer to "is
+# the 15-minute schedule actually firing?", and STALE means it is not.
+# --------------------------------------------------------------------------- #
+STATUS_STALE_MINUTES="${AUTOSYNC_STALE_MINUTES:-45}"
+
+status_report() {
+    local rc=0 now epoch="" stamp="" age age_min
+    local timer_active=0 cron_has=0
+    local detail head_line dirty behind units st svc tstate tenabled next_line
+
+    printf 'autosync status — %s (%s/%s)\n' "$REPO_DIR" "$REMOTE" "$BRANCH"
+    now=$(date -u +%s)
+
+    # 1. The trigger. Exactly one is correct: the systemd timer, or a cron
+    #    line, never both (two triggers = double deploys).
+    if command -v systemctl >/dev/null 2>&1 \
+       && systemctl cat scalper-autosync.timer >/dev/null 2>&1; then
+        tstate=$(systemctl is-active scalper-autosync.timer 2>/dev/null || true)
+        tenabled=$(systemctl is-enabled scalper-autosync.timer 2>/dev/null || true)
+        printf '  timer:     scalper-autosync.timer %s (%s)\n' \
+            "${tstate:-unknown}" "${tenabled:-unknown}"
+        [ "${tstate:-}" = "active" ] && timer_active=1
+        next_line=$(systemctl list-timers scalper-autosync.timer --no-pager 2>/dev/null \
+            | sed -n '2p' | sed 's/^[[:space:]]*//; s/[[:space:]]\{1,\}/ /g')
+        [ -n "$next_line" ] && printf '  schedule:  %s\n' "$next_line"
+    else
+        printf '  timer:     scalper-autosync.timer not installed\n'
+    fi
+    if command -v crontab >/dev/null 2>&1; then
+        local cron_lines
+        cron_lines=$(crontab -l 2>/dev/null \
+            | grep -E '(^|[[:space:]/])(autosync|deploy)\.sh' || true)
+        if [ -n "$cron_lines" ]; then
+            cron_has=1
+            printf '  cron:      %s\n' \
+                "$(printf '%s' "$cron_lines" | tr '\n' ';' | sed 's/;$//')"
+        fi
+    fi
+    if [ "$timer_active" = 1 ] && [ "$cron_has" = 1 ]; then
+        printf '  scheduler: TWO TRIGGERS (timer active + cron line) - remove one\n'
+        rc=1
+    elif [ "$timer_active" = 0 ] && [ "$cron_has" = 0 ]; then
+        printf '  scheduler: NONE active (no timer, no autosync cron line) - nothing will run\n'
+        rc=1
+    fi
+
+    # 2. Last completed run: the newest digest block in logs/autosync.log.
+    if [ -f "$LOG_FILE" ]; then
+        stamp=$(grep -a 'autosync digest ' "$LOG_FILE" 2>/dev/null | tail -n1 \
+            | sed -n 's/.*\([0-9]\{4\}-[0-9]\{2\}-[0-9]\{2\} [0-9]\{2\}:[0-9]\{2\}\).*/\1/p')
+        [ -n "$stamp" ] || stamp=$(tail -n1 "$LOG_FILE" 2>/dev/null \
+            | sed -n 's/^\([0-9]\{4\}-[0-9]\{2\}-[0-9]\{2\} [0-9]\{2\}:[0-9]\{2\}\).*/\1/p')
+        [ -n "$stamp" ] && epoch=$(date -u -d "$stamp UTC" +%s 2>/dev/null || true)
+    fi
+    if [ -z "$epoch" ]; then
+        printf '  last run:  NO RUN RECORDED in %s\n' "$LOG_FILE"
+        rc=1
+    else
+        age=$(( now - epoch )); [ "$age" -lt 0 ] && age=0
+        age_min=$(( age / 60 ))
+        if [ "$age_min" -gt "$STATUS_STALE_MINUTES" ]; then
+            printf '  last run:  STALE (last run %s min ago) — %s UTC\n' "$age_min" "$stamp"
+            printf '             no completed run for over %s min; check the timer and the log\n' \
+                "$STATUS_STALE_MINUTES"
+            rc=1
+        else
+            printf '  last run:  OK (last run %s min ago) — %s UTC\n' "$age_min" "$stamp"
+        fi
+    fi
+
+    # 3. The last digest, verbatim. A rollback or a failed push is attention.
+    if [ -f "$LOG_FILE" ]; then
+        detail=$(grep -aE '^  (data|deploy|integrity|freshness|books):' "$LOG_FILE" 2>/dev/null | tail -n5)
+        [ -n "$detail" ] && printf '%s\n' "$detail"
+        case "$(tail -n 15 "$LOG_FILE" 2>/dev/null || true)" in
+            *"ROLLED BACK"*|*"push: FAILED"*) rc=1 ;;
+        esac
+    fi
+
+    # 4. Repository state (read-only; no fetch).
+    if git -C "$REPO_DIR" rev-parse --git-dir >/dev/null 2>&1; then
+        head_line=$(git -C "$REPO_DIR" log -1 --format='%h %s' 2>/dev/null || true)
+        dirty=$(git -C "$REPO_DIR" status --porcelain --untracked-files=no 2>/dev/null \
+            | grep -vcE '^(..) (logs/|btc/logs/)' || true)
+        behind=$(git -C "$REPO_DIR" rev-list --count "HEAD..$REMOTE/$BRANCH" 2>/dev/null || true)
+        printf '  repo:      %s | dirty code: %s | behind %s/%s: %s\n' \
+            "${head_line:-unknown}" "${dirty:-0}" "$REMOTE" "$BRANCH" "${behind:-?}"
+        [ "${dirty:-0}" -gt 0 ] && rc=1
+    fi
+
+    # 5. Units (informational; a stopped unit is not an error by itself).
+    units=""
+    for svc in "${SERVICES[@]}"; do
+        st=$(systemctl is-active "$svc" 2>/dev/null || true)
+        units="${units}${units:+ | }${svc} ${st:-unknown}"
+    done
+    printf '  units:     %s\n' "$units"
+
+    if [ "$rc" = 0 ]; then printf '  result:    OK\n'; else printf '  result:    ATTENTION NEEDED\n'; fi
+    return "$rc"
+}
+
+case "${1:-}" in
+    --help|-h) usage; exit 0 ;;
+    --status)  status_report; exit $? ;;
+    "")        ;;
+    *)
+        printf 'autosync: unknown argument: %s\n' "$1" >&2
+        printf 'usage: %s [--status|--help]\n' "$0" >&2
+        exit 2
+        ;;
+esac
+
+mkdir -p "$LOG_DIR"
 
 # --------------------------------------------------------------------------- #
 # Interpreter: the box keeps its deps in mt5env/, and a bare `python3` there
