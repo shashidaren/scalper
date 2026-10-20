@@ -1,10 +1,10 @@
 {
-  "balance": 237.98,
-  "closed": 47,
-  "wins": 10,
+  "balance": 247.91,
+  "closed": 48,
+  "wins": 11,
   "losses": 37,
   "time_exits": 0,
   "position": null,
-  "ts": "2026-10-19T17:34:02Z",
+  "ts": "2026-10-20T01:07:01Z",
   "source": "paper_status_daily"
 }
