@@ -5,6 +5,9 @@ Ported from the gold-trading-bot repo's FORWARD_TEST approach:
   * breakeven ratchet (BE_TRIGGER_R): SL moves to entry once +<trigger>R
   * pessimistic exit resolution: if SL and TP are both touched in the
     same tick, the SL fill is assumed
+  * time-based exits (2026-10-23): the Friday weekend flat and the optional
+    MAX_HOLD_MINUTES cap, from risk_guard.due_exit, so paper and LIVE close on
+    the same clock (the paper book used to be the only place either rule ran)
   * closed trades update the daily stats, so the existing risk gates
     (max trades/day, daily loss limit) apply to paper trading too
 
@@ -27,6 +30,7 @@ from datetime import datetime
 from pathlib import Path
 
 import config
+import risk_guard
 from logger import LOG_DIR, log_system, log_trade, update_daily_pnl
 
 # Module-level default. Tests (btc/strategy_btc_test.py) patch this attribute,
@@ -103,6 +107,7 @@ class PaperAccount:
         self.wins = 0
         self.losses = 0
         self.time_exits = 0
+        self.weekend_exits = 0
         self.state_file = Path(state_file) if state_file is not None else Path(STATE_FILE)
         self._be_override = be_trigger_r
         self._max_hold_override = max_hold_minutes
@@ -165,6 +170,7 @@ class PaperAccount:
         self.wins = _int(data.get("wins", 0))
         self.losses = _int(data.get("losses", 0))
         self.time_exits = _int(data.get("time_exits", 0))
+        self.weekend_exits = _int(data.get("weekend_exits", 0))
 
     def save(self):
         """Atomic write: a crash mid-save cannot truncate the ledger."""
@@ -179,6 +185,8 @@ class PaperAccount:
                 "wins": self.wins,
                 "losses": self.losses,
                 "time_exits": self.time_exits,
+            "weekend_exits": self.weekend_exits,
+                "weekend_exits": self.weekend_exits,
                 "updated_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
             }, f, indent=2)
         tmp.replace(path)
@@ -186,7 +194,8 @@ class PaperAccount:
     def reset(self):
         self.balance = float(getattr(config, "SIM_START_BALANCE", 300.0))
         self.position = None
-        self.closed = self.wins = self.losses = self.time_exits = 0
+        self.closed = self.wins = self.losses = 0
+        self.time_exits = self.weekend_exits = 0
         self.save()
 
     # ------------------------------------------------ trading
@@ -244,17 +253,6 @@ class PaperAccount:
         diff = (exit_price - p["entry"]) if p["side"] == "BUY" else (p["entry"] - exit_price)
         return diff * p["volume"] * CONTRACT_SIZE
 
-    def _held_minutes(self, now=None):
-        """Minutes since the position was opened, or None if unparseable."""
-        p = self.position
-        if not p or not p.get("time"):
-            return None
-        try:
-            opened = datetime.strptime(p["time"], "%Y-%m-%d %H:%M:%S")
-        except (TypeError, ValueError):
-            return None
-        return ((now or datetime.now()) - opened).total_seconds() / 60.0
-
     def on_tick(self, bid, ask, now=None):
         """Resolve the open simulated position against live ticks.
 
@@ -298,12 +296,13 @@ class PaperAccount:
         if hit_tp:
             return self.close(p["tp"], "TP")
 
-        # Time stop last, so a simultaneous price exit always wins.
-        max_hold = self._max_hold()
-        if max_hold and max_hold > 0:
-            held = self._held_minutes(now)
-            if held is not None and held >= max_hold:
-                return self.close(exit_price, "TIME")
+        # Time-based exits last, so a simultaneous price exit always wins.
+        # Both rules come from risk_guard so paper and LIVE cannot drift apart
+        # (the Friday flat used to exist on neither, the hold cap on paper only).
+        due = risk_guard.due_exit(p.get("time"), now or datetime.now(),
+                                  max_hold_minutes=self._max_hold())
+        if due in ("WEEKEND", "TIME"):
+            return self.close(exit_price, due)
         return None
 
     def close(self, exit_price, reason):
@@ -334,6 +333,15 @@ class PaperAccount:
             # Neutral bucket (gold's convention): own counter, P&L-signed into
             # the balance, excluded from the win/loss tally.
             self.time_exits += 1
+        elif reason == "WEEKEND":
+            # A real market close at a rule-defined time, so it counts in the
+            # win/loss tally like any other exit; the counter is for visibility
+            # (and for comparing against the replay's own weekend rule).
+            self.weekend_exits += 1
+            if is_win:
+                self.wins += 1
+            else:
+                self.losses += 1
         elif is_win:
             self.wins += 1
         else:

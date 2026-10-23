@@ -44,6 +44,11 @@ if config is None or Path(getattr(config, "__file__", "")).resolve() != expected
     config = _instance.activate(str(HERE))
 _instance.add_engine_path(str(ROOT))
 
+# Not about the clock: keep the Friday weekend flat out of these cases so the
+# suite behaves the same on a Tuesday and a Saturday (btc/config.py has no
+# WEEKEND_FLAT_* key, so the engine default would otherwise apply).
+config.WEEKEND_FLAT_ENABLED = False
+
 import breakout_screen as bs  # noqa: E402  (btc/ is on sys.path)
 import research.strategy_sweep as sweep  # noqa: E402
 import strategy as strategy_mod  # noqa: E402

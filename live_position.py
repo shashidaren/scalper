@@ -15,7 +15,13 @@ wired wrongly.
    pre-trade tick. Missing/drifted stops are re-sent via `TRADE_ACTION_SLTP`;
    a stop that still cannot be attached is closed (default) or alerted.
 
-2. **Breakeven ratchet.** The validated 255-trade shape takes 43 of its exits
+2. **Clock exits.** The Friday weekend flat and the optional hold cap
+   (`risk_guard.due_exit`) are enforced here for LIVE, closing at market. Until
+   2026-10-23 the hold cap ran on the paper book only and the weekend rule ran
+   nowhere, so a live position could sit through a gap the backtest cannot
+   model (largest in the file: 12.2x ATR).
+
+3. **Breakeven ratchet.** The validated 255-trade shape takes 43 of its exits
    (16.9%) from BE at 1.5R, but the ratchet only ever existed in `paper.py` -
    a LIVE book without it runs an exit engine that was never forward tested.
    This applies the same rule through `TRADE_ACTION_SLTP`.
@@ -49,6 +55,7 @@ from pathlib import Path
 
 import config
 import logger
+import risk_guard
 
 STATE_NAME = "live_positions.json"
 
@@ -81,6 +88,7 @@ def _norm_position(p):
             "tp": float(p.get("tp") or 0.0),
             "profit": float(p.get("profit") or 0.0),
             "magic": int(p.get("magic", config.MAGIC_NUMBER)),
+            "time": p.get("time"),
         }
     try:
         ptype = int(getattr(p, "type", 1))
@@ -95,6 +103,7 @@ def _norm_position(p):
         "tp": float(getattr(p, "tp", 0.0) or 0.0),
         "profit": float(getattr(p, "profit", 0.0) or 0.0),
         "magic": int(getattr(p, "magic", config.MAGIC_NUMBER) or 0),
+        "time": getattr(p, "time", None),   # epoch seconds, MT5 server clock
     }
 
 
@@ -333,6 +342,26 @@ class LivePositionGuard:
                       f"[LIVE-GUARD] CRITICAL ticket {pos['ticket']}: {why} - alert only "
                       f"(LIVE_NAKED_POSITION_ACTION=alert). UNPROTECTED POSITION - act manually now.")
 
+    def _flat_close(self, pos, reason):
+        """Close a position because the clock says so (weekend flat / hold cap).
+
+        Returns True when the position is gone (or the broker says it cannot be
+        found), so the caller stops tracking it.
+        """
+        ok, detail = self._emergency_close(pos)
+        if ok:
+            self._log("INFO",
+                      f"[LIVE-GUARD] ticket {pos['ticket']}: closed at market ({reason}) "
+                      f"({detail})")
+            return True
+        key = ("flat_fail", int(pos["ticket"]))
+        level = "WARNING" if key in self._warned else "ERROR"
+        self._warned.add(key)
+        self._log(level,
+                  f"[LIVE-GUARD] ticket {pos['ticket']}: {reason} close FAILED ({detail}) - "
+                  f"will retry on the next loop")
+        return False
+
     def _ensure_stops(self, pos, want_sl, want_tp, sym=None):
         """Make the position carry `want_sl`/`want_tp`. Returns (pos, status).
 
@@ -480,11 +509,13 @@ class LivePositionGuard:
         self._save()
         return {"status": status, "ticket": pos["ticket"], "sl": pos["sl"], "tp": pos["tp"]}
 
-    def manage(self, positions, tick, sym=None):
-        """Per-loop housekeeping on open positions: prunes, stop re-checks, BE.
+    def manage(self, positions, tick, sym=None, now=None):
+        """Per-loop housekeeping on open positions: prunes, clock exits, BE.
 
         Safe to call when flat (it just prunes), and safe to call with the
-        bridge's raw objects or run.py's dicts.
+        bridge's raw objects or run.py's dicts. `now` exists so tests can pin
+        the clock: the weekend flat depends on the wall clock, and a suite that
+        only passes on a Tuesday is not a suite.
         """
         if not self.enabled or self.bridge is None:
             return {"armed": [], "repaired": []}
@@ -502,6 +533,17 @@ class LivePositionGuard:
 
         for ticket, pos in live.items():
             state = self.tracked.get(str(ticket))
+
+            # Time-based exits first (risk_guard): the Friday weekend flat and
+            # the optional hold cap. Both are clock rules, so a restart cannot
+            # postpone them, and both run the same code as the paper book.
+            due = risk_guard.due_exit(pos.get("time") or (state or {}).get("opened_at"),
+                                      now)
+            if due:
+                if self._flat_close(pos, due):
+                    self.tracked.pop(str(ticket), None)
+                    dirty = True
+                continue
 
             # A stop can also disappear mid-trade (broker edit, margin event).
             if not _positive(pos["sl"]):

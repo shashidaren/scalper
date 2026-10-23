@@ -24,7 +24,12 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
+import config  # noqa: E402
 import paper  # noqa: E402
+
+# Not about the clock: keep the Friday weekend flat out of these cases so the
+# suite behaves the same on a Tuesday and a Saturday.
+config.WEEKEND_FLAT_ENABLED = False
 
 RESULTS = []
 

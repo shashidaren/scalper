@@ -22,6 +22,11 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 import config  # noqa: E402
+
+# Not about the clock: this test replays fixed tick windows, so keep the Friday
+# weekend flat out of it and the results identical on any day of the week.
+config.WEEKEND_FLAT_ENABLED = False
+
 import logger  # noqa: E402
 import paper as paper_mod  # noqa: E402
 import run as run_mod  # noqa: E402

@@ -201,12 +201,14 @@ version is a config-only change to the paper book (`BE_TRIGGER_R = None`), which
 costs nothing but restarts the "stable config" clock — worth it, because a
 forward record for a config that cannot be traded is worth nothing.
 
-**D. Add the risk controls that pay regardless of edge:** post-fill SL
-verification (4.2), Friday 20:00 UTC flat + `MAX_HOLD_MINUTES` 360–480 (4.3),
-an equity floor kill switch (e.g. −20% from start), and a min-account-size rule.
-A 6h time exit is roughly P&L-neutral in the sweep (TRAIN +$208 vs +$286, OOS
-+$238 vs +$171) — it is bought as tail insurance, not as alpha, and should be
-described that way.
+**D. Add the risk controls that pay regardless of edge** — *done 2026-10-23,
+see `risk_controls_2026-10-23.md`*. Post-fill SL verification (§4.2) shipped
+first; the Friday 20:00 UTC flat is on (measured +$5.46, and it removes a
+12.2×ATR tail); the hold cap measured as noise (4h −$31 … 12h +$115, not
+monotone) and stays off; the equity floor shipped as a **latched 50%**
+backstop, because every floor tight enough to matter (10–30%) halted the paper
+book before it recovered. The −20% floor originally proposed here would have
+cost $61 on the paper book.
 
 **E. Watch the short side, do not touch it.** Paper book: BUY 4 wins / 29
 (−$93.06, mean R −0.41) vs SELL 11 / 31 (+$87.41, +0.34R). Two-sided Fisher
@@ -237,9 +239,17 @@ still < −0.25R and a one-sided test is < 0.05.*
 
 §4.1, §4.2 and §4.5 are now implemented and unit-tested in `LIVE` only —
 `live_position.py` + two new bridge primitives. See
-[`live_protection_2026-10-23.md`](live_protection_2026-10-23.md). §4.3
-(weekend/hold cap), §4.4 (equity floor) and the ATR floor in §5-A are still
-open, so the verdict in §1 is unchanged: **no-go for LIVE**.
+[`live_protection_2026-10-23.md`](live_protection_2026-10-23.md).
+
+§4.3 and §4.4 followed the same day: the Friday weekend flat is **on** (measured
+at +$5.46 over 255 trades against a 12.2×ATR gap tail), the hold cap stays off
+as noise, and the equity floor is a latched 50% backstop because no floor
+tight enough to matter survives a $300 account. See
+[`risk_controls_2026-10-23.md`](risk_controls_2026-10-23.md).
+
+The ATR floor in §5-A is still unadopted, no live account exists at the
+recommended size, and the demo execution drill has not been run — so the verdict
+in §1 is unchanged: **no-go for LIVE**.
 
 ## 8. Bottom line
 

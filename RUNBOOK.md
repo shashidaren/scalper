@@ -36,6 +36,27 @@ ratchet fires once at `BE_TRIGGER_R` (1.5R). Lines to act on:
 Disable without touching the engine: `LIVE_PROTECT_ENABLED = False` in
 `config.py` (stops being managed, nothing is undone).
 
+## Risk controls (weekend flat, equity floor)
+
+Both live in `risk_guard.py`; the measurements are in
+`docs/risk_controls_2026-10-23.md`.
+
+```bash
+python3 risk_guard.py                 # floor status: start, peak, floor, halted_at
+python3 risk_guard.py --reset         # clear a latched floor (deliberate action)
+cat logs/equity_floor.json
+grep -E 'RISK|weekend flat|closed at market' logs/system.jsonl | tail -20
+```
+
+- **Weekend flat** — open positions are closed at market from Friday 20:00 UTC;
+  no entries until Monday 00:00 UTC. A `[LIVE-GUARD] ... closed at market
+  (WEEKEND)` or a paper `SIM_EXIT reason=WEEKEND` line is this rule working.
+- **Equity floor** — `[RISK] EQUITY FLOOR HIT` latches: new entries stop, open
+  positions keep their stops, and the engine keeps managing them. It does not
+  un-latch on a bounce; reset it deliberately once you know why it fired.
+- **Hold cap** — `MAX_HOLD_MINUTES = 0` (off). Measured as noise; the weekend
+  rule already bounds the worst hold at ~72h.
+
 ## Kill switch
 
 Stops new entries only. Open positions keep their broker SL/TP. The LIVE guard

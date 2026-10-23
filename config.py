@@ -22,15 +22,42 @@ SIM_START_BALANCE = 300.0   # dummy balance to emulate with
 # the plateau (some protection, no reliable loss). Re-tune after more data.
 BE_TRIGGER_R = 1.5
 
-# Time stop (opt-in, default OFF). Close any open paper trade at market once it
+# Time stop (opt-in, default OFF). Close any open position at market once it
 # has been held this many minutes, reason "TIME" (neutral bucket: own counter,
 # P&L-signed into the balance, excluded from the win/loss tally). Ported from
 # gold-trading-bot, where MAX_HOLD_MINUTES=240 closed exactly one trade in its
 # first 14 days - but that one trade had ridden a 49-hour weekend gap, which is
-# the case this guards against. 0 disables it, so the current gold book is
-# byte-for-byte unchanged until an explicit decision to enable it.
-# Paper path only: the LIVE path leaves the exit to the broker-side SL/TP.
+# the case WEEKEND_FLAT_* below now handles directly.
+# 0 disables it, so the book is unchanged until an explicit decision to enable.
 MAX_HOLD_MINUTES = 0
+
+# --- Time-based exits and the equity floor (2026-10-23) ---
+# Risk controls, not alpha. Measured first: research/risk_measure.py, write-up
+# docs/risk_controls_2026-10-23.md. Consumers: risk_guard.py (all of the logic),
+# paper.PaperAccount.on_tick (paper exits), live_position.manage (LIVE exits).
+#
+# WEEKEND FLAT. Gold trades ~24/5: a Thursday/Friday entry can sit through the
+# Friday close and re-open Sunday at a different price. The M5 file has 15 gaps
+# > 2h, the largest 12.2x ATR, and the backtester fills a stop AT the stop, not
+# through it - so gap risk is invisible in every P&L number in this repo.
+# Measured cost of closing at the Friday 20:00 UTC boundary: +$5.46 over 255
+# trades (9 held, 6 losses avoided, 3 winners cut early). i.e. free insurance.
+# Applies to paper AND live so the forward test measures the live engine.
+WEEKEND_FLAT_ENABLED = True
+WEEKEND_FLAT_HOUR_UTC = 20        # Friday; the window runs to Monday 00:00 UTC
+
+# EQUITY FLOOR. Latched kill switch on total account loss, measured on equity
+# (floating P&L included). Sizing rule: set it BEYOND the worst drawdown the
+# book has actually produced, or it will halt a book that recovers - at $300
+# the observed drawdown is $104 (35%), so a 20% floor would have stopped the
+# paper book at trade 18 ($232.94) before it finished at $294.35. 50% of start
+# never binds in the backtest or in the paper book; it is a backstop against a
+# bug or a black swan, NOT a drawdown control. The real control is account size
+# (>= ~$1,000 for a 20-25% floor to be affordable). Mode "start" or "peak":
+# "peak" trails the high-water mark and tightens as the account grows.
+EQUITY_FLOOR_ENABLED = True
+EQUITY_FLOOR_MODE = "start"
+EQUITY_FLOOR_PCT = 50.0
 
 # Position sizing (testing size)
 LOT_SIZE = 0.01

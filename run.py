@@ -12,6 +12,7 @@ from logger import (
 from spread_gate import SpreadGateMonitor
 from risk_sizer import size_lots
 from live_position import LivePositionGuard
+import risk_guard
 try:
     from portfolio import portfolio_blocked
 except Exception:
@@ -182,6 +183,22 @@ def main():
             f"stop verification {'on' if guard.enabled else 'OFF'}, "
             f"BE ratchet {be_note}")
 
+    # Account-level guards (risk_guard): a latched total-loss floor and the
+    # Friday weekend flat. Both are inert in FORWARD_TEST only in the sense
+    # that they never fire there in practice - the floor is far below the
+    # observed drawdown and the paper book has no gaps to protect against -
+    # so the paper book runs the same rules as LIVE would.
+    equity_floor = risk_guard.EquityFloor()
+    log_system("INFO",
+        f"Equity floor: {'on' if equity_floor.enabled else 'OFF'} "
+        f"({equity_floor.pct:g}% of {equity_floor.mode}"
+        + (f", reference ${equity_floor.start:.2f}" if equity_floor.start else "")
+        + ") | weekend flat: "
+        + ("on" if risk_guard.weekend_flat_enabled() else "OFF")
+        + f" (Fri {getattr(config, 'WEEKEND_FLAT_HOUR_UTC', 20):02d}:00 UTC)"
+        + f" | hold cap: {risk_guard.hold_limit_minutes():g} min"
+        + ("" if risk_guard.hold_limit_minutes() else " (off)"))
+
     consecutive_errors = 0
     connect_failures = 0
     reconnect_count = 0
@@ -191,6 +208,8 @@ def main():
     stale_tick_cycles = 0
     last_tick_msc = None
     kill_switch_active = False
+    floor_blocked_prev = None
+    weekend_blocked_prev = None
 
     # Bar-close exit bookkeeping for strategies with BAR_CLOSE_EXITS (the
     # donchian shape's channel/time exits; gold's ScalpStrategy has none of
@@ -436,6 +455,16 @@ def main():
                     f"Uptime: {uptime}s | Reconnects: {reconnect_count}"
                 )
 
+                # Equity floor (latched). Measured on EQUITY - floating P&L
+                # counts - and only ever blocks NEW entries: open positions
+                # keep their broker-side stops and the LIVE guard.
+                floor_blocked, floor_reason = False, ""
+                if equity_floor is not None:
+                    try:
+                        floor_blocked, floor_reason = equity_floor.blocked(disp_equity)
+                    except Exception as e:
+                        log_system("WARNING", f"[RISK] equity floor check failed: {e}")
+
                 # Kill switch: disable NEW entries without stopping the engine.
                 # Open positions keep their broker-side SL/TP. Log once per
                 # state change so the trades log isn't spammed every 15s.
@@ -479,6 +508,28 @@ def main():
                 if kill_active:
                     time.sleep(config.CHECK_INTERVAL_SECONDS)
                     continue
+
+                if floor_blocked:
+                    if floor_blocked_prev is not True:
+                        log_system("WARNING",
+                            f"[RISK] new entries BLOCKED: {floor_reason}. Open positions keep "
+                            f"their stops. Reset: python risk_guard.py --reset")
+                    floor_blocked_prev = True
+                    time.sleep(config.CHECK_INTERVAL_SECONDS)
+                    continue
+                floor_blocked_prev = False
+
+                # The session filter already ends at 20:00 UTC, so this is the
+                # belt to that braces: no entry may be opened into the weekend.
+                if risk_guard.weekend_flat_enabled() and risk_guard.in_weekend_window():
+                    if weekend_blocked_prev is not True:
+                        log_system("INFO",
+                            "[RISK] weekend flat window - no new entries until Monday "
+                            "00:00 UTC (open positions are closed at market)")
+                    weekend_blocked_prev = True
+                    time.sleep(config.CHECK_INTERVAL_SECONDS)
+                    continue
+                weekend_blocked_prev = False
 
                 # Spread filter (identical rule to before, but the decision is
                 # recorded by the monitor so an impossible gate is visible)

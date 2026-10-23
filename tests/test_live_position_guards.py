@@ -29,6 +29,7 @@ import json
 import sys
 import tempfile
 from contextlib import contextmanager
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -159,6 +160,8 @@ class FakeBridge:
         return rc in rc_ok, rc, "ok"
 
     def close_position(self, ticket, comment="test"):
+        if getattr(self, "fail_close", False):
+            return False, "retcode=10009 rejected"
         self.mt5.closes.append({"position": int(ticket), "comment": comment})
         self.mt5.positions.pop(int(ticket), None)
         return True, "closed"
@@ -209,7 +212,11 @@ def guard_for(tmp, bridge, logs=None, name="live_positions.json"):
     return g, logs
 
 
+# WEEKEND_FLAT_ENABLED off by default here: these cases are about stops, and a
+# suite that changes behaviour every Friday at 20:00 UTC would fail the deploy
+# gate on Saturdays. The clock rules get their own section with a pinned `now`.
 BASE_CFG = dict(TRADING_MODE="LIVE", LIVE_PROTECT_ENABLED=True,
+                WEEKEND_FLAT_ENABLED=False, MAX_HOLD_MINUTES=0,
                 LIVE_STOP_VERIFY_ATTEMPTS=3, LIVE_STOP_VERIFY_SLEEP_SECONDS=0.0,
                 LIVE_STOP_TOLERANCE_POINTS=5, LIVE_NAKED_POSITION_ACTION="close",
                 LIVE_BE_ENABLED=True, LIVE_BE_TRIGGER_R=None, BE_TRIGGER_R=1.5,
@@ -611,6 +618,72 @@ def main() -> int:
     check("no-TP intent is 0.0 (MT5's none)", tp == 0.0)
     sl, tp = live_position.intended_stops("BUY", 0.0, 8.0, 20.0, 2)
     check("zero entry has no intent", (sl, tp) == (None, None))
+
+    # ------------------------------------------------------- clock exits
+    # Pinned `now`: the weekend flat is a wall-clock rule, so these cases must
+    # not depend on which day the suite happens to run.
+    print("clock exits (LIVE)")
+    FRI = datetime(2026, 10, 23, 20, 5, tzinfo=timezone.utc)
+    WED = datetime(2026, 10, 21, 12, 0, tzinfo=timezone.utc)
+
+    mt5 = FakeMT5()
+    br = FakeBridge(mt5)
+    with cfg(**dict(BASE_CFG, WEEKEND_FLAT_ENABLED=True)):
+        g, logs = guard_for(tmp, br, name="clk_weekend.json")
+        mt5.positions[TICKET] = Pos(entry=4000.0, sl=3992.0, tp=4020.0)
+        mt5.positions[TICKET].time = int(
+            datetime(2026, 10, 23, 10, 0, tzinfo=timezone.utc).timestamp())
+        g.on_fill(Resp(10009, order=TICKET), "BUY", 8.0, 20.0, 0.01)
+        res = g.manage(list(mt5.positions.values()), Tick(), now=FRI)
+        check("LIVE closes at market at the Friday boundary", len(mt5.closes) == 1)
+        check("the clock close names the reason",
+              any("closed at market (WEEKEND)" in m for lv, m in logs))
+        check("a clock-closed ticket is dropped from state",
+              str(TICKET) not in g.tracked)
+
+        # Same position, ten minutes earlier: nothing happens.
+        mt5 = FakeMT5()
+        br = FakeBridge(mt5)
+        g, logs = guard_for(tmp, br, name="clk_before.json")
+        mt5.positions[TICKET] = Pos(entry=4000.0, sl=3992.0, tp=4020.0)
+        mt5.positions[TICKET].time = int(
+            datetime(2026, 10, 23, 10, 0, tzinfo=timezone.utc).timestamp())
+        g.on_fill(Resp(10009, order=TICKET), "BUY", 8.0, 20.0, 0.01)
+        g.manage(list(mt5.positions.values()), Tick(), now=FRI - timedelta(minutes=10))
+        check("nothing closes just before the boundary", not mt5.closes)
+        check("the position is still tracked", str(TICKET) in g.tracked)
+
+    mt5 = FakeMT5()
+    br = FakeBridge(mt5)
+    with cfg(**dict(BASE_CFG, MAX_HOLD_MINUTES=60)):
+        g, logs = guard_for(tmp, br, name="clk_hold.json")
+        mt5.positions[TICKET] = Pos(entry=4000.0, sl=3992.0, tp=4020.0)
+        mt5.positions[TICKET].time = int((WED - timedelta(hours=2)).timestamp())
+        g.on_fill(Resp(10009, order=TICKET), "BUY", 8.0, 20.0, 0.01)
+        g.manage(list(mt5.positions.values()), Tick(), now=WED)
+        check("LIVE enforces MAX_HOLD_MINUTES too", len(mt5.closes) == 1)
+        check("the hold close names the reason",
+              any("closed at market (TIME)" in m for lv, m in logs))
+
+    mt5 = FakeMT5()
+    br = FakeBridge(mt5)
+    br.fail_close = True
+    with cfg(**dict(BASE_CFG, WEEKEND_FLAT_ENABLED=True)):
+        g, logs = guard_for(tmp, br, name="clk_fail.json")
+        mt5.positions[TICKET] = Pos(entry=4000.0, sl=3992.0, tp=4020.0)
+        mt5.positions[TICKET].time = int(
+            datetime(2026, 10, 23, 10, 0, tzinfo=timezone.utc).timestamp())
+        g.on_fill(Resp(10009, order=TICKET), "BUY", 8.0, 20.0, 0.01)
+        g.manage(list(mt5.positions.values()), Tick(), now=FRI)
+        check("a rejected clock close keeps the position tracked",
+              str(TICKET) in g.tracked)
+        check("the failed close is reported",
+              any("close FAILED" in m for lv, m in logs))
+        n = len([1 for lv, m in logs if "close FAILED" in m])
+        g.manage(list(mt5.positions.values()), Tick(), now=FRI)
+        check("the retry is downgraded to WARNING (no log flood)",
+              len([1 for lv, m in logs if "close FAILED" in m]) == n + 1
+              and any(lv == "WARNING" and "close FAILED" in m for lv, m in logs))
 
     # ------------------------------------------------------------- wiring
     # The guard is only safe because run.py constructs it in the LIVE branch
