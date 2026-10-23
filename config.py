@@ -65,6 +65,35 @@ MAX_DAILY_LOSS = 30.0          # Stop trading for the day if daily PnL <= -$30
 MAX_TRADES_PER_DAY = 15        # Hard cap on number of trades per day
 MAX_CONSECUTIVE_LOSSES = 4     # Optional pause after X losses in a row
 
+# --- LIVE position protection (2026-10-23) ---
+# LIVE-only. In FORWARD_TEST these are inert (live_position.enabled refuses to
+# act), so the paper book is byte-for-byte unchanged. Write-up:
+# docs/live_readiness_review_2026-10-23.md §4.1, §4.2, §4.5.
+#
+# 1. Post-fill stop verification: after every LIVE fill the engine re-reads the
+#    position and proves a stop is attached at SL_ATR_MULT x ATR from the
+#    ACTUAL fill price (anchoring on the fill, not the pre-trade tick, is what
+#    keeps realized R equal to modelled R when the fill slips). A missing or
+#    drifted stop is re-sent via TRADE_ACTION_SLTP.
+# 2. Breakeven ratchet: the validated shape takes 16.9% of its exits from BE at
+#    1.5R, but that rule only ever existed in paper.py. LIVE now applies it
+#    through TRADE_ACTION_SLTP so the live exit engine matches the tested one.
+LIVE_PROTECT_ENABLED = True
+LIVE_STOP_VERIFY_ATTEMPTS = 3          # re-reads / re-sends after a fill
+LIVE_STOP_VERIFY_SLEEP_SECONDS = 1.0   # between those attempts
+LIVE_STOP_TOLERANCE_POINTS = 5         # broker may store the stop this close
+# What to do when a position exists with NO stop and the repair failed.
+# "close"  = market-close it (a naked position is unbounded risk; this is the
+#            deliberate default even though it can lock in a loss)
+# "alert"  = log CRITICAL and leave it to a human
+LIVE_NAKED_POSITION_ACTION = "close"
+LIVE_BE_ENABLED = True
+# None = inherit BE_TRIGGER_R (1.5R), which is the value the paper book and the
+# 255-trade backtest were measured at. 0 = no LIVE ratchet (verification still
+# runs). Deliberately NOT a separate default: two different BE triggers between
+# paper and live is exactly the mismatch this whole block exists to remove.
+LIVE_BE_TRIGGER_R = None
+
 # Loop timing
 CHECK_INTERVAL_SECONDS = 15    # How often the live loop checks for signals while flat
 POSITION_CHECK_INTERVAL_SECONDS = 1  # Faster tick poll (seconds) while a paper position is open

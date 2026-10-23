@@ -39,7 +39,7 @@ SKIP_DIRS = {".git", ".venv", "venv", "mt5env", "logs", "data",
 
 ENGINE_MODULES = [
     "config", "logger", "strategy", "paper", "spread_gate", "risk_sizer",
-    "portfolio", "live_ledger", "mt5_bridge", "run",
+    "portfolio", "live_ledger", "live_position", "mt5_bridge", "run",
 ]
 
 # (label, argv-relative-to-root, modules that must be importable)
@@ -47,6 +47,8 @@ SCRIPTS = [
     ("spread gate", ["tests/test_spread_gate.py"], []),
     ("risk sizer", ["tests/test_risk_sizer.py"], []),
     ("paper guards", ["tests/test_paper_guards.py"], []),
+    ("live position guards", ["tests/test_live_position_guards.py"], []),
+    ("mt5 SLTP primitives", ["tests/test_mt5_bridge_sltp.py"], []),
     ("repair tool", ["tests/test_repair_phantom_ledger.py"], []),
     ("check_data", ["tests/test_check_data.py"], []),
     ("ledger export", ["tests/test_ledger_export.py"], []),

@@ -11,6 +11,7 @@ from logger import (
 )
 from spread_gate import SpreadGateMonitor
 from risk_sizer import size_lots
+from live_position import LivePositionGuard
 try:
     from portfolio import portfolio_blocked
 except Exception:
@@ -160,6 +161,12 @@ def main():
 
     paper = None
     ledger = None
+    # LIVE-only position protection (docs/live_readiness_review_2026-10-23.md
+    # §4.1/§4.2): post-fill stop verification and the BE ratchet. Constructed
+    # only in LIVE, and the guard refuses to act outside TRADING_MODE=LIVE, so
+    # the paper path below is untouched. `bridge` is assigned after every
+    # (re)connect because the object is rebuilt by the recovery branch.
+    guard = None
     if config.TRADING_MODE == "FORWARD_TEST":
         paper = PaperAccount(**paper_kwargs)
         log_system("INFO",
@@ -167,7 +174,13 @@ def main():
             f"NO real orders will be sent")
     else:
         ledger = LiveLedger()
-        log_system("INFO", "TRADING MODE: LIVE - real orders WILL be sent")
+        guard = LivePositionGuard()
+        be_note = ("off" if not getattr(config, "LIVE_BE_ENABLED", True)
+                   else f"{guard.be_trigger_r:g}R")
+        log_system("INFO",
+            "TRADING MODE: LIVE - real orders WILL be sent | "
+            f"stop verification {'on' if guard.enabled else 'OFF'}, "
+            f"BE ratchet {be_note}")
 
     consecutive_errors = 0
     connect_failures = 0
@@ -226,6 +239,10 @@ def main():
                     last_tick_msc = None
                     reconnect_count += 1
                     connected_since = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                    if guard is not None:
+                        # The bridge is rebuilt on every reconnect; the guard
+                        # must talk to the live object, never a stale one.
+                        guard.bridge = bridge
                     log_system("INFO", f"Connected to MT5 (reconnect #{reconnect_count})")
                     update_connection_status(
                         connected=True,
@@ -339,6 +356,16 @@ def main():
                                 })
                 except Exception:
                     positions = []
+
+                # LIVE-only stop housekeeping (no-op in paper mode: guard is
+                # None there, and the paper ratchet lives in paper.on_tick).
+                # Re-verifies a stop that vanished mid-trade and ratchets to
+                # breakeven at BE_TRIGGER_R. Never allowed to break the loop.
+                if guard is not None:
+                    try:
+                        guard.manage(positions, tick, sym)
+                    except Exception as e:
+                        log_system("WARNING", f"[LIVE-GUARD] manage failed: {e}")
 
                 # A missing/zero `point` used to raise ZeroDivisionError inside
                 # the broad handler; fail the gate CLOSED instead of trading on
@@ -548,6 +575,26 @@ def main():
                                     "sl_dist": round(sl_dist, 2),
                                     "tp_dist": round(tp_dist, 2)
                                 })
+                                # A DONE retcode does not prove a stop is
+                                # attached. Prove it, repair it, or close it -
+                                # before the loop moves on (§4.2).
+                                if guard is not None:
+                                    try:
+                                        v = guard.on_fill(res, signal, sl_dist,
+                                                          tp_dist, volume, sym)
+                                        if v.get("status") in ("ok", "repaired"):
+                                            log_system("INFO",
+                                                f"[LIVE] stop verified on ticket {v.get('ticket')} "
+                                                f"(SL {v.get('sl')}, TP {v.get('tp')}) "
+                                                f"[{v.get('status')}]")
+                                        else:
+                                            log_system("ERROR",
+                                                f"[LIVE] stop NOT verified: {v.get('status')} - "
+                                                f"check ticket {v.get('ticket')} in MT5 now")
+                                    except Exception as e:
+                                        log_system("ERROR",
+                                            f"[LIVE-GUARD] verification raised ({e}) - the "
+                                            f"position may have NO stop; check MT5 now")
                             else:
                                 comment = res.comment if res else "No response"
                                 log_trade("ENTRY_FAILED", {"reason": comment})

@@ -233,7 +233,15 @@ still < −0.25R and a one-sided test is < 0.05.*
    review, and gold on its own account (the shared-account rule in `STATUS.md`
    still stands even for a Gold-only flip).
 
-## 7. Bottom line
+## 7. Implementation note (2026-10-23, later the same day)
+
+§4.1, §4.2 and §4.5 are now implemented and unit-tested in `LIVE` only —
+`live_position.py` + two new bridge primitives. See
+[`live_protection_2026-10-23.md`](live_protection_2026-10-23.md). §4.3
+(weekend/hold cap), §4.4 (equity floor) and the ATR floor in §5-A are still
+open, so the verdict in §1 is unchanged: **no-go for LIVE**.
+
+## 8. Bottom line
 
 Operationally ready, evidentially not. The code, the guards, the parity and the
 ops automation are in better shape than most live retail bots — the problem is
