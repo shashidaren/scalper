@@ -156,6 +156,19 @@ BE_TRIGGER_R = 1.5           # PLACEHOLDER
 # on a wall-clock rule that no BTC document has pre-registered.
 MAX_HOLD_MINUTES = 0
 
+# Weekend flat: DECIDED 2026-10-23 (user) - BTC flattens on weekends.
+# BTCUSD is 24/7, but weekend liquidity thins and gap risk is unmodelled,
+# so flatten Friday 20:00 UTC like gold (WEEKEND_FLAT_HOUR_UTC stays at the
+# risk_guard default of 20; gold sets the same hour explicitly in config.py).
+# This was already the effective behaviour: risk_guard.weekend_flat_enabled()
+# defaults to True when a config omits the key, and this file omitted it.
+# The line below makes the decision explicit so it is not read as an
+# inheritance bug. Evidence note: research/risk_measure.py measured this
+# rule on data/GOLD_M5.csv only, i.e. the BTC rule is a risk judgement, not a
+# measured BTC result. MAX_HOLD_MINUTES stays 0 above: measured as noise
+# on gold, never measured on BTC.
+WEEKEND_FLAT_ENABLED = True
+
 # %-risk sizing is LIVE-only and off by default. btc/run.py currently refuses
 # LIVE (HANDOFF gates it), so this stays 0 until a separate account exists.
 RISK_PCT = 0.0
