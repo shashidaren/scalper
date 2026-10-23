@@ -11,6 +11,8 @@ from logger import (
 )
 from spread_gate import SpreadGateMonitor
 from risk_sizer import size_lots
+from live_position import LivePositionGuard
+import risk_guard
 try:
     from portfolio import portfolio_blocked
 except Exception:
@@ -160,6 +162,12 @@ def main():
 
     paper = None
     ledger = None
+    # LIVE-only position protection (docs/live_readiness_review_2026-10-23.md
+    # §4.1/§4.2): post-fill stop verification and the BE ratchet. Constructed
+    # only in LIVE, and the guard refuses to act outside TRADING_MODE=LIVE, so
+    # the paper path below is untouched. `bridge` is assigned after every
+    # (re)connect because the object is rebuilt by the recovery branch.
+    guard = None
     if config.TRADING_MODE == "FORWARD_TEST":
         paper = PaperAccount(**paper_kwargs)
         log_system("INFO",
@@ -167,7 +175,29 @@ def main():
             f"NO real orders will be sent")
     else:
         ledger = LiveLedger()
-        log_system("INFO", "TRADING MODE: LIVE - real orders WILL be sent")
+        guard = LivePositionGuard()
+        be_note = ("off" if not getattr(config, "LIVE_BE_ENABLED", True)
+                   else f"{guard.be_trigger_r:g}R")
+        log_system("INFO",
+            "TRADING MODE: LIVE - real orders WILL be sent | "
+            f"stop verification {'on' if guard.enabled else 'OFF'}, "
+            f"BE ratchet {be_note}")
+
+    # Account-level guards (risk_guard): a latched total-loss floor and the
+    # Friday weekend flat. Both are inert in FORWARD_TEST only in the sense
+    # that they never fire there in practice - the floor is far below the
+    # observed drawdown and the paper book has no gaps to protect against -
+    # so the paper book runs the same rules as LIVE would.
+    equity_floor = risk_guard.EquityFloor()
+    log_system("INFO",
+        f"Equity floor: {'on' if equity_floor.enabled else 'OFF'} "
+        f"({equity_floor.pct:g}% of {equity_floor.mode}"
+        + (f", reference ${equity_floor.start:.2f}" if equity_floor.start else "")
+        + ") | weekend flat: "
+        + ("on" if risk_guard.weekend_flat_enabled() else "OFF")
+        + f" (Fri {getattr(config, 'WEEKEND_FLAT_HOUR_UTC', 20):02d}:00 UTC)"
+        + f" | hold cap: {risk_guard.hold_limit_minutes():g} min"
+        + ("" if risk_guard.hold_limit_minutes() else " (off)"))
 
     consecutive_errors = 0
     connect_failures = 0
@@ -178,6 +208,8 @@ def main():
     stale_tick_cycles = 0
     last_tick_msc = None
     kill_switch_active = False
+    floor_blocked_prev = None
+    weekend_blocked_prev = None
 
     # Bar-close exit bookkeeping for strategies with BAR_CLOSE_EXITS (the
     # donchian shape's channel/time exits; gold's ScalpStrategy has none of
@@ -226,6 +258,10 @@ def main():
                     last_tick_msc = None
                     reconnect_count += 1
                     connected_since = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                    if guard is not None:
+                        # The bridge is rebuilt on every reconnect; the guard
+                        # must talk to the live object, never a stale one.
+                        guard.bridge = bridge
                     log_system("INFO", f"Connected to MT5 (reconnect #{reconnect_count})")
                     update_connection_status(
                         connected=True,
@@ -340,6 +376,16 @@ def main():
                 except Exception:
                     positions = []
 
+                # LIVE-only stop housekeeping (no-op in paper mode: guard is
+                # None there, and the paper ratchet lives in paper.on_tick).
+                # Re-verifies a stop that vanished mid-trade and ratchets to
+                # breakeven at BE_TRIGGER_R. Never allowed to break the loop.
+                if guard is not None:
+                    try:
+                        guard.manage(positions, tick, sym)
+                    except Exception as e:
+                        log_system("WARNING", f"[LIVE-GUARD] manage failed: {e}")
+
                 # A missing/zero `point` used to raise ZeroDivisionError inside
                 # the broad handler; fail the gate CLOSED instead of trading on
                 # a spread we cannot measure.
@@ -409,6 +455,16 @@ def main():
                     f"Uptime: {uptime}s | Reconnects: {reconnect_count}"
                 )
 
+                # Equity floor (latched). Measured on EQUITY - floating P&L
+                # counts - and only ever blocks NEW entries: open positions
+                # keep their broker-side stops and the LIVE guard.
+                floor_blocked, floor_reason = False, ""
+                if equity_floor is not None:
+                    try:
+                        floor_blocked, floor_reason = equity_floor.blocked(disp_equity)
+                    except Exception as e:
+                        log_system("WARNING", f"[RISK] equity floor check failed: {e}")
+
                 # Kill switch: disable NEW entries without stopping the engine.
                 # Open positions keep their broker-side SL/TP. Log once per
                 # state change so the trades log isn't spammed every 15s.
@@ -452,6 +508,28 @@ def main():
                 if kill_active:
                     time.sleep(config.CHECK_INTERVAL_SECONDS)
                     continue
+
+                if floor_blocked:
+                    if floor_blocked_prev is not True:
+                        log_system("WARNING",
+                            f"[RISK] new entries BLOCKED: {floor_reason}. Open positions keep "
+                            f"their stops. Reset: python risk_guard.py --reset")
+                    floor_blocked_prev = True
+                    time.sleep(config.CHECK_INTERVAL_SECONDS)
+                    continue
+                floor_blocked_prev = False
+
+                # The session filter already ends at 20:00 UTC, so this is the
+                # belt to that braces: no entry may be opened into the weekend.
+                if risk_guard.weekend_flat_enabled() and risk_guard.in_weekend_window():
+                    if weekend_blocked_prev is not True:
+                        log_system("INFO",
+                            "[RISK] weekend flat window - no new entries until Monday "
+                            "00:00 UTC (open positions are closed at market)")
+                    weekend_blocked_prev = True
+                    time.sleep(config.CHECK_INTERVAL_SECONDS)
+                    continue
+                weekend_blocked_prev = False
 
                 # Spread filter (identical rule to before, but the decision is
                 # recorded by the monitor so an impossible gate is visible)
@@ -548,6 +626,26 @@ def main():
                                     "sl_dist": round(sl_dist, 2),
                                     "tp_dist": round(tp_dist, 2)
                                 })
+                                # A DONE retcode does not prove a stop is
+                                # attached. Prove it, repair it, or close it -
+                                # before the loop moves on (§4.2).
+                                if guard is not None:
+                                    try:
+                                        v = guard.on_fill(res, signal, sl_dist,
+                                                          tp_dist, volume, sym)
+                                        if v.get("status") in ("ok", "repaired"):
+                                            log_system("INFO",
+                                                f"[LIVE] stop verified on ticket {v.get('ticket')} "
+                                                f"(SL {v.get('sl')}, TP {v.get('tp')}) "
+                                                f"[{v.get('status')}]")
+                                        else:
+                                            log_system("ERROR",
+                                                f"[LIVE] stop NOT verified: {v.get('status')} - "
+                                                f"check ticket {v.get('ticket')} in MT5 now")
+                                    except Exception as e:
+                                        log_system("ERROR",
+                                            f"[LIVE-GUARD] verification raised ({e}) - the "
+                                            f"position may have NO stop; check MT5 now")
                             else:
                                 comment = res.comment if res else "No response"
                                 log_trade("ENTRY_FAILED", {"reason": comment})

@@ -13,9 +13,54 @@ cat btc/logs/live_status.json
 
 A missing `spread_gate` field in `live_status.json` means the running process predates the gate banner. That is a deploy-skew signal, not a strategy signal.
 
+## LIVE position protection
+
+LIVE only (`docs/live_protection_2026-10-23.md`). Inert in `FORWARD_TEST`.
+
+```bash
+cat logs/live_positions.json                          # tickets the guard protects
+grep LIVE-GUARD logs/system.jsonl | tail -20
+journalctl -u scalper-bot -n 50 --no-pager | grep -E 'LIVE-GUARD|stop verified'
+```
+
+Every fill is followed by a read-back that proves a stop is attached 2×ATR from
+the **actual** fill price; between fills, a lost stop is restored and the BE
+ratchet fires once at `BE_TRIGGER_R` (1.5R). Lines to act on:
+
+- `stop NOT verified: <status>` — the stop is not proven; check that ticket in MT5.
+- `EMERGENCY-CLOSED` — a naked position was closed (`LIVE_NAKED_POSITION_ACTION=close`).
+- `UNPROTECTED POSITION - act manually` — repair failed; close it by hand.
+- `never confirmed` / `unconfirmed` — repair accepted but the broker could not be
+  re-read; it was **not** closed. Verify in MT5.
+
+Disable without touching the engine: `LIVE_PROTECT_ENABLED = False` in
+`config.py` (stops being managed, nothing is undone).
+
+## Risk controls (weekend flat, equity floor)
+
+Both live in `risk_guard.py`; the measurements are in
+`docs/risk_controls_2026-10-23.md`.
+
+```bash
+python3 risk_guard.py                 # floor status: start, peak, floor, halted_at
+python3 risk_guard.py --reset         # clear a latched floor (deliberate action)
+cat logs/equity_floor.json
+grep -E 'RISK|weekend flat|closed at market' logs/system.jsonl | tail -20
+```
+
+- **Weekend flat** — open positions are closed at market from Friday 20:00 UTC;
+  no entries until Monday 00:00 UTC. A `[LIVE-GUARD] ... closed at market
+  (WEEKEND)` or a paper `SIM_EXIT reason=WEEKEND` line is this rule working.
+- **Equity floor** — `[RISK] EQUITY FLOOR HIT` latches: new entries stop, open
+  positions keep their stops, and the engine keeps managing them. It does not
+  un-latch on a bounce; reset it deliberately once you know why it fired.
+- **Hold cap** — `MAX_HOLD_MINUTES = 0` (off). Measured as noise; the weekend
+  rule already bounds the worst hold at ~72h.
+
 ## Kill switch
 
-Stops new entries only. Open positions keep their broker SL/TP.
+Stops new entries only. Open positions keep their broker SL/TP. The LIVE guard
+keeps protecting them (it is independent of the kill switch).
 
 ```bash
 touch /root/scalper/logs/KILL_SWITCH

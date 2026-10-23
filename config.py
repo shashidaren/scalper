@@ -22,15 +22,42 @@ SIM_START_BALANCE = 300.0   # dummy balance to emulate with
 # the plateau (some protection, no reliable loss). Re-tune after more data.
 BE_TRIGGER_R = 1.5
 
-# Time stop (opt-in, default OFF). Close any open paper trade at market once it
+# Time stop (opt-in, default OFF). Close any open position at market once it
 # has been held this many minutes, reason "TIME" (neutral bucket: own counter,
 # P&L-signed into the balance, excluded from the win/loss tally). Ported from
 # gold-trading-bot, where MAX_HOLD_MINUTES=240 closed exactly one trade in its
 # first 14 days - but that one trade had ridden a 49-hour weekend gap, which is
-# the case this guards against. 0 disables it, so the current gold book is
-# byte-for-byte unchanged until an explicit decision to enable it.
-# Paper path only: the LIVE path leaves the exit to the broker-side SL/TP.
+# the case WEEKEND_FLAT_* below now handles directly.
+# 0 disables it, so the book is unchanged until an explicit decision to enable.
 MAX_HOLD_MINUTES = 0
+
+# --- Time-based exits and the equity floor (2026-10-23) ---
+# Risk controls, not alpha. Measured first: research/risk_measure.py, write-up
+# docs/risk_controls_2026-10-23.md. Consumers: risk_guard.py (all of the logic),
+# paper.PaperAccount.on_tick (paper exits), live_position.manage (LIVE exits).
+#
+# WEEKEND FLAT. Gold trades ~24/5: a Thursday/Friday entry can sit through the
+# Friday close and re-open Sunday at a different price. The M5 file has 15 gaps
+# > 2h, the largest 12.2x ATR, and the backtester fills a stop AT the stop, not
+# through it - so gap risk is invisible in every P&L number in this repo.
+# Measured cost of closing at the Friday 20:00 UTC boundary: +$5.46 over 255
+# trades (9 held, 6 losses avoided, 3 winners cut early). i.e. free insurance.
+# Applies to paper AND live so the forward test measures the live engine.
+WEEKEND_FLAT_ENABLED = True
+WEEKEND_FLAT_HOUR_UTC = 20        # Friday; the window runs to Monday 00:00 UTC
+
+# EQUITY FLOOR. Latched kill switch on total account loss, measured on equity
+# (floating P&L included). Sizing rule: set it BEYOND the worst drawdown the
+# book has actually produced, or it will halt a book that recovers - at $300
+# the observed drawdown is $104 (35%), so a 20% floor would have stopped the
+# paper book at trade 18 ($232.94) before it finished at $294.35. 50% of start
+# never binds in the backtest or in the paper book; it is a backstop against a
+# bug or a black swan, NOT a drawdown control. The real control is account size
+# (>= ~$1,000 for a 20-25% floor to be affordable). Mode "start" or "peak":
+# "peak" trails the high-water mark and tightens as the account grows.
+EQUITY_FLOOR_ENABLED = True
+EQUITY_FLOOR_MODE = "start"
+EQUITY_FLOOR_PCT = 50.0
 
 # Position sizing (testing size)
 LOT_SIZE = 0.01
@@ -64,6 +91,35 @@ SPREAD_COST_PRICE = 0.45
 MAX_DAILY_LOSS = 30.0          # Stop trading for the day if daily PnL <= -$30
 MAX_TRADES_PER_DAY = 15        # Hard cap on number of trades per day
 MAX_CONSECUTIVE_LOSSES = 4     # Optional pause after X losses in a row
+
+# --- LIVE position protection (2026-10-23) ---
+# LIVE-only. In FORWARD_TEST these are inert (live_position.enabled refuses to
+# act), so the paper book is byte-for-byte unchanged. Write-up:
+# docs/live_readiness_review_2026-10-23.md §4.1, §4.2, §4.5.
+#
+# 1. Post-fill stop verification: after every LIVE fill the engine re-reads the
+#    position and proves a stop is attached at SL_ATR_MULT x ATR from the
+#    ACTUAL fill price (anchoring on the fill, not the pre-trade tick, is what
+#    keeps realized R equal to modelled R when the fill slips). A missing or
+#    drifted stop is re-sent via TRADE_ACTION_SLTP.
+# 2. Breakeven ratchet: the validated shape takes 16.9% of its exits from BE at
+#    1.5R, but that rule only ever existed in paper.py. LIVE now applies it
+#    through TRADE_ACTION_SLTP so the live exit engine matches the tested one.
+LIVE_PROTECT_ENABLED = True
+LIVE_STOP_VERIFY_ATTEMPTS = 3          # re-reads / re-sends after a fill
+LIVE_STOP_VERIFY_SLEEP_SECONDS = 1.0   # between those attempts
+LIVE_STOP_TOLERANCE_POINTS = 5         # broker may store the stop this close
+# What to do when a position exists with NO stop and the repair failed.
+# "close"  = market-close it (a naked position is unbounded risk; this is the
+#            deliberate default even though it can lock in a loss)
+# "alert"  = log CRITICAL and leave it to a human
+LIVE_NAKED_POSITION_ACTION = "close"
+LIVE_BE_ENABLED = True
+# None = inherit BE_TRIGGER_R (1.5R), which is the value the paper book and the
+# 255-trade backtest were measured at. 0 = no LIVE ratchet (verification still
+# runs). Deliberately NOT a separate default: two different BE triggers between
+# paper and live is exactly the mismatch this whole block exists to remove.
+LIVE_BE_TRIGGER_R = None
 
 # Loop timing
 CHECK_INTERVAL_SECONDS = 15    # How often the live loop checks for signals while flat

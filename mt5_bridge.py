@@ -266,6 +266,130 @@ class MT5Bridge:
                         return True
             return False
 
+    def positions_get(self):
+        """Own-symbol positions, or **None** when the read itself failed.
+
+        None and [] are deliberately different: `live_position` must never
+        conclude "the position is gone" - and act on it - because a read
+        hiccup returned an empty list.
+
+        MT5's Python API is unhelpful here: `positions_get()` returns None
+        **both** when the book is flat and when the terminal cannot be read.
+        `last_error()` is the only discriminator - (1, 'Success') means the
+        call itself worked, so None is genuinely "no open positions".
+        """
+        with self._lock:
+            try:
+                res = self.mt5.positions_get(symbol=config.SYMBOL)
+            except Exception as e:
+                print(f"[WARN] positions_get failed: {e}")
+                return None
+            if res is not None:
+                return list(res)
+            try:
+                err = self.mt5.last_error()
+            except Exception:
+                err = None
+            try:
+                code = int(err[0]) if err else None
+            except (TypeError, ValueError, IndexError):
+                code = None
+            if code == 1:                       # (1, 'Success') -> flat book
+                return []
+            print(f"[WARN] positions_get returned None with last_error={err!r} - "
+                  f"treating it as an unreadable feed, not an empty book")
+            return None
+
+    def _ok_retcodes(self):
+        """Retcodes that mean "the request is now in force".
+
+        NO_CHANGES counts as success: re-sending the stop a position already
+        carries is a no-op, not a failure (the LIVE guard re-asserts stops).
+        """
+        out = set()
+        for name in ("TRADE_RETCODE_DONE", "TRADE_RETCODE_NO_CHANGES",
+                     "TRADE_RETCODE_DONE_PARTIAL"):
+            try:
+                out.add(int(getattr(self.mt5, name)))
+            except Exception:
+                continue
+        return out or {10009}
+
+    def modify_position_stops(self, ticket, sl, tp=None):
+        """Move an existing position's SL/TP (TRADE_ACTION_SLTP).
+
+        Returns (ok, retcode, comment). Used only by `live_position` (LIVE
+        only). **`tp` must be the position's current tp**: MT5 treats a zero
+        or omitted tp in a SLTP request as "remove the take-profit".
+        """
+        with self._lock:
+            try:
+                digits = int(self.get_symbol_info().digits)
+            except Exception:
+                digits = int(getattr(config, "PRICE_DIGITS", 2))
+            request = {
+                "action": self.mt5.TRADE_ACTION_SLTP,
+                "symbol": config.SYMBOL,
+                "position": int(ticket),
+                "sl": round(float(sl), digits),
+                "tp": round(float(tp or 0.0), digits),
+                "magic": config.MAGIC_NUMBER,
+                "comment": str(getattr(config, "ORDER_COMMENT", "Gold Scalper v7"))[:31],
+            }
+            try:
+                result = self.mt5.order_send(request)
+            except Exception as e:
+                return False, None, f"exception:{e}"
+            if result is None:
+                return False, None, "no_result"
+            retcode = int(getattr(result, "retcode", -1))
+            comment = str(getattr(result, "comment", "") or "")
+            return retcode in self._ok_retcodes(), retcode, comment
+
+    def close_position(self, ticket, comment="live-guard close"):
+        """Market-close one position immediately.
+
+        Only reachable from `live_position` when a stop cannot be attached to
+        an already-open position - i.e. the emergency path. Returns
+        (ok, detail); never raises.
+        """
+        with self._lock:
+            try:
+                res = self.mt5.positions_get(ticket=int(ticket))
+                pos = res[0] if res else None
+            except Exception as e:
+                return False, f"position read failed: {e}"
+            if pos is None:
+                return False, f"position {ticket} not found"
+            tick = self.get_live_tick(retries=2)
+            sym = self.get_symbol_info()
+            if not tick or not sym:
+                return False, "market data unavailable"
+            is_buy = int(getattr(pos, "type", 1)) == 0
+            price = tick.bid if is_buy else tick.ask
+            request = {
+                "action": self.mt5.TRADE_ACTION_DEAL,
+                "symbol": config.SYMBOL,
+                "volume": float(pos.volume),
+                "type": self.mt5.ORDER_TYPE_SELL if is_buy else self.mt5.ORDER_TYPE_BUY,
+                "position": int(ticket),
+                "price": float(price),
+                "deviation": 50,
+                "magic": config.MAGIC_NUMBER,
+                "comment": str(comment)[:31],
+                "type_time": self.mt5.ORDER_TIME_GTC,
+                "type_filling": self._filling_mode(sym),
+            }
+            try:
+                result = self.mt5.order_send(request)
+            except Exception as e:
+                return False, f"exception:{e}"
+            if result is None:
+                return False, "no_result"
+            retcode = int(getattr(result, "retcode", -1))
+            ok = retcode in self._ok_retcodes()
+            return ok, f"retcode={retcode} {getattr(result, 'comment', '')}"
+
     def _filling_mode(self, sym_info):
         """Pick an order filling mode the symbol actually supports.
 
