@@ -58,3 +58,41 @@ echo "Bars   : $BARS_ACTUAL"
 echo "Logged : $LOG"
 echo
 echo "Copy the hash + range into the active research plan before running any sweep."
+
+# --------------------------------------------------------------------------- #
+# The tree is now dirty, and that has consequences.
+#
+# $OUT is TRACKED (the `data/*.csv` ignore rule does not apply to a file git
+# already knows about). Overwriting it leaves `M data/GOLD_M5.csv`, which
+# autosync reads as "hand-edits on the server" and refuses to deploy - a
+# silent, permanent deploy freeze until someone cleans it up. It did exactly
+# that on 2026-10-24.
+#
+# Deliberately NOT auto-committed: a pull is a research input, and turning
+# every pull into a git commit is a bigger decision than this script should
+# make on its own. Just make the consequence impossible to miss.
+# --------------------------------------------------------------------------- #
+if git rev-parse --git-dir >/dev/null 2>&1; then
+  DIRTY="$(git status --porcelain -- "$OUT" 2>/dev/null || true)"
+  if [ -n "$DIRTY" ]; then
+    cat >&2 <<EOF
+
+⚠️  ACTION REQUIRED — this pull left a tracked file modified:
+      $DIRTY
+
+    autosync.sh treats a dirty tracked file as hand-edits and will SKIP every
+    deploy ("SKIPPED - local code edits detected on the server") until this is
+    resolved. It does not resolve itself.
+
+    Keep the new data (it becomes the pinned research window):
+        git add $OUT
+        git commit -m "data: GOLD M5 pull $START -> $END ($BARS_ACTUAL bars)"
+        # then re-pin btc/golden.py and add a STATUS.md changelog row
+
+    Or discard the pull and go back to the committed window:
+        git checkout -- $OUT
+
+    Check with:  tools/autosync.sh --status     (want "dirty code: 0")
+EOF
+  fi
+fi

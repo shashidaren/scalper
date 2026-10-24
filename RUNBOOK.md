@@ -66,9 +66,13 @@ cat logs/equity_floor.json
 grep -E 'RISK|weekend flat|closed at market' logs/system.jsonl | tail -20
 ```
 
-- **Weekend flat** — open positions are closed at market from Friday 20:00 UTC;
-  no entries until Monday 00:00 UTC. A `[LIVE-GUARD] ... closed at market
-  (WEEKEND)` or a paper `SIM_EXIT reason=WEEKEND` line is this rule working.
+- **Weekend flat** — **gold only** (BTC trades through the weekend, decided
+  2026-10-24). Gold's open positions are closed at market from Friday 20:00 UTC
+  and there are no entries until Monday 00:00 UTC. A `[LIVE-GUARD] ... closed
+  at market (WEEKEND)` or a paper `SIM_EXIT reason=WEEKEND` line is this rule
+  working. `WEEKEND_FLAT_ENABLED` is set exactly once in each config file; a
+  second assignment silently overrides the first (that was the 2026-10-23/24
+  bug).
 - **Equity floor** — `[RISK] EQUITY FLOOR HIT` latches: new entries stop, open
   positions keep their stops, and the engine keeps managing them. It does not
   un-latch on a bounce; reset it deliberately once you know why it fired.
@@ -183,6 +187,12 @@ bash tests/test_autosync.sh
 
 `tools/smoke_test.py` is what `autosync.sh` reads: exit 0 = deploy, non-zero =
 roll back. It must stay hermetic and fast.
+
+**A dirty tracked file is also a deploy freeze.** `SKIPPED - local code edits
+detected on the server` is not about other people's code — it fires on any
+modified tracked file, including data. `data/GOLD_M5.csv` is **tracked**, so a
+routine `tools/pull_gold_m5.sh` blocks every deploy until you either commit the
+pull or `git checkout -- data/GOLD_M5.csv`. The pull script now says so.
 
 **A red gate is a deploy freeze, and it does not announce itself.** After any
 `data/GOLD_M5.csv` pull, run the gate by hand before trusting the timer:
