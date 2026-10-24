@@ -12,7 +12,7 @@ Read these before touching the book.
 
 | | |
 |---|---|
-| [`docs/effectiveness_plan_2026-10-24.md`](docs/effectiveness_plan_2026-10-24.md) | **Current plan.** Pre-registered ATR-floor + TP-6.0 candidates. Data refresh required before any config change. |
+| [`docs/effectiveness_plan_2026-10-24.md`](docs/effectiveness_plan_2026-10-24.md) | **Closed.** Fresh OOS rejected TP 6.0 / ATR floor. Current geometry stays. Edge degraded on Jul–Oct 2026 window (257 / +$29 / PF 1.02). |
 | [`docs/live_readiness_review_2026-10-23.md`](docs/live_readiness_review_2026-10-23.md) | Live-readiness verdict: **no-go**. Why 100 paper trades cannot answer the question. Replacement gate. |
 | [`docs/live_protection_2026-10-23.md`](docs/live_protection_2026-10-23.md) | `live_position.py` — post-fill stop verification and the BE ratchet, LIVE only. |
 | [`docs/risk_controls_2026-10-23.md`](docs/risk_controls_2026-10-23.md) | `risk_guard.py` — Friday weekend flat (on), hold cap (off), latched equity floor. |
@@ -26,15 +26,13 @@ Two rules that were implicit and are now code:
   suite not about the clock must set `WEEKEND_FLAT_ENABLED = False`; clock cases
   inject `now`. `tools/smoke_test.py` runs on every autosync tick.
 
-`TRADING_MODE` is still `FORWARD_TEST`. Strategy parameters are unchanged:
-backtest still 255 trades / +$456.58 / PF 1.32, and `research/parity_test.py`
-still passes.
-
-**Next action (do this first):** refresh `GOLD_M5.csv` (pre-June + post-2026-09-11)
-and re-run the pre-registered candidates in
-`docs/effectiveness_plan_2026-10-24.md`. Do **not** edit `ATR_MIN` or
-`TP_ATR_MULT` until that cold-OOS pass completes.
+`TRADING_MODE` is still `FORWARD_TEST`. Strategy parameters are **unchanged**
+after the 2026-10-24 candidate pass. Do not edit `ATR_MIN` / `TP_ATR_MULT` /
+session / RSI from the failed candidates.
 
 Before any live decision: the demo execution drill in the readiness review
 (§6.3) has not been run — `live_position.py` has only ever been tested against
 a fake terminal.
+
+**Next research** needs a new pre-registered hypothesis, not another re-tune of
+the same RSI-pullback / EMA200 shape on overlapping data.

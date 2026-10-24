@@ -1,91 +1,108 @@
 # Gold effectiveness plan — 2026-10-24
 
-**Status.** Agreed. No runtime / strategy parameter changed in this commit.
-`TRADING_MODE` stays `FORWARD_TEST`. Backtest and paper book remain the
-255 / +$456.58 / PF 1.32 shape until a candidate survives cold OOS on **fresh**
-data.
+**Status. CLOSED for parameter changes.** Fresh-data candidate pass completed
+2026-10-24 on the box. **No strategy parameter adopted.** `TRADING_MODE` stays
+`FORWARD_TEST`. Current geometry remains in force for the paper book.
 
-**Source.** Review of `ARCHITECTURE.md`, `HANDOFF.md`, `STATUS.md`,
-`strategy.py`, `config.py`, `docs/loss_analysis_2026-10-02.md`, and
-`docs/live_readiness_review_2026-10-23.md`.
+**Source.** Review of architecture/handoff + `docs/loss_analysis_2026-10-02.md` +
+`docs/live_readiness_review_2026-10-23.md`, then a live re-pull and
+`strategy_sweep.py --candidates` / `backtest.py` / `loss_analysis.py` on the
+new file.
 
 ---
 
-## 1. Why change anything
+## 1. Why we looked
 
-- Edge is thin (~0.11R). The current launch gate ("100+ paper trades, PF > 1.2")
-  has ~2:1 discrimination only; ~330 trades are needed for 80% power.
-- `ATR_MIN = 0.50` is dead code (data ATR min ≈ 1.22). The bottom ATR quartile
-  of entries is the only losing bucket (−$60.85, PF 0.76); top quartile is
-  strongly profitable (PF 1.82).
-- Research file `data/GOLD_M5.csv` ends 2026-09-11 and has been inspected three
-  times. Any further split of it is not out-of-sample.
-- LIVE protection and risk controls (weekend flat, stop verify, BE ratchet,
-  equity floor) already shipped 2026-10-23. The remaining lever is **entry
-  quality / payoff shape**, not more exit plumbing.
+- Edge was thin (~0.11R on the spent research file). Launch gate underpowered.
+- `ATR_MIN = 0.50` was dead code on the old file; bottom ATR quartile had been
+  the only losing bucket.
+- Research file ending 2026-09-11 was spent (inspected three times).
+- LIVE protection and risk controls already shipped 2026-10-23.
 
-## 2. Pre-registered candidates (do not adopt until cold OOS on fresh data)
+## 2. Pre-registered candidates (results)
 
-Run in this order on a **new** pull only:
-
-| # | Change | Prior full-file / TRAIN+OOS evidence | Notes |
+| # | Change | Fresh-data result (TRAIN Jul20–Sep7 / OOS Sep7–Oct23) | Decision |
 |---|---|---|---|
-| 1 | `ATR_MIN` → 3.0 (also test 2.5 / 3.5) | Survived TRAIN + cold OOS in 2026-10-02 candidates | Removes the losing low-vol regime. Trade-count cost is the main trade-off. |
-| 2 | `TP_ATR_MULT` → 6.0 | TRAIN +$342.62 / OOS +$195.44; 4/4 walk-forward; full +$538 / PF 1.38 | Monotone plateau; inside bootstrap noise on spent data. |
-| 3 | Combo: TP 6.0 + ATR floor 3.0 | Strongest prior point estimate (+$580.90, PF 1.44, CI excluded zero) | Preferred if both #1 and #2 hold individually. |
-| 4 | Session start 08 instead of 07 (optional) | Survived prior splits | Lower priority; frequency vs quality. |
+| 1 | `ATR_MIN` → 2.5 / 3.0 / 3.5 | 3.0 TRAIN +$236 OOS −$162; 3.5 similar; 2.5 overfit | **Not adopted** — OOS still negative |
+| 2 | `TP_ATR_MULT` → 6.0 | TRAIN +$245 OOS **−$181** (overfit) | **Rejected** |
+| 3 | TP 6.0 + ATR floor 3.0 | Not re-tested as combo after #2 failed | **Rejected** |
+| 4 | Session 08–20 | TRAIN +$254 OOS −$149 | **Not adopted** |
 
-**Reject without fresh data:** BE off, SL 2.5×, any hour/day filter, wiring
-`MAX_CONSECUTIVE_LOSSES` (already measured harmful).
+Other levers that looked better than adopted on both halves still lost money on
+OOS (BE off, SL 2.5×, time-exit 72 bars). “Survives” in the sweep output means
+*better than the adopted baseline*, not *profitable on OOS*.
 
-## 3. Data work (must precede any config.py edit)
+Walk-forward on the new file: adopted **1/4** folds positive; best survivors
+only **2/4**. Not adoption-grade.
 
-1. Refresh `GOLD_M5.csv`:
-   - Untouched pre-June-2026 window (`fetch_data.py --start-pos 20000` or
-     equivalent).
-   - Everything after 2026-09-11 through current.
-2. Re-run the exact candidate protocol from `research/strategy_sweep.py
-   --candidates` (and walk-forward / bootstrap) on the new file only.
-3. Adopt a candidate **only** if it still wins on that fresh data under the
-   same discipline (TRAIN → cold OOS → regimes → 4/4 folds).
-4. After any adoption: restart the paper-book "stable config" clock and let it
-   accumulate under the new parameters.
+## 3. Fresh full-window backtest (current config)
 
-## 4. Parallel operational items (safe anytime)
+`data/GOLD_M5.csv` after `fetch_data.py` (start_pos=0, 20k bars):
 
-These do not touch strategy geometry:
+| Metric | Value |
+|---|---|
+| Window | 2026-07-15 06:10 → 2026-10-23 19:20 |
+| Trades | 257 |
+| Net | **+$29.15** |
+| PF | **1.02** |
+| WR | 26.5% |
+| Avg R | **0.03** |
+| Max DD | $254.99 |
+| Exits | 68 TP / 41 BE / 148 SL |
 
-- Confirm paper and LIVE exit engines stay matched (already the intent of
-  `live_position.py`).
-- Demo execution drill before any real-money flip
-  (`docs/live_readiness_review_2026-10-23.md` §6.3).
-- Consider tightening `MAX_SPREAD_POINTS` toward 1.25× observed p90 (cost
-  containment; measure veto rate first).
-- Log rotation / dashboard auth before attaching a funded account.
-- `SYMBOL_TRADE_STOPS_LEVEL` preflight in the bridge (cheap insurance).
+Compare to the spent-file reference (Jun–Sep research window): 255 / +$456 /
+PF 1.32 / avg R 0.11. **The edge has degraded sharply on the recent window.**
 
-## 5. Explicit non-goals
+### Loss anatomy highlights
 
-- No LIVE flip on the shared XM account or with a ~$300 balance.
-- No re-tuning on the existing spent `GOLD_M5.csv`.
-- No change to `TRADING_MODE`, magic, or service units without a new cold-OOS
-  pass and an explicit decision.
+- Sep −$27, Oct −$60 (both negative months).
+- Friday −$193 (PF 0.51) — worst weekday by far.
+- Hours 17–18 UTC heavily negative (−$90 / −$159).
+- Net excluding top-5 winners: **−$192** (tail-driven, fragile).
+- ATR quartile pattern from the old file **did not reproduce** (low-ATR is no
+  longer the clear loser).
+- Broker pull only returned the latest 20k M5 bars — **no pre-June history**
+  available from this container for a true older OOS check.
 
-## 6. Success criteria for the next gate
+## 4. Decision
 
-Replace the old "100 trades / PF > 1.2" rule with:
+1. **Do not change** `ATR_MIN`, `TP_ATR_MULT`, RSI levels, session window, or
+   BE trigger in `config.py`.
+2. Keep the paper book on the current geometry. The weak forward record is
+   consistent with this backtest, not just an underpowered sample.
+3. LIVE remains **no-go** (unchanged from the 2026-10-23 readiness review).
+4. Next research, if any, needs a **new hypothesis** with its own pre-registration
+   — not another re-tune of the same RSI-pullback / EMA200 shape on overlapping
+   data.
 
-1. Cold OOS on data never used for selection (pre-June + post-2026-09-11),
-   n ≥ 100, bootstrap mean-R CI above zero, 4/4 walk-forward quarters positive.
-2. Forward evidence with real power (~300+ paper trades on the **exact** exit
-   engine LIVE will run, or mean R whose bootstrap CI excludes zero).
-3. Demo execution drill (20 trades) confirming stop attach, BE round-trip, and
-   realized R vs modelled R.
-4. Then, and only then, consider LIVE at 0.01 lots on a sufficiently funded
-   account with the existing equity floor and kill switch.
+## 5. Parallel operational items (still valid, still optional)
+
+- Paper ↔ LIVE exit parity (already the intent of `live_position.py`).
+- Demo execution drill before any real-money flip.
+- Tighten `MAX_SPREAD_POINTS` only after measuring veto rate.
+- Log rotation / dashboard auth before a funded account.
+- `SYMBOL_TRADE_STOPS_LEVEL` preflight.
+
+## 6. Explicit non-goals (unchanged)
+
+- No LIVE on the shared XM account or a ~$300 balance.
+- No hour/day filters fitted on this sample (Friday/17–18 look bad but n is
+  thin and we already rejected that class of filter).
+- No wiring `MAX_CONSECUTIVE_LOSSES` without a new measurement (old file said
+  harmful; new file is mixed and not decisive).
+
+## 7. Gate going forward
+
+Still require, before any LIVE consideration:
+
+1. A strategy (current or new) with cold OOS on data not used for selection,
+   bootstrap mean-R CI above zero, and strong walk-forward.
+2. Forward evidence with real power (~300+ paper trades on the exact LIVE exit
+   engine, or mean R whose CI excludes zero).
+3. Demo execution drill (20 trades).
+4. Adequate account size for the equity floor to be meaningful.
 
 ---
 
-**Next concrete action on the box:** refresh GOLD M5 data, then re-run the
-candidate table above. Do not edit `ATR_MIN` / `TP_ATR_MULT` until that
-completes.
+**Closed 2026-10-24.** Parameter candidates from this plan are rejected or not
+adopted. No runtime path changed.
