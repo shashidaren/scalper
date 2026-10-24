@@ -11,7 +11,8 @@ Last verified on `scalping`: 2026-10-19 17:31 UTC (user-supplied box output: 17:
 - `TRADING_MODE` stays `FORWARD_TEST` until an explicit live decision. Kill switch is `logs/KILL_SWITCH` (blocks new entries only).
 - Paper track record (2026-10-19 16:37 UTC, `logs/paper_account.json`): balance **`$237.98`** (book started $300 on 2026-10-04), **47 closed, 10 wins / 37 losses**. Previous snapshot 2026-10-12: `$249.70`, 21 closed, 4W/17L. A Gold-only live flip is not justified; shared-account rule still applies.
 - **Effectiveness plan CLOSED 2026-10-24** (`docs/effectiveness_plan_2026-10-24.md`). Fresh `GOLD_M5.csv` (2026-07-15 → 2026-10-23, 20k bars): current config **257 trades / +$29.15 / PF 1.02 / avg R 0.03 / max DD $255**. Sep and Oct both negative. TP 6.0 **rejected** (OOS −$181). ATR floor 3.0/3.5 not adopted (OOS still negative). Walk-forward adopted 1/4 folds. **No strategy parameter changed.** Edge has degraded vs the old spent-file reference (255 / +$456 / PF 1.32).
-- **New research plan locked 2026-10-24**: `docs/research_plan_vol_regime_2026-10-24.md` (VOL-REGIME-A). ATR percentile regime filter is now coded (`ATR_REGIME_ENABLED=False` by default). Paper book behaviour is unchanged. Next step is a fresh data pull + the pre-registered 36-combination sweep.
+- **VOL-REGIME-A CLOSED 2026-10-24** (`docs/research_plan_vol_regime_2026-10-24.md`). Absolute-floor candidates maxed at avgR +0.059 / PF 1.04 on the spent window — failed the pre-registered gate. Pure percentile filter was not active offline. Not adopted.
+- **Active research track: BREAKOUT-B** (`docs/research_plan_breakout_2026-10-24.md`). Pre-registered same day. Next: fresh pull via `tools/pull_gold_m5.sh` + restricted sweep under the locked protocol.
 - Deploy freeze is explained and closed. A dirty tracked `docker-compose.yml` froze every 15-minute deploy from 2026-10-04 12:30 to 2026-10-07 02:28 UTC (~63 h). The process ran `a122e7a`-era code, so PRs #22/#23/#24 were on disk but not in memory, and `logs/live_status.json` had no `spread_gate` field. Server HEAD after the fix was `b033986` with a clean tree (user-verified 2026-10-07). `deploy.sh` now logs `DIRTY TREE` and `PULL FAILED` and exits 1 without restarting.
 - The 15-minute autosync pulls `main` and restarts a unit only if a runtime path changed. `docs/`, `research/`, `tests/`, `*.md`, `tools/`, and `deploy.sh` do not restart the book.
 - **Autosync is live** (`tools/autosync.sh` on `scalper-autosync.timer`, every 15 min; first manual run 16:36 UTC, first timer run 2026-10-19 17:00:14 UTC, service exit 0). It publishes `logs/ledger.jsonl` + the state files as `data collection N`. The crontab has **no** `deploy.sh`/`autosync.sh` line — the timer is the only scheduler. The raw `logs/trades.jsonl` (SIGNAL/SKIP telemetry, ~11.5k rows/day) is local-only; untracking is DONE (840ceca, merged with PR #32 / 4184046 into 59620a0). Both raw logs remain on disk and growing, with backups in `/root/scalper-eventlog/*-2026-10-19.jsonl`. Only the six publish files are tracked under `logs/` and `btc/logs/`.
@@ -32,7 +33,7 @@ Last verified on `scalping`: 2026-10-19 17:31 UTC (user-supplied box output: 17:
 
 - Do not raise `MAX_SPREAD_POINTS` again, or change `TRADING_MODE`, `BTC_STRATEGY`, or the service units, without a new cold-OOS pass. 6,250 is the observation gate, not a strategy approval.
 - Do **not** adopt the 2026-10-24 candidates (`ATR_MIN`, `TP_ATR_MULT=6`, session 08–20) — they failed or did not clear OOS on the fresh pull.
-- Do **not** enable `ATR_REGIME_ENABLED` until the pre-registered VOL-REGIME-A gate is cleared.
+- Do **not** enable `ATR_REGIME_ENABLED` (VOL-REGIME-A closed).
 - Treat proxy or exchange CSVs as BTC evidence. The gate reads XM bars only.
 - Flip either book to `LIVE` on the shared XM account. A separate account or a hard combined risk gate is required first.
 - Re-pull or reuse the inspected 2026-07-25..2026-10-03 BTC M5 window for a new gate.
@@ -50,8 +51,8 @@ Last verified on `scalping`: 2026-10-19 17:31 UTC (user-supplied box output: 17:
 
 ## Open
 
-- **VOL-REGIME-A** is the active Gold research track (`docs/research_plan_vol_regime_2026-10-24.md`). Code is in place (default OFF). Next: fresh data pull + 36-combination sweep under the pre-registered protocol.
-- Effectiveness parameter pass is **done** — no config change.
+- **BREAKOUT-B** is the active Gold research track (`docs/research_plan_breakout_2026-10-24.md`). Next: fresh pull via `tools/pull_gold_m5.sh` + restricted sweep under the locked protocol.
+- VOL-REGIME-A closed (failed gate). Effectiveness parameter pass closed earlier the same day.
 - Rotate the MT5 and VNC passwords (they were pasted in plain text; change at the broker, update `.env`).
 - Re-apply the two mt5linux image patches if the container is ever recreated from stock `lprett/mt5linux`. Details: `docs/archive/HANDOFF_2026-10-07.md` §4.
 - File the two upstream mt5linux bugs (fifo `mkfifo` crash, `config.sh` `return` under `set -e`).
@@ -80,4 +81,5 @@ Last verified on `scalping`: 2026-10-19 17:31 UTC (user-supplied box output: 17:
 | 2026-10-23 | Live-readiness review: **no-go** for LIVE, docs only, no runtime change (`docs/live_readiness_review_2026-10-23.md`). Reproduced backtest 255/+$456.58/PF 1.32, `--verify` parity, 6/6 suites, smoke 13/13. Paper book 2026-10-04..10-23: 60 closed, `$294.35`, 15W/45L, PF 0.978, max DD `$103.95` (34.6%). New: the "100+ trades, PF>1.2" launch gate has only ~2:1 discrimination — a real 0.11R edge fails it 54% of the time, a zero-edge book passes it 21% of the time (~330 trades needed for 80% power). Three blockers the paper book cannot close: BE ratchet and time stop are paper-only (`paper.py:280`, no `TRADE_ACTION_SLTP` anywhere), no post-fill check that the live position has a stop, and no weekend/hold cap with a 59h hold already on the record. Also: `ATR_MIN=0.50` has never gated a signal (data min 1.22) while the bottom ATR quartile is the only losing bucket. |
 | 2026-10-24 | Effectiveness plan agreed (`docs/effectiveness_plan_2026-10-24.md`). Pre-registered ATR floor / TP 6.0 / combo for fresh-data test only. |
 | 2026-10-24 | Fresh pull + candidates + full backtest/loss anatomy on box. Window 2026-07-15..10-23: **257 / +$29 / PF 1.02**. TP 6.0 rejected (OOS −$181). ATR floor not adopted. Plan **closed** — no strategy parameter change. HANDOFF/STATUS updated. |
-| 2026-10-24 | **VOL-REGIME-A** pre-registered (`docs/research_plan_vol_regime_2026-10-24.md`). Code landed: `ATR_REGIME_ENABLED=False` + percentile gate in `strategy.py`. Paper book behaviour unchanged. |
+| 2026-10-24 | **VOL-REGIME-A** pre-registered + code landed (default OFF). Later same day: sweep on spent window failed gate (best avgR 0.059 / PF 1.04). **Closed / not adopted.** |
+| 2026-10-24 | **BREAKOUT-B** pre-registered (`docs/research_plan_breakout_2026-10-24.md`). One-command data pull added (`tools/pull_gold_m5.sh`). Active research track. |
