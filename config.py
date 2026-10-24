@@ -153,6 +153,11 @@ SESSION_END_HOUR_UTC = 20
 # $99.62), positive in every calendar month and both halves of the data, and
 # a 10k-resample bootstrap P(net>0)=0.96 (was 0.60 — the old config's CI
 # spanned zero). See docs/strategy_iteration_2026-10-01.md.
+# NOTE (2026-10-24): those numbers were measured on the then-current
+# data/GOLD_M5.csv, which has since been replaced by the rolling pull. On the
+# 2026-07-15..10-23 window the SAME parameters read 257 trades / +$29.15 /
+# PF 1.02 — the parameters are unchanged, the edge has degraded. Do not read
+# the figures above as current performance; see STATUS.md.
 RSI_BUY_LEVEL = 40
 RSI_SELL_LEVEL = 60
 

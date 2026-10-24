@@ -74,7 +74,25 @@ LOT_SIZE = 0.01            # broker minimum, same as gold
 SESSION_FILTER_ENABLED = False
 SESSION_START_HOUR_UTC = 7     # inert while the filter is off; documents intent
 SESSION_END_HOUR_UTC = 20
-WEEKEND_FLAT_ENABLED = False     # BTC is 24/7; gold's measured rule does not transfer
+
+# Weekend flat: **OFF** for BTC. DECIDED 2026-10-24 (user) — a 24/7 instrument
+# trades 24/7. This is the ONLY assignment of this key in this file; do not add
+# a second one.
+#
+# History, because it cost a day of confusion: the key was absent before
+# 2026-10-23, and `risk_guard.weekend_flat_enabled()` defaults to True when a
+# config omits it — so BTC silently flattened Friday 20:00 -> Monday 00:00 UTC
+# even though nothing had ever decided that. 2026-10-23 made it explicit as
+# True; STATUS.md meanwhile recorded it as off, and two assignments then
+# disagreed inside this one file (fixed 2026-10-24).
+#
+# What the evidence actually supports: `research/risk_measure.py` measured the
+# rule on `data/GOLD_M5.csv` only (+$5.46 over 255 trades, 9 holds, 6 losses
+# avoided, against gap risk up to 12.2xATR that the backtest cannot model).
+# Gold closes daily, which hides part of that gap risk; BTC does not close, so
+# the transfer is even weaker than for gold. It is a risk judgement, not a
+# measured BTC result — the user's judgement is to leave it off.
+WEEKEND_FLAT_ENABLED = False
 
 # --- entry blackout windows (24/7 instrument; gold has none) ---
 # Gold's market closes daily, which hides two costs that BTC does not hide:
@@ -157,18 +175,11 @@ BE_TRIGGER_R = 1.5           # PLACEHOLDER
 # on a wall-clock rule that no BTC document has pre-registered.
 MAX_HOLD_MINUTES = 0
 
-# Weekend flat: DECIDED 2026-10-23 (user) - BTC flattens on weekends.
-# BTCUSD is 24/7, but weekend liquidity thins and gap risk is unmodelled,
-# so flatten Friday 20:00 UTC like gold (WEEKEND_FLAT_HOUR_UTC stays at the
-# risk_guard default of 20; gold sets the same hour explicitly in config.py).
-# This was already the effective behaviour: risk_guard.weekend_flat_enabled()
-# defaults to True when a config omits the key, and this file omitted it.
-# The line below makes the decision explicit so it is not read as an
-# inheritance bug. Evidence note: research/risk_measure.py measured this
-# rule on data/GOLD_M5.csv only, i.e. the BTC rule is a risk judgement, not a
-# measured BTC result. MAX_HOLD_MINUTES stays 0 above: measured as noise
-# on gold, never measured on BTC.
-WEEKEND_FLAT_ENABLED = True
+# Weekend flat: see the strategy-filters section above. ONE assignment lives
+# there (OFF, decided 2026-10-24); this note exists only so a reader who greps
+# for the key here is not left wondering whether it was dropped by mistake.
+# (It was assigned twice until 2026-10-24, and the second copy was what the
+# running process actually honoured.)
 
 # %-risk sizing is LIVE-only and off by default. btc/run.py currently refuses
 # LIVE (HANDOFF gates it), so this stays 0 until a separate account exists.

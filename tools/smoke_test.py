@@ -52,6 +52,7 @@ SCRIPTS = [
     ("risk guard", ["tests/test_risk_guard.py"], []),
     ("repair tool", ["tests/test_repair_phantom_ledger.py"], []),
     ("check_data", ["tests/test_check_data.py"], []),
+    ("heartbeat", ["tests/test_heartbeat.py"], []),
     ("ledger export", ["tests/test_ledger_export.py"], []),
     ("btc preflight", ["btc/preflight_test.py"], ["pandas", "numpy"]),
     ("btc edge screen", ["btc/edge_screen_test.py"], ["pandas", "numpy"]),

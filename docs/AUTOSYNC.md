@@ -83,12 +83,37 @@ time.**
 | `logs/ledger.jsonl` | `logs/trades.jsonl` (the raw event log) |
 | `logs/daily_stats.json` | `logs/live_status.json` |
 | `logs/paper_account.json` | `logs/connection_status.json` |
-| `btc/logs/{ledger.jsonl,daily_stats.json,paper_account.json}` | `logs/system.jsonl`, logs, locks, `KILL_SWITCH`, `quarantine/` |
+| `logs/heartbeat.json` (derived liveness) | `logs/system.jsonl`, logs, locks, `KILL_SWITCH`, `quarantine/` |
+| `btc/logs/{ledger.jsonl,daily_stats.json,paper_account.json}` | |
 
-The published files move only when a trade does (~5–30 commits/day). The
+The trade files move only when a trade does (~5–30 commits/day). The
 unpublished ones change every 15 seconds and would turn this into 96 commits a
 day for no analytical value. `.gitignore` enforces the split; `logs/*` (not
 `logs/`) so the negations work.
+
+### `logs/heartbeat.json` — the one derived file
+
+The tree above has a hole: on a weekend-flat Friday the gold book makes no
+trades until Monday 00:00 UTC, so **all** of the published trade files can sit
+frozen for ~52 hours. From a checkout, "healthy and idle" and "died on Friday
+night" then look identical.
+
+`tools/heartbeat.py` closes that by publishing the *age* of each engine's
+`live_status.json` (plus connection state, mode, spread-gate state, open
+positions, last ledger event) — never the 15-second stream itself. Per book the
+verdict is `ok` / `stale` (older than `HEARTBEAT_STALE_MINUTES`, default 10) /
+`unknown` (no `live_status.json`) — a missing file is never reported as `ok`,
+because that is the false reassurance the file exists to prevent.
+
+To keep the commit count sane it rewrites only when its time bucket rolls
+(`AUTOSYNC_HEARTBEAT_BUCKET_MINUTES`, default 60) or the verdict flips. Every
+write carries `as_of_utc`, so between writes a stale file says so about itself.
+
+```bash
+python3 tools/heartbeat.py --check      # print it, never write; exit 1 if stale
+python3 tools/heartbeat.py --force      # write now, ignoring the bucket
+AUTOSYNC_HEARTBEAT=0 tools/autosync.sh  # don't publish it at all
+```
 
 ### `ledger.jsonl` is not `trades.jsonl`
 
@@ -190,6 +215,9 @@ makes that false, so `always` is the honest default here.
 | `AUTOSYNC_REMOTE` / `AUTOSYNC_BRANCH` | `origin` / `main` | what to sync against |
 | `AUTOSYNC_PUBLISH_DATA` | `1` | `0` = never commit/push data (deploy-only, like `deploy.sh`) |
 | `AUTOSYNC_PUBLISH_EVENT_LOG` | `0` | `1` = also publish the raw `trades.jsonl` (grows ~1.7 MB/day; see above) |
+| `AUTOSYNC_HEARTBEAT` | `1` | `0` = do not publish `logs/heartbeat.json` |
+| `AUTOSYNC_HEARTBEAT_BUCKET_MINUTES` | `60` | how often the heartbeat may rewrite (`0` = every run) |
+| `HEARTBEAT_STALE_MINUTES` | `10` | age at which an engine counts as not running |
 | `AUTO_DEPLOY` | `1` | `0` = publish data only, never merge or restart |
 | `SMOKE_GATE` | `1` | `0` = deploy without the smoke test (**not advised**) |
 | `AUTOSYNC_PYTHON` | `mt5env/bin/python`, else `python3` | interpreter for the checks |

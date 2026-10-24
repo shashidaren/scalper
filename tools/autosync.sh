@@ -34,6 +34,8 @@
 # Env (all optional; see docs/AUTOSYNC.md §5)
 #   AUTOSYNC_REPO_DIR, AUTOSYNC_BRANCH, AUTOSYNC_REMOTE, AUTOSYNC_LOCK_FILE
 #   AUTOSYNC_PUBLISH_DATA=1  0 = never commit/push data
+#   AUTOSYNC_HEARTBEAT=1     0 = do not publish logs/heartbeat.json
+#   AUTOSYNC_HEARTBEAT_BUCKET_MINUTES=60  how often the heartbeat is rewritten
 #   AUTO_DEPLOY=1            0 = data-only mode
 #   SMOKE_GATE=1             0 = deploy without the smoke test (not advised)
 #   AUTOSYNC_PYTHON          interpreter for the checks (default: mt5env or python3)
@@ -51,6 +53,7 @@ REMOTE="${AUTOSYNC_REMOTE:-origin}"
 BRANCH="${AUTOSYNC_BRANCH:-main}"
 LOCK_FILE="${AUTOSYNC_LOCK_FILE:-${REPO_DIR}/logs/autosync.lock}"
 PUBLISH_DATA="${AUTOSYNC_PUBLISH_DATA:-1}"
+HEARTBEAT="${AUTOSYNC_HEARTBEAT:-1}"
 AUTO_DEPLOY="${AUTO_DEPLOY:-1}"
 SMOKE_GATE="${SMOKE_GATE:-1}"
 NOTIFY="${NOTIFY:-always}"
@@ -70,10 +73,17 @@ LOG_FILE="${LOG_DIR}/autosync.log"
 # SIGNAL/SKIP telemetry at ~11,500 rows and ~1.7 MB a day - publishing it is
 # what put 187,406 rows into `data collection 1` (2026-10-19). It stays local.
 # `AUTOSYNC_PUBLISH_EVENT_LOG=1` restores the old behaviour if ever needed.
+# `logs/heartbeat.json` is the one derived file here. It carries the AGE of
+# each engine's live_status.json, so a repo checkout can tell "healthy and
+# idle" from "died on Friday night" - the three paper files above cannot, and
+# on a weekend-flat Friday they stay frozen for ~52 h. tools/heartbeat.py
+# rewrites it only when its hourly bucket or the verdict changes, so it does
+# not add a commit per tick. It is deliberately NOT a copy of live_status.json.
 DATA_FILES=(
     logs/ledger.jsonl
     logs/daily_stats.json
     logs/paper_account.json
+    logs/heartbeat.json
     btc/logs/ledger.jsonl
     btc/logs/daily_stats.json
     btc/logs/paper_account.json
@@ -377,6 +387,15 @@ DATA_MSG="no new data"
 if [ "$PUBLISH_DATA" = "1" ] && [ -f tools/ledger_export.py ]; then
     "$PYTHON" tools/ledger_export.py --quiet >/dev/null 2>&1 \
         || log "WARN: ledger_export.py failed - publishing the previous ledger"
+fi
+# Liveness, before the commit so it travels with this run's data. Best effort
+# on purpose: a broken heartbeat must never cost a deploy or a data publish.
+if [ "$PUBLISH_DATA" = "1" ] && [ "$HEARTBEAT" = "1" ] && [ -f tools/heartbeat.py ]; then
+    if HB_OUT=$("$PYTHON" tools/heartbeat.py 2>&1); then
+        log "${HB_OUT}"
+    else
+        log "WARN: heartbeat.py failed - not published this run: ${HB_OUT}"
+    fi
 fi
 if [ "$PUBLISH_DATA" = "1" ]; then
     for f in "${DATA_FILES[@]}"; do git add -- "$f" 2>/dev/null || true; done

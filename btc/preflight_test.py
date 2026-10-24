@@ -2,9 +2,13 @@
 """Offline tests for btc/preflight.py (no bridge, no MT5, no network).
 
 Three things are asserted:
-  1. the bar-file economics match the documented gold facts (spread/1R ~5.7%,
-     break-even WR 28.6%) - i.e. the maths that tells you whether a shape can
-     pay for the spread is right;
+  1. the bar-file economics are right - break-even WR 28.6% follows from the
+     configured 1:2.5 RR (data-independent), the cost-with-WR identity holds
+     exactly, and spread/1R reproduces the value measured on the pinned bar
+     file (data-dependent, so sha256-pinned via `btc/golden.py`: a changed
+     file is reported as SKIP rather than failing this suite - see that
+     module for why a rolling, gitignored CSV must not be able to red-line
+     the autosync deploy gate);
   2. the BTC failure mode is reproduced: quotes far above the CONFIGURED
      MAX_SPREAD_POINTS grade INFEASIBLE with exit code 2. Asserted relative
      to the config value, not the old 1500 placeholder - the gate moved to
@@ -28,6 +32,15 @@ sys.path.insert(0, str(HERE))
 sys.path.insert(0, str(ROOT))      # spread_gate.py lives at the repo root
 
 import _instance  # noqa: E402
+import golden  # noqa: E402
+
+# gold's spread-as-fraction-of-1R is measured from the bar file, so it is a
+# data-dependent golden number: asserted only against the file it came from.
+# Pinned 2026-10-24 against the fresh 2026-07-15..10-23 pull (median spread
+# 51 pts, ATR p50 4.075). The previous file measured ~5.3-5.7%; the retired
+# number is kept here only so the next reader knows why the docs said 5.7%.
+GOLD_CSV_SHA256 = "b5bb79e2813c1766dbbe511c2447d56cfec959f29727b2c52e3a4b999ac69d2b"
+GOLD_COST_PER_R = 0.06258          # 6.26% of one stop, round trip
 
 RESULTS = []
 
@@ -35,6 +48,11 @@ RESULTS = []
 def check(name, ok, detail=""):
     print(f"  [{'PASS' if ok else 'FAIL'}] {name}{(' — ' + detail) if detail else ''}")
     RESULTS.append(bool(ok))
+
+
+def skip(name, detail=""):
+    """Report a check as SKIP. Not counted, not a failure: see btc/golden.py."""
+    print(f"  [SKIP] {name}{(' — ' + detail) if detail else ''}")
 
 
 def btc_shaped_csv(path: Path, bars: int = 3000, spread_pts: int = 4242) -> Path:
@@ -67,12 +85,28 @@ def main() -> int:
         spec.loader.exec_module(gold_cfg)
         import preflight
         rep = preflight.csv_cost_report(pd.read_csv(gold_csv, parse_dates=["time"]), gold_cfg)
-        check("gold spread/1R reproduces the documented ~5.3-5.7%",
-              0.05 < rep["cost_per_r"] < 0.06, f"{100 * rep['cost_per_r']:.2f}%")
+
+        # Data-independent: 1:2.5 RR gives 1/(1+2.5) = 28.57% break-even.
         check("gold break-even WR reproduces 28.6% (RR 1:2.5)",
               abs(rep["breakeven_wr_pct"] - 28.6) < 0.1, f"{rep['breakeven_wr_pct']:.1f}%")
-        check("gold's required WR with cost is ~30%",
-              29.5 < rep["required_wr_pct"] < 31.0, f"{rep['required_wr_pct']:.1f}%")
+
+        # Data-independent identity: paying c stops for a 1:2.5 shape lifts the
+        # required win rate by exactly a factor of (1 + c). This asserts the
+        # arithmetic itself, so it holds for any file and any cost.
+        want_wr = rep["breakeven_wr_pct"] * (1.0 + (rep["cost_per_r"] or 0.0))
+        check("required WR == break-even WR x (1 + cost/1R)",
+              abs(rep["required_wr_pct"] - want_wr) < 1e-9,
+              f"{rep['required_wr_pct']:.2f}% vs {want_wr:.2f}%")
+
+        # Data-dependent golden number: only meaningful for the pinned file.
+        seen = f"{100 * (rep['cost_per_r'] or 0):.2f}% of 1R"
+        if golden.is_pinned(gold_csv, GOLD_CSV_SHA256):
+            check(f"gold spread/1R reproduces the pinned "
+                  f"{100 * GOLD_COST_PER_R:.2f}%",
+                  abs((rep["cost_per_r"] or 0) - GOLD_COST_PER_R) < 5e-4, seen)
+        else:
+            skip("gold spread/1R reproduces the pinned value",
+                 golden.moved(gold_csv, GOLD_CSV_SHA256, seen))
     else:
         print("  (skipping gold economics: data/GOLD_M5.csv not present)")
 

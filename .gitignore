@@ -35,6 +35,9 @@ logs/*
 !logs/ledger.jsonl
 !logs/daily_stats.json
 !logs/paper_account.json
+# Derived liveness heartbeat (age of each engine's live_status.json). Published
+# so "is it running?" is answerable from a checkout; see tools/heartbeat.py.
+!logs/heartbeat.json
 btc/logs/*
 !btc/logs/ledger.jsonl
 !btc/logs/daily_stats.json
