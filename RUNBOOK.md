@@ -63,6 +63,11 @@ Both live in `risk_guard.py`; the measurements are in
 python3 risk_guard.py                 # floor status: start, peak, floor, halted_at
 python3 risk_guard.py --reset         # clear a latched floor (deliberate action)
 cat logs/equity_floor.json
+
+# BTC has its OWN floor state (btc/logs/equity_floor.json). The plain command
+# above only ever touches gold's.
+python3 btc/tool.py risk_guard.py
+python3 btc/tool.py risk_guard.py --reset
 grep -E 'RISK|weekend flat|closed at market' logs/system.jsonl | tail -20
 ```
 
@@ -76,6 +81,11 @@ grep -E 'RISK|weekend flat|closed at market' logs/system.jsonl | tail -20
 - **Equity floor** — `[RISK] EQUITY FLOOR HIT` latches: new entries stop, open
   positions keep their stops, and the engine keeps managing them. It does not
   un-latch on a bounce; reset it deliberately once you know why it fired.
+  **The state is per instance**, and both bots read the same shared MT5 equity,
+  so one bad enough day latches both. Resetting gold does not reset BTC:
+  you need both commands above. Confirm with
+  `grep "Equity floor" logs/system.jsonl btc/logs/system.jsonl | tail -2` —
+  each line prints the reference it latched (`start`) and the resulting floor.
 - **Hold cap** — `MAX_HOLD_MINUTES = 0` (off). Measured as noise; the weekend
   rule already bounds the worst hold at ~72h.
 
