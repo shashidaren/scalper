@@ -143,9 +143,21 @@ class ScalpStrategy:
                 self._extract_bar_field(rates[idx], "close"),
             )
 
-        if eval_key is not None and eval_key == self._cached_eval_key and self._cached_eval_vals is not None:
+        # When the ATR regime filter is enabled we need the full ATR series,
+        # so skip the simple scalar cache and always recompute. Default is OFF,
+        # so the existing fast path is preserved for the running paper book.
+        regime_on = bool(getattr(config, "ATR_REGIME_ENABLED", False))
+        use_cache = (
+            not regime_on
+            and eval_key is not None
+            and eval_key == self._cached_eval_key
+            and self._cached_eval_vals is not None
+        )
+
+        if use_cache:
             current_close, current_ema, current_atr, rsi_curr, rsi_prev = self._cached_eval_vals
             self.indicator_cache_hits += 1
+            df = None  # not needed when regime filter is off and cache hits
         else:
             df = pd.DataFrame(rates)
 
@@ -187,7 +199,8 @@ class ScalpStrategy:
                         bar_ts = bar_ts.item()
                 except Exception:
                     bar_ts = None
-            if eval_key is not None:
+            if eval_key is not None and not regime_on:
+                # Only cache the scalar path when regime filter is off
                 self._cached_eval_key = eval_key
                 self._cached_eval_vals = (
                     current_close, current_ema, current_atr, rsi_curr, rsi_prev
@@ -198,6 +211,40 @@ class ScalpStrategy:
         if current_atr < atr_min:
             self.last_skip_reason = f"atr_low:{current_atr:.2f}<{atr_min:g}"
             return None, 0, 0
+
+        # --- Volatility regime filter (VOL-REGIME-A) ---
+        # Only active when ATR_REGIME_ENABLED=True. Computes the percentile of
+        # the current ATR inside the trailing lookback window and rejects the
+        # bar if it is below the configured threshold. Optional absolute floor
+        # can sit on top. Default is OFF → identical to previous behaviour.
+        if regime_on:
+            lookback = int(getattr(config, "ATR_LOOKBACK", 100))
+            pct_threshold = float(getattr(config, "ATR_PERCENTILE", 50))
+            abs_floor = getattr(config, "ATR_MIN_ABSOLUTE", None)
+            atr_period = int(getattr(config, "ATR_PERIOD", 14))
+
+            # Need enough history for the percentile
+            if df is None or len(df) < lookback + atr_period:
+                n = 0 if df is None else len(df)
+                self.last_skip_reason = f"atr_regime:insufficient_history:{n}"
+                return None, 0, 0
+
+            atr_window = df['atr'].iloc[-lookback:]
+            # Percentile of the *current* ATR inside the lookback window
+            # (fraction of values strictly less than current_atr)
+            current_pct = (atr_window < current_atr).mean() * 100.0
+
+            if current_pct < pct_threshold:
+                self.last_skip_reason = (
+                    f"atr_regime:pct={current_pct:.1f}<{pct_threshold:g}"
+                )
+                return None, 0, 0
+
+            if abs_floor is not None and current_atr < float(abs_floor):
+                self.last_skip_reason = (
+                    f"atr_regime:abs={current_atr:.2f}<{float(abs_floor):g}"
+                )
+                return None, 0, 0
 
         # Dynamic SL & TP based on market volatility (gold: 2.0 -> 5.0 ATR,
         # i.e. ~1:2.5 RR; both multiples are config keys so a BTC instance can
