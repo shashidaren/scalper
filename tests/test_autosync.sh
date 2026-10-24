@@ -119,7 +119,8 @@ SH
         git checkout -q -b main
         mkdir -p tools logs btc/logs
         cp "$ROOT/tools/autosync.sh" "$ROOT/tools/smoke_test.py" \
-           "$ROOT/tools/check_data.py" "$ROOT/tools/ledger_export.py" tools/
+           "$ROOT/tools/check_data.py" "$ROOT/tools/ledger_export.py" \
+           "$ROOT/tools/heartbeat.py" tools/
         cp "$ROOT/STATUS.md" . 2>/dev/null || echo "# STATUS" > STATUS.md
         echo '{"balance": 300.0, "position": null, "closed": 0, "wins": 0, "losses": 0}' \
             > logs/paper_account.json
@@ -197,6 +198,7 @@ run_autosync() {   # extra env assignments get exported by the caller
         AUTOSYNC_SETTLE_SECONDS=0 \
         AUTOSYNC_PYTHON="$TMP/bin/python3" \
         AUTOSYNC_LOCK_FILE="$TMP/autosync.lock" \
+        AUTOSYNC_HEARTBEAT="${AUTOSYNC_HEARTBEAT:-0}" \
         bash tools/autosync.sh >> "$TMP/run.log" 2>&1
         echo $? > "$TMP/rc"
     )
@@ -438,6 +440,43 @@ for op in fetch push; do
     flock -n "$TMP/server/logs/deploy.lock" -c true && pass "$op timeout releases deploy lock" || fail "deploy lock leaked"
     log_has "done. data=" "$op timeout still completes digest"
 done
+
+# --------------------------------------------------------------------------- #
+echo "== 11. the liveness heartbeat is published, and only when due"
+# A quiet weekend looks identical to a dead engine in the three paper files.
+# logs/heartbeat.json carries the AGE of live_status.json so a checkout can
+# tell the difference. A huge bucket keeps both runs in one bucket, so the
+# "not due" case is deterministic; bucket-roll is unit-tested separately in
+# tests/test_heartbeat.py.
+export AUTOSYNC_HEARTBEAT_BUCKET_MINUTES=1000000
+setup
+AUTOSYNC_HEARTBEAT=1 run_autosync
+log_has "heartbeat: " "the heartbeat runs as part of the publish phase"
+[ -f "$TMP/server/logs/heartbeat.json" ] \
+    && pass "heartbeat file written" || fail "no heartbeat file"
+git -C "$TMP/server" ls-tree -r HEAD --name-only | grep -qx "logs/heartbeat.json" \
+    && pass "heartbeat is tracked in the data commit" || fail "heartbeat not committed"
+git -C "$TMP/server" show HEAD:logs/heartbeat.json | grep -q '"verdict"' \
+    && pass "the committed heartbeat carries a verdict" || fail "verdict missing"
+[ "$(git -C "$TMP/server" log -1 --format=%s)" = "data collection 1" ] \
+    && pass "heartbeat rides the ordinary data collection commit" || fail "bad commit subject"
+git -C "$TMP/server" show HEAD:logs/heartbeat.json | grep -q '"engine_status_age_min"' \
+    && pass "it publishes the engine age, not just a timestamp" || fail "age missing"
+
+before_hb="$(git -C "$TMP/server" rev-parse HEAD)"
+AUTOSYNC_HEARTBEAT=1 run_autosync
+log_has "not due" "a second run in the same bucket does not rewrite it"
+[ "$(git -C "$TMP/server" rev-parse HEAD)" = "$before_hb" ] \
+    && pass "no extra commit for an unchanged heartbeat" || fail "heartbeat spammed a commit"
+
+setup
+AUTOSYNC_HEARTBEAT=0 run_autosync
+grep -q "heartbeat: " "$TMP/run.log" \
+    && fail "hb ran while disabled" || pass "AUTOSYNC_HEARTBEAT=0 skips the tool"
+[ -f "$TMP/server/logs/heartbeat.json" ] \
+    && fail "hb wrote while disabled" || pass "nothing written while disabled"
+[ "$(cat "$TMP/rc")" = "0" ] && pass "disabling it does not affect the run" || fail "run failed"
+unset AUTOSYNC_HEARTBEAT_BUCKET_MINUTES
 
 # --help must print the header only, never the script body.
 bash "$TMP/server/tools/autosync.sh" --help > "$TMP/help.out" 2>&1

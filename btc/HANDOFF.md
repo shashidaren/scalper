@@ -45,14 +45,25 @@ research predicted, not because of a bug. Nothing here is a go-live signal.
 
 ## Is it running?
 
-The published files cannot answer that on their own. `paper_account.json` only
+The trade files cannot answer that on their own. `paper_account.json` only
 changes on a fill, and `daily_stats.json` only changes at midnight UTC, so a
-healthy bot on a quiet weekend looks exactly like a dead one. The engine's
-real heartbeat (`live_status.json`, `connection_status.json`, `system.jsonl`)
-is deliberately **not** published to git — it changes every 15 s and would
-turn autosync into a commit generator.
+healthy bot during a quiet stretch looks exactly like a dead one. The engine's
+raw status (`live_status.json`, `connection_status.json`, `system.jsonl`)
+changes every 15 s and is deliberately **not** published.
 
-Ask the box instead:
+**Check the published heartbeat first** — it exists for exactly this question:
+
+```bash
+python3 tools/heartbeat.py --check     # exit 0 = both books ok; 1 = stale/unknown
+cat logs/heartbeat.json                # the published copy
+```
+
+It carries `engine_status_age_min` per book: small = looping, `stale` = not
+looping, `unknown` = no `live_status.json` at all. Rewritten hourly by
+autosync (immediately on a verdict flip), so `as_of_utc` can be up to an hour
+old.
+
+Then confirm on the box:
 
 ```bash
 cd /root/scalper
@@ -89,20 +100,27 @@ reason the book stays in paper.
 The paper book therefore runs the shape that already failed, on purpose: it is
 an observation feed, and it is allowed to look bad.
 
-## Open question — weekend flat on a 24/7 instrument
+## Weekend flat — settled 2026-10-24, and why it was confusing
 
-`btc/config.py` currently assigns `WEEKEND_FLAT_ENABLED` **twice**: `False`
-(~line 77, "BTC is 24/7; gold's measured rule does not transfer") and `True`
-(~line 171, "DECIDED 2026-10-23 (user) — BTC flattens on weekends"). The later
-assignment wins, so the **effective value is `True`**, and it has been since
-2026-10-23.
+`WEEKEND_FLAT_ENABLED = False`. **BTC trades through the weekend.**
 
-Two STATUS.md entries say the opposite (`2026-10-23`: "BTC explicitly off";
-`2026-10-24`: "`WEEKEND_FLAT_ENABLED = False` committed for BTC"). So the
-documented intent and the running behaviour disagree, and only the user can
-settle it. Until then: trust the code (`True`), do not "fix" the docs to match
-one side, and note that the Friday-flat evidence was measured on
-`data/GOLD_M5.csv` only — for BTC it is a risk judgement, not a measured result.
+How this went wrong, so nobody re-breaks it: the key was absent before
+2026-10-23, and `risk_guard.weekend_flat_enabled()` defaults to `True` when a
+config omits it — so BTC silently flattened Friday 20:00 → Monday 00:00 UTC
+without anything having decided that. 2026-10-23 added an explicit `True`;
+2026-10-24 a second `False` was added **higher up the same file**, and the
+later `True` still won, so the code kept doing one thing while STATUS.md
+documented the other.
+
+Now there is exactly **one** assignment, in the strategy-filters section, with
+the history in a comment. If you are tempted to add a second: that is the bug.
+
+The evidence for the rule (`research/risk_measure.py`: +$5.46 over 255 trades,
+9 holds, 6 losses avoided, against gap risk up to 12.2×ATR the backtest cannot
+model) was measured on `data/GOLD_M5.csv` only. Gold closes daily, which hides
+much of that gap risk; BTC does not close. So for BTC it was always a risk
+judgement rather than a measured result, and the judgement is off. Gold keeps
+its Friday flat.
 
 ## Do not
 

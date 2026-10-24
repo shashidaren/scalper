@@ -13,6 +13,24 @@ cat btc/logs/live_status.json
 
 A missing `spread_gate` field in `live_status.json` means the running process predates the gate banner. That is a deploy-skew signal, not a strategy signal.
 
+### "Is it actually running?" — from anywhere
+
+`logs/heartbeat.json` is the published answer: it carries the **age** of each
+engine's `live_status.json`, so a checkout can tell "healthy and idle" from
+"died on Friday night". Autosync rewrites it hourly (or immediately when a
+verdict flips), so `as_of_utc` may be up to an hour old — it says so itself.
+
+```bash
+python3 tools/heartbeat.py --check     # print it; exit 1 unless both books are ok
+cat logs/heartbeat.json                # same thing as published
+```
+
+`verdict: stale` means a `live_status.json` is older than
+`HEARTBEAT_STALE_MINUTES` (10) — the engine is not looping. `unknown` means
+there is no such file at all (never started, or the log dir is wrong).
+Neither one is ever reported as `ok`. On the box, confirm with
+`systemctl is-active` and `python3 btc/server_check.py`.
+
 ## LIVE position protection
 
 LIVE only (`docs/live_protection_2026-10-23.md`). Inert in `FORWARD_TEST`.
