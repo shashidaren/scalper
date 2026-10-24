@@ -22,6 +22,16 @@ Thumbs.db
 *.patch
 
 # Data (large CSVs – download on demand instead)
+#
+# NOTE: this rule does NOT cover data/GOLD_M1.csv or data/GOLD_M5.csv, which
+# are already tracked (gitignore never applies to a tracked file). So
+# `tools/pull_gold_m5.sh` overwrites a TRACKED file and leaves the tree dirty -
+# which autosync reads as "hand-edits on the server" and refuses to deploy.
+# That is exactly what froze deploys on 2026-10-24. Either commit the pull or
+# `git checkout -- data/GOLD_M5.csv` afterwards (the pull script now says so),
+# or untrack both files deliberately:
+#     git rm --cached data/GOLD_M1.csv data/GOLD_M5.csv
+# This line still stops any NEW csv from being added by accident.
 data/*.csv
 
 # Runtime logs / status files.
