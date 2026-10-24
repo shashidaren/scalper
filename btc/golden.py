@@ -8,8 +8,11 @@ once, by hand, on `data/GOLD_M5.csv`:
     btc/edge_screen_test.py   the code-vs-backtest baseline (n / net / PF)
     btc/preflight_test.py     the spread cost as a fraction of one stop (1R)
 
-`data/GOLD_M5.csv` is **gitignored and replaced** by `tools/pull_gold_m5.sh` -
-it is a rolling observation window, not a checked-in fixture. So a bare
+`data/GOLD_M5.csv` is **replaced** by `tools/pull_gold_m5.sh` - it is a rolling
+observation window, not a fixed fixture. (It is also *tracked*, despite the
+`data/*.csv` line in `.gitignore`, which has no effect on an already-tracked
+file; that is what lets a routine pull leave the server's tree dirty and
+freeze the deploy gate. See `tools/pull_gold_m5.sh`.) So a bare
 `assert trades == 257` is a time bomb: the day the window rolls, the number
 changes for a perfectly good reason, the suite goes red, and because both
 suites sit inside `tools/smoke_test.py` the autosync **deploy gate** goes red

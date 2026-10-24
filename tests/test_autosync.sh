@@ -478,6 +478,34 @@ grep -q "heartbeat: " "$TMP/run.log" \
 [ "$(cat "$TMP/rc")" = "0" ] && pass "disabling it does not affect the run" || fail "run failed"
 unset AUTOSYNC_HEARTBEAT_BUCKET_MINUTES
 
+# --------------------------------------------------------------------------- #
+echo "== 12. a skipped deploy makes the push non-fast-forward, not a credentials fault"
+# The 2026-10-24 incident: origin advanced (a merged PR), the box had one dirty
+# tracked file, so the deploy was skipped - which leaves HEAD an ancestor of
+# origin/main, so the Phase-3 push is rejected. The old message said "fix git
+# credentials", which sent the operator chasing a network problem that did not
+# exist. The two causes must stay distinguishable.
+setup
+seed_change "docs/upstream_note.md" "upstream moved"
+printf '# hand edit\n' >> "$TMP/server/strategy.py"
+run_autosync
+log_has "SKIPPED - local code edits detected" "a dirty tracked file still blocks the deploy"
+log_has "push: REJECTED" "the push is reported as REJECTED, not as a timeout"
+log_lacks "fix git credentials" "credentials are not blamed for a non-fast-forward"
+log_lacks "push: FAILED" "a rejection is not logged as a plain failure"
+[ "$(git -C "$TMP/server" rev-parse HEAD)" != "$(remote_sha)" ] \
+    && pass "the box stays behind origin while the tree is dirty" || fail "box advanced anyway"
+run_status
+[ "$(cat "$TMP/status.rc")" = "1" ] \
+    && pass "--status still flags the rejection" || fail "--status hid push: REJECTED"
+
+# ... and cleaning the tree lets the very next tick catch up and push normally.
+git -C "$TMP/server" checkout -- strategy.py
+run_autosync
+log_has "push: ok" "cleaning the tree restores a normal push"
+[ "$(git -C "$TMP/server" rev-parse HEAD)" = "$(remote_sha)" ] \
+    && pass "the box catches up to origin in one tick" || fail "box did not catch up"
+
 # --help must print the header only, never the script body.
 bash "$TMP/server/tools/autosync.sh" --help > "$TMP/help.out" 2>&1
 grep -q '^set -uo pipefail' "$TMP/help.out" \

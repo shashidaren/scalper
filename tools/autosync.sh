@@ -197,7 +197,7 @@ status_report() {
         detail=$(grep -aE '^  (data|deploy|integrity|freshness|books):' "$LOG_FILE" 2>/dev/null | tail -n5)
         [ -n "$detail" ] && printf '%s\n' "$detail"
         case "$(tail -n 15 "$LOG_FILE" 2>/dev/null || true)" in
-            *"ROLLED BACK"*|*"push: FAILED"*) rc=1 ;;
+            *"ROLLED BACK"*|*"push: FAILED"*|*"push: REJECTED"*) rc=1 ;;
         esac
     fi
 
@@ -207,7 +207,11 @@ status_report() {
         dirty=$(git -C "$REPO_DIR" status --porcelain --untracked-files=no 2>/dev/null \
             | grep -vcE '^(..) (logs/|btc/logs/)' || true)
         behind=$(git -C "$REPO_DIR" rev-list --count "HEAD..$REMOTE/$BRANCH" 2>/dev/null || true)
-        printf '  repo:      %s | dirty code: %s | behind %s/%s: %s\n' \
+        # "as of last fetch" is not decoration: this command never fetches, so
+        # the number comes from the cached remote ref. On 2026-10-24 it read
+        # "behind 0" on a box that was two commits behind - the cached ref had
+        # not moved because fetch was failing.
+        printf '  repo:      %s | dirty code: %s | behind %s/%s: %s (as of last fetch)\n' \
             "${head_line:-unknown}" "${dirty:-0}" "$REMOTE" "$BRANCH" "${behind:-?}"
         [ "${dirty:-0}" -gt 0 ] && rc=1
     fi
@@ -596,10 +600,38 @@ fi
 # Phase 3 — push (data and the merge commit; never force)
 # --------------------------------------------------------------------------- #
 PUSH_MSG="ok"
-if ! network_git push "$REMOTE" "$BRANCH" >/dev/null 2>&1; then
-    PUSH_MSG="FAILED (failed or timed out; data is safe in a local commit; retries next run)"
-    EXTRA="${EXTRA}
+if ! PUSH_OUT=$(network_git push "$REMOTE" "$BRANCH" 2>&1); then
+    # Two very different faults share one exit code, and conflating them sends
+    # the operator to the wrong place (on 2026-10-24 the log said "fix git
+    # credentials" for a problem that had nothing to do with credentials).
+    #
+    #   1. NON-FAST-FORWARD - benign and self-healing. This run saw origin
+    #      ahead but skipped the merge (dirty tree, AUTO_DEPLOY=0, ...), so
+    #      HEAD is an ancestor of $REMOTE/$BRANCH and a push would rewind it.
+    #      It resolves on the first tick that actually merges.
+    #   2. Anything else - network, timeout, real credentials.
+    #
+    # Decide (1) from repository STATE, not from the error text: a quiet or
+    # relocated git can fail without printing the word "non-fast-forward",
+    # while "am I behind the remote" is always answerable locally.
+    NONFF=0
+    case "$PUSH_OUT" in
+        *non-fast-forward*|*"fetch first"*|*"Updates were rejected"*|*\[rejected\]*) NONFF=1 ;;
+    esac
+    BEHIND_COUNT=$(git rev-list --count "HEAD..$REMOTE/$BRANCH" 2>/dev/null || echo "")
+    case "$BEHIND_COUNT" in
+        ''|*[!0-9]*) BEHIND_COUNT="" ;;               # unusable -> rely on the text
+        *) [ "$BEHIND_COUNT" -gt 0 ] && NONFF=1 ;;
+    esac
+    if [ "$NONFF" = "1" ]; then
+        PUSH_MSG="REJECTED (non-fast-forward): local HEAD is ${BEHIND_COUNT:-?} commit(s) behind $REMOTE/$BRANCH because this run skipped the merge - nothing to push until a tick merges"
+        EXTRA="${EXTRA}
+ℹ️ push rejected as non-fast-forward: HEAD is behind $REMOTE/$BRANCH (the deploy was skipped, not failed - see 'deploy:')"
+    else
+        PUSH_MSG="FAILED (failed or timed out; data is safe in a local commit; retries next run)"
+        EXTRA="${EXTRA}
 ⚠️ push to $REMOTE failed - fix git credentials on the box"
+    fi
 fi
 log "push: $PUSH_MSG"
 
