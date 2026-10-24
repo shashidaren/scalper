@@ -79,3 +79,61 @@ If no combination meets the bar, the hypothesis is **closed as failed** and we m
 ## 9. Code changes (draft)
 
 See accompanying notes in the PR / session for the exact patch to `strategy.py` and `config.py`.
+
+Loaded 20000 bars  2026-07-15 06:10:00 → 2026-10-23 19:20:00
+Running 36 pre-registered combinations…
+  [01/36] lb50_p40_absoff                 n= 257  net=$  +29.15  PF=1.02  avgR=+0.030
+  [02/36] lb50_p40_abs2.5                 n= 247  net=$  +32.83  PF=1.02  avgR=+0.033
+  [03/36] lb50_p40_abs3.0                 n= 213  net=$  +57.81  PF=1.04  avgR=+0.059
+  [04/36] lb50_p50_absoff                 n= 257  net=$  +29.15  PF=1.02  avgR=+0.030
+  [05/36] lb50_p50_abs2.5                 n= 247  net=$  +32.83  PF=1.02  avgR=+0.033
+  [06/36] lb50_p50_abs3.0                 n= 213  net=$  +57.81  PF=1.04  avgR=+0.059
+  [07/36] lb50_p60_absoff                 n= 257  net=$  +29.15  PF=1.02  avgR=+0.030
+  [08/36] lb50_p60_abs2.5                 n= 247  net=$  +32.83  PF=1.02  avgR=+0.033
+  [09/36] lb50_p60_abs3.0                 n= 213  net=$  +57.81  PF=1.04  avgR=+0.059
+  [10/36] lb50_p70_absoff                 n= 257  net=$  +29.15  PF=1.02  avgR=+0.030
+  [11/36] lb50_p70_abs2.5                 n= 247  net=$  +32.83  PF=1.02  avgR=+0.033
+  [12/36] lb50_p70_abs3.0                 n= 213  net=$  +57.81  PF=1.04  avgR=+0.059
+  [13/36] lb100_p40_absoff                n= 257  net=$  +29.15  PF=1.02  avgR=+0.030
+  [14/36] lb100_p40_abs2.5                n= 247  net=$  +32.83  PF=1.02  avgR=+0.033
+  [15/36] lb100_p40_abs3.0                n= 213  net=$  +57.81  PF=1.04  avgR=+0.059
+  [16/36] lb100_p50_absoff                n= 257  net=$  +29.15  PF=1.02  avgR=+0.030
+  [17/36] lb100_p50_abs2.5                n= 247  net=$  +32.83  PF=1.02  avgR=+0.033
+  [18/36] lb100_p50_abs3.0                n= 213  net=$  +57.81  PF=1.04  avgR=+0.059
+  [19/36] lb100_p60_absoff                n= 257  net=$  +29.15  PF=1.02  avgR=+0.030
+  [20/36] lb100_p60_abs2.5                n= 247  net=$  +32.83  PF=1.02  avgR=+0.033
+  [21/36] lb100_p60_abs3.0                n= 213  net=$  +57.81  PF=1.04  avgR=+0.059
+  [22/36] lb100_p70_absoff                n= 257  net=$  +29.15  PF=1.02  avgR=+0.030
+  [23/36] lb100_p70_abs2.5                n= 247  net=$  +32.83  PF=1.02  avgR=+0.033
+  [24/36] lb100_p70_abs3.0                n= 213  net=$  +57.81  PF=1.04  avgR=+0.059
+  [25/36] lb200_p40_absoff                n= 257  net=$  +29.15  PF=1.02  avgR=+0.030
+  [26/36] lb200_p40_abs2.5                n= 247  net=$  +32.83  PF=1.02  avgR=+0.033
+  [27/36] lb200_p40_abs3.0                n= 213  net=$  +57.81  PF=1.04  avgR=+0.059
+  [28/36] lb200_p50_absoff                n= 257  net=$  +29.15  PF=1.02  avgR=+0.030
+  [29/36] lb200_p50_abs2.5                n= 247  net=$  +32.83  PF=1.02  avgR=+0.033
+  [30/36] lb200_p50_abs3.0                n= 213  net=$  +57.81  PF=1.04  avgR=+0.059
+  [31/36] lb200_p60_absoff                n= 257  net=$  +29.15  PF=1.02  avgR=+0.030
+  [32/36] lb200_p60_abs2.5                n= 247  net=$  +32.83  PF=1.02  avgR=+0.033
+  [33/36] lb200_p60_abs3.0                n= 213  net=$  +57.81  PF=1.04  avgR=+0.059
+  [34/36] lb200_p70_absoff                n= 257  net=$  +29.15  PF=1.02  avgR=+0.030
+  [35/36] lb200_p70_abs2.5                n= 247  net=$  +32.83  PF=1.02  avgR=+0.033
+  [36/36] lb200_p70_abs3.0                n= 213  net=$  +57.81  PF=1.04  avgR=+0.059
+
+=== Top 10 by avg R ===
+  lb50_p40_abs3.0                 n= 213  net=$  +57.81  PF=1.04  avgR=+0.059  DD=$269.2
+  lb50_p50_abs3.0                 n= 213  net=$  +57.81  PF=1.04  avgR=+0.059  DD=$269.2
+  lb50_p60_abs3.0                 n= 213  net=$  +57.81  PF=1.04  avgR=+0.059  DD=$269.2
+  lb50_p70_abs3.0                 n= 213  net=$  +57.81  PF=1.04  avgR=+0.059  DD=$269.2
+  lb100_p40_abs3.0                n= 213  net=$  +57.81  PF=1.04  avgR=+0.059  DD=$269.2
+  lb100_p50_abs3.0                n= 213  net=$  +57.81  PF=1.04  avgR=+0.059  DD=$269.2
+  lb100_p60_abs3.0                n= 213  net=$  +57.81  PF=1.04  avgR=+0.059  DD=$269.2
+  lb100_p70_abs3.0                n= 213  net=$  +57.81  PF=1.04  avgR=+0.059  DD=$269.2
+  lb200_p40_abs3.0                n= 213  net=$  +57.81  PF=1.04  avgR=+0.059  DD=$269.2
+  lb200_p50_abs3.0                n= 213  net=$  +57.81  PF=1.04  avgR=+0.059  DD=$269.2
+
+Markdown written to docs/vol_regime_train_results.md
+
+Remember: these numbers are still on the same spent window until
+you pull completely fresh data and re-run under the locked splits
+in docs/research_plan_vol_regime_2026-10-24.md.
+
