@@ -74,6 +74,7 @@ LOT_SIZE = 0.01            # broker minimum, same as gold
 SESSION_FILTER_ENABLED = False
 SESSION_START_HOUR_UTC = 7     # inert while the filter is off; documents intent
 SESSION_END_HOUR_UTC = 20
+WEEKEND_FLAT_ENABLED = False     # BTC is 24/7; gold's measured rule does not transfer
 
 # --- entry blackout windows (24/7 instrument; gold has none) ---
 # Gold's market closes daily, which hides two costs that BTC does not hide:
