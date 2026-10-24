@@ -166,6 +166,21 @@ bash tests/test_autosync.sh
 `tools/smoke_test.py` is what `autosync.sh` reads: exit 0 = deploy, non-zero =
 roll back. It must stay hermetic and fast.
 
+**A red gate is a deploy freeze, and it does not announce itself.** After any
+`data/GOLD_M5.csv` pull, run the gate by hand before trusting the timer:
+
+```bash
+mt5env/bin/python tools/smoke_test.py        # must end "SMOKE TEST PASSED"
+tail -40 logs/autosync.log                   # look for repeated rollbacks
+git log -1 --format='%h %ci %s'              # vs origin/main: is the box current?
+```
+
+Two BTC suites pin golden numbers to the bar file they were measured on
+(`btc/golden.py`). A `[SKIP] ... is not the pinned file` line is not a
+failure — it means the data window rolled. Re-pin **only** after confirming the
+new number is explained, and add a STATUS changelog row; re-pinning to clear a
+red light hides the drift it exists to catch.
+
 ## Ledger integrity
 
 ```bash

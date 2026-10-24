@@ -5,11 +5,18 @@ A session may edit this file and add one changelog row. Do not paste a new statu
 
 Last verified on `scalping`: 2026-10-19 17:31 UTC (user-supplied box output: 17:30 timer run completed cleanly).
 
+Last verified **from published data only**: 2026-10-24 (book state, ledger
+integrity, deploy gate — see the changelog). The box was **not** contacted:
+`live_status.json` / `connection_status.json` / `system.jsonl` are
+machine-local and cannot be read from a repo checkout. To re-verify liveness
+run `python3 btc/server_check.py` on the box (see `btc/HANDOFF.md`).
+
 ## Gold
 
 - Production book. Engine is the repo root (`run.py` + `config.py`). Dashboard `:8088`. Unit `scalper-bot`.
 - `TRADING_MODE` stays `FORWARD_TEST` until an explicit live decision. Kill switch is `logs/KILL_SWITCH` (blocks new entries only).
-- Paper track record (2026-10-19 16:37 UTC, `logs/paper_account.json`): balance **`$237.98`** (book started $300 on 2026-10-04), **47 closed, 10 wins / 37 losses**. Previous snapshot 2026-10-12: `$249.70`, 21 closed, 4W/17L. A Gold-only live flip is not justified; shared-account rule still applies.
+- Paper track record (2026-10-23 20:00:00 UTC, `logs/paper_account.json`): balance **`$297.40`** (book started $300 on 2026-10-04), **64 closed, 16 wins / 48 losses**, 1 weekend exit. Current book PF **0.99** (gross $319.37 won vs $321.97 lost), net −$2.60. Snapshots: 2026-10-19 `$237.98`, 47 closed, 10W/37L → 2026-10-12 `$249.70`, 21 closed, 4W/17L. The book recovered ~$60 over its last 17 trades; at PF 0.99 that is noise, not an edge. A Gold-only live flip is still not justified; shared-account rule applies.
+- Last action before this snapshot was the weekend-flat rule firing correctly: `SIM_EXIT reason=WEEKEND` at `2026-10-23 20:00:00` (SELL closed −$1.14). No entries until Monday 00:00 UTC.
 - **Effectiveness plan CLOSED 2026-10-24** (`docs/effectiveness_plan_2026-10-24.md`). Fresh `GOLD_M5.csv` (2026-07-15 → 2026-10-23, 20k bars): current config **257 trades / +$29.15 / PF 1.02 / avg R 0.03 / max DD $255**. Sep and Oct both negative. TP 6.0 **rejected** (OOS −$181). ATR floor 3.0/3.5 not adopted (OOS still negative). Walk-forward adopted 1/4 folds. **No strategy parameter changed.** Edge has degraded vs the old spent-file reference (255 / +$456 / PF 1.32).
 - **VOL-REGIME-A CLOSED 2026-10-24** (`docs/research_plan_vol_regime_2026-10-24.md`). Absolute-floor candidates maxed at avgR +0.059 / PF 1.04 on the spent window — failed the pre-registered gate. Pure percentile filter was not active offline. Not adopted.
 - **Active research track: BREAKOUT-B** (`docs/research_plan_breakout_2026-10-24.md`). Pre-registered same day. Next: fresh pull via `tools/pull_gold_m5.sh` + restricted sweep under the locked protocol.
@@ -20,27 +27,31 @@ Last verified on `scalping`: 2026-10-19 17:31 UTC (user-supplied box output: 17:
 
 ## BTC
 
-- Paper book 2026-10-19 16:37 UTC: balance `$295.90`, 85 closed (19W/66L). Phase 1 and 1c remain FAIL; nothing here changes that.
+- Paper book 2026-10-23 09:25:32 UTC: balance **`$287.59`** (started $300 on 2026-10-07), **106 closed, 22 wins / 84 losses**, PF **0.89** (gross $102.27 won vs $114.68 lost), net −$12.41, no open position. 69 SL / 22 TP / 15 BE. Snapshots: 2026-10-19 `$295.90`, 85 closed, 19W/66L. Phase 1 and 1c remain FAIL; nothing here changes that.
+- This is a **loss-making paper book**, which is the expected result of running a shape that failed its gate. Do not read 106 trades as evidence.
 
 - Instance dir `btc/`. Same engine, `btc/config.py` swapped in via `btc/_instance.py`. Dashboard `:8089`. Units `scalper-btc-bot` and `scalper-btc-dashboard`.
 - User-verified 2026-10-07 21:39 UTC: all three units `active`, tree clean, `spread_gate` in the running process is `6250` (13/13 quotes passed, spread 4000, state `ok`). The 1,500 placeholder is no longer what the process is enforcing.
 - `TRADING_MODE="FORWARD_TEST"`. `MAX_SPREAD_POINTS=6250` is the recorded 1.25× TRAIN p90 rule. Paper observation only. Phase 1 is still a fail, so a paper fill is not a go-live.
 - Phase 1 (M5 pullback) is a **FAIL / no-go** on real XM bars (2026-10-03): cold OOS about −$46, PF 0.75. Write-up: `docs/btc_phase1_result_2026-10-03.md`.
 - Phase 1c (Donchian on untouched H1) is a **FAIL / no-go**, not blocked. Collected 2026-10-07 02:55 UTC. Train-selected winner cold OOS `n=96`, −$40.03, PF 0.96. Baseline +$129.23 / PF 1.18 also fails (PF < 1.2, CI includes 0). Write-up: `docs/btc_phase1c_result_2026-10-07.md`. Do not set `BTC_STRATEGY=donchian`. Do not retune `data/BTCUSD_H1.csv`.
-- 2026-10-24: local `WEEKEND_FLAT_ENABLED = False` committed for BTC (24/7; gold's Friday rule does not transfer).
+- **OPEN DECISION — weekend flat for a 24/7 instrument.** `btc/config.py` assigns `WEEKEND_FLAT_ENABLED` twice: `False` (~line 77, "gold's measured rule does not transfer") and `True` (~line 171, "DECIDED 2026-10-23 (user)"). The later assignment wins, so the **effective value is `True`** and has been since 2026-10-23. This entry previously claimed `False` was committed; that is not what the code does. The 2026-10-23 changelog row also says "BTC explicitly off". Code and docs disagree and only the user can settle it. Until then trust the code (`True`), and note the Friday-flat evidence was measured on GOLD M5 only — for BTC it is a risk judgement, not a measured result. Tracked in `btc/HANDOFF.md`.
 
 ## Do not
 
 - Do not raise `MAX_SPREAD_POINTS` again, or change `TRADING_MODE`, `BTC_STRATEGY`, or the service units, without a new cold-OOS pass. 6,250 is the observation gate, not a strategy approval.
 - Do **not** adopt the 2026-10-24 candidates (`ATR_MIN`, `TP_ATR_MULT=6`, session 08–20) — they failed or did not clear OOS on the fresh pull.
 - Do **not** enable `ATR_REGIME_ENABLED` (VOL-REGIME-A closed).
-- Treat proxy or exchange CSVs as BTC evidence. The gate reads XM bars only.
-- Flip either book to `LIVE` on the shared XM account. A separate account or a hard combined risk gate is required first.
-- Re-pull or reuse the inspected 2026-07-25..2026-10-03 BTC M5 window for a new gate.
-- Re-rank on `data/BTCUSD_H1.csv` (sha256 `f7305461…ab21`, 2024-06-25..2026-10-07). That file is now inspected.
-- Re-tune the same RSI-pullback / EMA200 shape on overlapping Gold data without a new pre-registered hypothesis.
+- Do not treat proxy or exchange CSVs as BTC evidence. The gate reads XM bars only.
+- Do not flip either book to `LIVE` on the shared XM account. A separate account or a hard combined risk gate is required first.
+- Do not re-pull or reuse the inspected 2026-07-25..2026-10-03 BTC M5 window for a new gate.
+- Do not re-rank on `data/BTCUSD_H1.csv` (sha256 `f7305461…ab21`, 2024-06-25..2026-10-07). That file is now inspected.
+- Do not re-tune the same RSI-pullback / EMA200 shape on overlapping Gold data without a new pre-registered hypothesis.
+- Do not re-pin a golden baseline (`btc/golden.py`) just to clear a red check. Re-pin only when the movement is explained, and add a changelog row.
 
 ## Server
+
+- **Deploy gate was RED 2026-10-24; fixed the same day.** `tools/smoke_test.py` failed on `btc preflight` (8/9) and `btc edge screen` (9/11). Cause: both suites pinned golden numbers measured on the *previous* `data/GOLD_M5.csv` (backtest `255 / +$456.58 / PF 1.32`, spread 5.3–5.7% of 1R). The 2026-10-24 fresh pull replaced that file (now `257 / +$29.15 / PF 1.02`, spread 6.26%), so the pins went red while the tools were in fact still reproducing `backtest.py` exactly. Because `autosync.sh` runs this gate after merging `origin/main` and **rolls back on failure**, every 15-minute tick since that pull will have reverted its own merge — so merged commits may not be on the box even though they are on `origin/main`. Confirm with `git -C /root/scalper log -1` vs `origin/main` and `tail -40 logs/autosync.log`. Fix: data-dependent golden numbers are now sha256-pinned (`btc/golden.py`) and report **SKIP** with the observed value when the file changes, so a rolling window cannot red-line the gate; data-independent invariants (the `net_R = gross_R − cost_R` identity, `required WR = break-even × (1+cost)`) still assert everywhere. Gate: **16/16 PASS, 0 skipped**. The fix lands on the box through the same autosync path — once this commit is on `origin/main`, the next tick should merge and keep it.
 
 - Timer active + enabled; autosync service disabled, no `[Install]` or boot symlink. 17:00:14 run exited 0/SUCCESS, digest `0 fail, 0 warn`, deploy none. 17:15 skipped after an interrupted manual run; both lock probes were free at 17:29:15. The next timer tick completed at 17:30:23 with push OK, deploy none, `0 fail, 0 warn`, both books fresh (0 min), digest written, and service exit 0/SUCCESS; next tick scheduled 17:45. No repeated skip. Dashboard already restarted after the config change; all five tools executable.
 
@@ -83,3 +94,5 @@ Last verified on `scalping`: 2026-10-19 17:31 UTC (user-supplied box output: 17:
 | 2026-10-24 | Fresh pull + candidates + full backtest/loss anatomy on box. Window 2026-07-15..10-23: **257 / +$29 / PF 1.02**. TP 6.0 rejected (OOS −$181). ATR floor not adopted. Plan **closed** — no strategy parameter change. HANDOFF/STATUS updated. |
 | 2026-10-24 | **VOL-REGIME-A** pre-registered + code landed (default OFF). Later same day: sweep on spent window failed gate (best avgR 0.059 / PF 1.04). **Closed / not adopted.** |
 | 2026-10-24 | **BREAKOUT-B** pre-registered (`docs/research_plan_breakout_2026-10-24.md`). One-command data pull added (`tools/pull_gold_m5.sh`). Active research track. |
+| 2026-10-24 | **Deploy gate repaired** (`btc/golden.py`). `btc/preflight_test.py` + `btc/edge_screen_test.py` pinned golden numbers to the *previous* `data/GOLD_M5.csv`; the fresh pull made both red, and a red `smoke_test.py` makes `autosync.sh` roll back every merge. Now pinned by sha256: a changed file reports SKIP with the observed value, while the data-independent invariants still assert. Re-blessed the baseline to 257 / +$29.15 / PF 1.02 and spread 6.26% of 1R. Gate **16/16, 0 skipped**. No runtime path touched. |
+| 2026-10-24 | **Docs corrected against the code** (no runtime change). `btc/HANDOFF.md` said the 1,500-pt spread placeholder was vetoing the feed, that 0 trades was correct, and that Phase 1c was unrun — all false since 2026-10-07. Rewritten with current book numbers and the "is it running" procedure. STATUS: gold `$297.40`/64/16W-48L (was `$237.98`/47/10W-37L), BTC `$287.59`/106/22W-84L (was `$295.90`/85/19W-66L); corrected the false claim that BTC `WEEKEND_FLAT_ENABLED = False` was committed (effective value is `True`); rebuilt the garbled "Do not" list. |

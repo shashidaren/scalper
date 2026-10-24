@@ -1,11 +1,136 @@
 # HANDOFF — Bitcoin (BTCUSD)
 
-Current truth is [`../STATUS.md`](../STATUS.md). BTC-specific commands are in [`../RUNBOOK.md`](../RUNBOOK.md).
+Current truth is [`../STATUS.md`](../STATUS.md). Commands are in [`../RUNBOOK.md`](../RUNBOOK.md).
+This file orients you on the BTC book only; it is not a second status page.
 
-The previous handoff (946 lines) is archived at [`../docs/archive/btc_HANDOFF_2026-10-07.md`](../docs/archive/btc_HANDOFF_2026-10-07.md). Phase 1 evidence is [`../docs/btc_phase1_result_2026-10-03.md`](../docs/btc_phase1_result_2026-10-03.md). The unrun Phase 1c collect is [`../docs/collect-2026-10-07/README.md`](../docs/collect-2026-10-07/README.md).
+> **Corrected 2026-10-24.** This file previously said the 1,500-point spread
+> placeholder was vetoing the live feed and that "0 trades is correct", and
+> that Phase 1c had not been run. All three were false (the gate moved to
+> 6,250 on 2026-10-07, the book has 106 closed trades, and Phase 1c ran on
+> 2026-10-07 and failed). If you are reading a copy that says otherwise, it is
+> stale — `STATUS.md` and `btc/logs/` win.
 
-Still true, and not a license to edit config:
+## What this book is
 
-- Units are enabled and active. The 1,500-point spread placeholder vetoes the live feed. 0 trades is correct.
-- Phase 1 failed. Phase 1c has not been run.
-- Do not set `BTC_STRATEGY=donchian` or raise `MAX_SPREAD_POINTS` without a passing cold-OOS gate and an explicit user decision.
+A **second instance of the same engine**, not a second engine. `btc/config.py`
+is swapped into `sys.modules["config"]` by `btc/_instance.py`, then the repo
+root's `run.py` / `paper.py` / `strategy.py` run unchanged. Full picture:
+[`../ARCHITECTURE.md`](../ARCHITECTURE.md).
+
+| | |
+|---|---|
+| unit | `scalper-btc-bot` (dashboard `scalper-btc-dashboard`, `:8089`) |
+| config | `btc/config.py` — the only file that makes it a bitcoin bot |
+| mode | `TRADING_MODE = "FORWARD_TEST"` — paper fills only, no orders ever |
+| symbol | `BTCUSD`, M5, magic `999112`, shared bridge `:18812` |
+| strategy | `scalp` (EMA200 + RSI 40/60 pullback), SL 2.0×ATR, TP 5.0×ATR, BE 1.5R |
+| spread gate | `MAX_SPREAD_POINTS = 6250` (1.25× TRAIN p90; live board quotes ~4,000) |
+| risk gates | `MAX_DAILY_LOSS = 8.0`, `MAX_TRADES_PER_DAY = 15` |
+
+## Current state (2026-10-24)
+
+From `btc/logs/paper_account.json`, last trade **2026-10-23 09:25:32**:
+
+| | |
+|---|---|
+| balance | **$287.59** (book started $300 on 2026-10-07) |
+| closed | **106** — 22 wins / 84 losses |
+| profit factor | **0.89** (gross $102.27 won vs $114.68 lost) |
+| exits | 69 SL · 22 TP · 15 BE |
+| open position | none |
+
+That is a **−4.1% paper drawdown over 16 days**. It is consistent with the
+Phase 1 result, not with a working edge: the book is losing for the reason the
+research predicted, not because of a bug. Nothing here is a go-live signal.
+
+## Is it running?
+
+The published files cannot answer that on their own. `paper_account.json` only
+changes on a fill, and `daily_stats.json` only changes at midnight UTC, so a
+healthy bot on a quiet weekend looks exactly like a dead one. The engine's
+real heartbeat (`live_status.json`, `connection_status.json`, `system.jsonl`)
+is deliberately **not** published to git — it changes every 15 s and would
+turn autosync into a commit generator.
+
+Ask the box instead:
+
+```bash
+cd /root/scalper
+python3 btc/server_check.py            # read-only; units, ports, data, ledger
+systemctl is-active scalper-btc-bot scalper-btc-dashboard
+journalctl -u scalper-btc-bot -n 40 --no-pager | tail -20
+cat btc/logs/live_status.json          # updated_at should be seconds old
+```
+
+`btc/server_check.py` is safe to run while gold trades: it imports no MT5
+module and opens no bridge connection. It reports `unknown` rather than a
+guess, which is the point.
+
+**Expect quiet on weekends.** `WEEKEND_FLAT_ENABLED` is effectively `True`
+(see the open question below), so both books stop taking entries from Friday
+20:00 UTC and resume Monday 00:00 UTC. Gold's last action before this snapshot
+was exactly that rule firing: `SIM_EXIT reason=WEEKEND` at
+`2026-10-23 20:00:00` (a SELL closed for −$1.14). A weekend with zero trades
+is the system working, not stalling.
+
+## Why this book has no validated edge
+
+Both pre-registered BTC hypotheses failed their gates. This is the whole
+reason the book stays in paper.
+
+- **Phase 1 — M5 RSI pullback (the shipped shape).** FAIL / no-go on real XM
+  bars (2026-10-03): cold OOS about −$46, PF 0.75.
+  [`../docs/btc_phase1_result_2026-10-03.md`](../docs/btc_phase1_result_2026-10-03.md)
+- **Phase 1c — H1 Donchian breakout.** FAIL / no-go. Collected 2026-10-07
+  02:55 UTC; train-selected winner cold OOS `n=96`, −$40.03, PF 0.96. The
+  baseline (+$129.23, PF 1.18) also fails the gate (PF < 1.2, CI spans 0).
+  [`../docs/btc_phase1c_result_2026-10-07.md`](../docs/btc_phase1c_result_2026-10-07.md)
+
+The paper book therefore runs the shape that already failed, on purpose: it is
+an observation feed, and it is allowed to look bad.
+
+## Open question — weekend flat on a 24/7 instrument
+
+`btc/config.py` currently assigns `WEEKEND_FLAT_ENABLED` **twice**: `False`
+(~line 77, "BTC is 24/7; gold's measured rule does not transfer") and `True`
+(~line 171, "DECIDED 2026-10-23 (user) — BTC flattens on weekends"). The later
+assignment wins, so the **effective value is `True`**, and it has been since
+2026-10-23.
+
+Two STATUS.md entries say the opposite (`2026-10-23`: "BTC explicitly off";
+`2026-10-24`: "`WEEKEND_FLAT_ENABLED = False` committed for BTC"). So the
+documented intent and the running behaviour disagree, and only the user can
+settle it. Until then: trust the code (`True`), do not "fix" the docs to match
+one side, and note that the Friday-flat evidence was measured on
+`data/GOLD_M5.csv` only — for BTC it is a risk judgement, not a measured result.
+
+## Do not
+
+- Set `BTC_STRATEGY=donchian` without a passing cold-OOS gate **and** an
+  explicit user decision. Phase 1c failed; the plumbing exists, the evidence
+  does not.
+- Raise `MAX_SPREAD_POINTS` again. 6,250 is an observation gate, not a
+  strategy approval.
+- Change `TRADING_MODE`, or flip either book to `LIVE` on the shared XM
+  account. That needs a separate account or a hard combined risk gate first.
+- Treat proxy (Binance) or exchange CSVs as BTC evidence. The gate reads XM
+  bars only.
+- Re-pull or re-rank on `data/BTCUSD_H1.csv` (sha256 `f7305461…ab21`). That
+  file is inspected; reusing it makes any new gate worthless.
+- Re-tune the same RSI-pullback / EMA200 shape on overlapping data. A new BTC
+  hypothesis needs its own pre-registered rule and a fresh pull.
+
+## Research plumbing (read-only)
+
+Every research script must run through `btc/tool.py` so `btc/config.py` is the
+active config; a bare `import config` picks up gold.
+
+```bash
+mt5env/bin/python btc/tool.py btc/edge_screen.py --family donchian --csv data/BTCUSD_H1.csv
+mt5env/bin/python btc/tool.py btc/train_select.py --family donchian --csv data/BTCUSD_H1.csv
+python3 btc/server_check.py              # the "is anything running" collector
+mt5env/bin/python btc/preflight.py       # would the spread gate let it trade?
+```
+
+Gate rule: fail when net ≤ 0, PF < 1.2, n < 60, or gross ≤ cost. A pass is a
+document, then a question — never a config edit.
