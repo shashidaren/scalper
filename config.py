@@ -182,6 +182,17 @@ ATR_MIN = 0.50
 SL_ATR_MULT = 2.0
 TP_ATR_MULT = 5.0
 
+# --- Volatility regime filter (VOL-REGIME-A research, 2026-10-24) ---
+# Default OFF so the live/paper book is unchanged until a candidate clears the
+# pre-registered gate in docs/research_plan_vol_regime_2026-10-24.md.
+# When enabled, entries are only allowed when current ATR is at/above the
+# configured percentile of the trailing lookback window (and optional absolute
+# floor). See the research plan for the exact search space and success criteria.
+ATR_REGIME_ENABLED = False
+ATR_LOOKBACK = 100          # candidates: 50 / 100 / 200
+ATR_PERCENTILE = 50         # candidates: 40 / 50 / 60 / 70
+ATR_MIN_ABSOLUTE = None     # candidates: None / 2.5 / 3.0
+
 # --- Instrument economics (symbol-agnostic engine) ---
 # XAU/USD on XM Standard: 1.00 lot = 100 oz, so $PnL = price_diff * lots * 100.
 # A BTC instance overrides both of these (1 lot = 1 BTC, same 2 digits).
