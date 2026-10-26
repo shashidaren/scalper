@@ -11,7 +11,9 @@ run.py                         engine loop (risk gates, kill switch, stale-tick,
   live_ledger.LiveLedger       LIVE realized PnL, logs/live_ledger.json
   spread_gate.py               entry veto + dashboard banner (does not change the gate)
   logger.py                    logs/{system,trades}.jsonl, live_status.json, …
-dashboard.py                   reads those files only, :8088
+dashboard.py                   reads those files only, :8088 — Overview + Scalp tab
+scalp_view.py                  read-only projections for the Scalp tab: the open
+                               trade and the paired win/loss record (no new state)
 deploy.sh                      manual deploy: git pull --ff-only; restart only if a runtime path changed
 tools/autosync.sh              cron: publish paper state, merge origin/main behind a smoke gate
 tools/smoke_test.py            the deploy gate (hermetic suites + engine imports)
@@ -28,7 +30,8 @@ btc/_instance.py               sys.modules["config"] swap, so research scripts c
 
 Every engine module does a bare `import config`. Whichever `config.py` is registered first is the instance. `btc/tool.py` is how research runs under the BTC config. Do not `import config` from a script that has already imported the gold one.
 
-Shared on purpose: bridge, loop, paper book, ledger, dashboard app, deploy, systemd pattern.
+Shared on purpose: bridge, loop, paper book, ledger, dashboard app (both views),
+deploy, systemd pattern.
 Not shared: magic number, log dir, contract size, session filter, spread gate, strategy params.
 `portfolio.py` is the only module that reads both log dirs. It is a combined-account brake, not a strategy.
 
@@ -39,7 +42,7 @@ Adding a third symbol means another instance dir with its own `config.py` and la
 | Unit | Entry | Port |
 |---|---|---|
 | `scalper-bot` | `/root/scalper/run.py` | dashboard 8088 |
-| `scalper-dashboard` | `dashboard.py` | 8088 |
+| `scalper-dashboard` | `dashboard.py` | 8088 (`/` overview, `/scalp` record) |
 | `scalper-btc-bot` | `/root/scalper/btc/run.py` | — |
 | `scalper-btc-dashboard` | `btc/dashboard.py` | 8089 |
 

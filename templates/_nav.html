@@ -1,0 +1,11 @@
+{# Tab bar shared by every view of this app. `tab` is set by the route. #}
+<div class="tabs">
+  <a href="/" class="{% if tab == 'overview' %}active{% endif %}">Overview</a>
+  <a href="/scalp" class="{% if tab == 'scalp' %}active{% endif %}">Scalp</a>
+  <span class="spacer"></span>
+  <span class="meta">
+    {% if config is defined and config %}{{ config.symbol }}{% endif %}
+    {% if live is defined and live and live.mode %}&nbsp;•&nbsp;{{ live.mode }}{% endif %}
+    {% if live is defined and live and live.connected %}&nbsp;•&nbsp;<span class="status-dot on"></span>connected{% else %}&nbsp;•&nbsp;<span class="status-dot off"></span>offline{% endif %}
+  </span>
+</div>

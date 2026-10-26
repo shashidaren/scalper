@@ -8,6 +8,27 @@ An experimental algorithmic trading and backtesting framework for **GOLD / XAUUS
 
 ## Changelog
 
+### 2026-10-26 – Dashboard SCALP tab (`/scalp`)
+
+- The dashboard is now two views of one app. **Overview** (`/`) is unchanged.
+  **Scalp** (`/scalp`, same port, same unit) shows the open trade — entry,
+  mark, stop, target, distance to each in points, unrealized USD and R, the
+  reward:risk actually being run, and how far price has moved through its own
+  stop→target band — and, below it, the **winning and losing trade record**:
+  one row per trade with outcome, exit reason, hold time, R multiple, P&L, plus
+  win rate, profit factor, streaks, drawdown and a cumulative-P&L curve.
+- It is read-only. `scalp_view.py` pairs the lifecycle events already written by
+  the engine (`logs/ledger.jsonl`, a fresh tail of `logs/trades.jsonl`) with the
+  open position in `logs/paper_account.json` and the quote in
+  `logs/live_status.json`. No new state file, no new service, no MT5 access.
+- Wins are `profit > 0`, losses `profit <= 0`, TIME exits excluded — the book's
+  own convention in `paper.py`, so `/scalp` cannot disagree with
+  `paper_account.json`. The record covers the current book only, so a
+  `paper.py --reset` starts a new one.
+- `GET /api/scalp` (filters: `?result=wins|losses|breakeven`, `?limit=N`).
+  `tests/test_scalp_view.py` runs inside `tools/smoke_test.py`. Write-up:
+  `docs/dashboard_scalp_2026-10-26.md`.
+
 ### 2026-10-01 – Trade-frequency tuning (RSI 40/60, session 07–20 UTC)
 
 - User feedback: the bot was taking very few trades (174 over ~101 days of
@@ -107,7 +128,8 @@ python run.py
 uvicorn dashboard:app --host 0.0.0.0 --port 8088
 ```
 
-Dashboard: http://YOUR_SERVER_IP:8088
+Dashboard: http://YOUR_SERVER_IP:8088          (overview)
+           http://YOUR_SERVER_IP:8088/scalp    (current trade + win/loss record)
 
 ---
 

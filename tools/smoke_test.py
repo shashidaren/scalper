@@ -40,6 +40,9 @@ SKIP_DIRS = {".git", ".venv", "venv", "mt5env", "logs", "data",
 ENGINE_MODULES = [
     "config", "logger", "strategy", "paper", "spread_gate", "risk_sizer",
     "portfolio", "live_ledger", "live_position", "risk_guard", "mt5_bridge", "run",
+    # Read-only projections behind the dashboard's SCALP tab. Imported here so a
+    # syntax-OK module that cannot resolve its own imports still fails the gate.
+    "scalp_view",
 ]
 
 # (label, argv-relative-to-root, modules that must be importable)
@@ -54,6 +57,7 @@ SCRIPTS = [
     ("check_data", ["tests/test_check_data.py"], []),
     ("heartbeat", ["tests/test_heartbeat.py"], []),
     ("ledger export", ["tests/test_ledger_export.py"], []),
+    ("scalp view", ["tests/test_scalp_view.py"], []),
     ("btc preflight", ["btc/preflight_test.py"], ["pandas", "numpy"]),
     ("btc edge screen", ["btc/edge_screen_test.py"], ["pandas", "numpy"]),
     ("btc strategy", ["btc/strategy_btc_test.py"], ["pandas", "numpy", "rpyc"]),
