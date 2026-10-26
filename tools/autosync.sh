@@ -306,7 +306,7 @@ svc_active()    { systemctl is-active --quiet "$1" 2>/dev/null; }
 is_inert_for_engine() {
     case "$1" in
         docs/*|research/*|tests/*|tools/*|*.md|deploy.sh) return 0 ;;
-        dashboard.py|templates/*) return 0 ;;
+        dashboard.py|scalp_view.py|templates/*) return 0 ;;
         backtest.py|fetch_data.py|gold.py|balance.py|wait_for_mt5.py) return 0 ;;
         btc/*)
             # btc/config.py is read by the shared portfolio gate for the gold
@@ -319,7 +319,10 @@ is_inert_for_engine() {
 
 is_inert_for_dashboard() {
     case "$1" in
-        dashboard.py|config.py|logger.py|portfolio.py|templates/*) return 1 ;;
+        # uvicorn holds these as imported modules, so a change needs a restart
+        # (templates/ does not - Jinja re-reads them per request).
+        dashboard.py|config.py|logger.py|portfolio.py|scalp_view.py) return 1 ;;
+        templates/*) return 1 ;;
     esac
     return 0
 }
@@ -327,7 +330,7 @@ is_inert_for_dashboard() {
 is_inert_for_btc_engine() {
     case "$1" in
         docs/*|research/*|tests/*|tools/*|*.md|deploy.sh) return 0 ;;
-        dashboard.py|templates/*) return 0 ;;
+        dashboard.py|scalp_view.py|templates/*) return 0 ;;
         backtest.py|fetch_data.py|gold.py|balance.py|wait_for_mt5.py) return 0 ;;
         btc/config.py|btc/run.py|btc/strategy_btc.py|btc/_instance.py) return 1 ;;
         btc/*) return 0 ;;
@@ -338,7 +341,7 @@ is_inert_for_btc_engine() {
 is_inert_for_btc_dashboard() {
     case "$1" in
         btc/dashboard.py|btc/config.py|config.py|logger.py|portfolio.py) return 1 ;;
-        dashboard.py|templates/*) return 1 ;;
+        dashboard.py|scalp_view.py|templates/*) return 1 ;;
     esac
     return 0
 }
