@@ -101,8 +101,9 @@ pull_failed() {   # reason, current sha, captured git output
 #    config/sys.path, EXCEPT btc/config.py: the shared portfolio gate reads its
 #    MAX_DAILY_LOSS / MAX_TRADES_PER_DAY through portfolio.py::_btc_config().
 #  * scalper-dashboard is a read-only viewer: only dashboard.py, config.py,
-#    logger.py, portfolio.py and templates/ are runtime inputs (templates/ is
-#    re-read per request by Jinja; dashboard.py is NOT - uvicorn holds it).
+#    logger.py, portfolio.py, scalp_view.py and templates/ are runtime inputs
+#    (templates/ is re-read per request by Jinja; the modules are NOT - uvicorn
+#    holds them, so scalp_view.py needs a restart just like dashboard.py).
 #  * scalper-btc-bot is the SAME engine under btc/config.py (btc/run.py): every
 #    shared engine module is a runtime input, plus btc/config.py, btc/run.py,
 #    btc/strategy_btc.py and btc/_instance.py. Gold's config.py is shadowed by
@@ -122,24 +123,24 @@ is_inert_for() {
       case "$path" in
         btc/config.py) return 1 ;;
         btc/*) return 0 ;;
-        backtest.py|fetch_data.py|gold.py|balance.py|dashboard.py|templates/*) return 0 ;;
+        backtest.py|fetch_data.py|gold.py|balance.py|dashboard.py|scalp_view.py|templates/*) return 0 ;;
       esac
       ;;
     scalper-dashboard)
       case "$path" in
-        dashboard.py|config.py|logger.py|portfolio.py|templates/*) return 1 ;;
+        dashboard.py|config.py|logger.py|portfolio.py|scalp_view.py|templates/*) return 1 ;;
         *) return 0 ;;
       esac
       ;;
     scalper-btc-bot)
       case "$path" in
-        btc/dashboard.py|dashboard.py|templates/*) return 0 ;;
+        btc/dashboard.py|dashboard.py|scalp_view.py|templates/*) return 0 ;;
         backtest.py|fetch_data.py|gold.py|balance.py) return 0 ;;
       esac
       ;;
     scalper-btc-dashboard)
       case "$path" in
-        btc/dashboard.py|btc/config.py|dashboard.py|config.py|logger.py|portfolio.py|templates/*) return 1 ;;
+        btc/dashboard.py|btc/config.py|dashboard.py|config.py|logger.py|portfolio.py|scalp_view.py|templates/*) return 1 ;;
         *) return 0 ;;
       esac
       ;;
@@ -171,7 +172,7 @@ dashboard_relevant_paths() {
   while IFS= read -r f; do
     [ -n "$f" ] || continue
     case "$f" in
-      dashboard.py|config.py|logger.py|portfolio.py|templates/*) out="${out}${f} " ;;
+      dashboard.py|config.py|logger.py|portfolio.py|scalp_view.py|templates/*) out="${out}${f} " ;;
     esac
   done <<< "$1"
   printf '%s' "$out"

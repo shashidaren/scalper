@@ -147,6 +147,13 @@ expect_log btc_only_commit_skips_gold 'restart skipped for scalper-bot'
 run_case templates_only_skips_gold '' GIT_DIFF=templates/index.html
 expect_log templates_only_skips_gold 'dashboard-relevant change'
 
+# scalp_view.py is imported by dashboard.py, so uvicorn holds it in memory: a
+# view-only change restarts both dashboards and neither book (it is not an
+# engine input - that is what the inert list above asserts).
+run_case scalp_view_restarts_both_dashboards 'scalper-dashboard scalper-btc-dashboard' \
+  DEPLOY_SERVICES='scalper-bot scalper-dashboard scalper-btc-bot scalper-btc-dashboard' \
+  GIT_DIFF='scalp_view.py'
+
 # btc/config.py IS a runtime input for gold's shared portfolio gate.
 run_case btc_config_restarts_gold scalper-bot GIT_DIFF=btc/config.py
 
