@@ -8,9 +8,10 @@ RPyC connection.
 """
 
 import json
+import math
 import traceback
 from pathlib import Path
-from datetime import datetime
+from datetime import datetime, timezone
 
 from fastapi import FastAPI, Request
 from fastapi.responses import HTMLResponse
@@ -130,6 +131,37 @@ def error_page(e: Exception) -> HTMLResponse:
         """,
         status_code=200,
     )
+
+
+def readiness_context() -> dict:
+    """Gold planning view only; never promotes a book or writes trading state."""
+    snapshot = None
+    warning = None
+    try:
+        data = json.loads((LOG_DIR / "paper_account.json").read_text())
+        closed = data["closed"]
+        balance = data["balance"]
+        if (type(closed) is not int or closed < 0 or
+                type(balance) not in (int, float) or not math.isfinite(balance)):
+            raise ValueError("invalid book counters")
+        stamp = datetime.fromisoformat(data["updated_at"])
+        if stamp.tzinfo is None:
+            stamp = stamp.replace(tzinfo=timezone.utc)
+        age = (datetime.now(timezone.utc) - stamp).total_seconds() / 3600
+        snapshot = {"closed": closed, "balance": balance,
+                    "updated_at": data["updated_at"], "stale": age > 24 or age < 0,
+                    "remaining": max(0, 300 - closed)}
+    except (OSError, ValueError, TypeError, KeyError):
+        warning = "Paper snapshot unavailable or invalid. Progress is unknown, not passed."
+    return {"tab": "readiness", "title": DASHBOARD_TITLE,
+            "config": config_snapshot(), "snapshot": snapshot, "warning": warning,
+            "is_gold": getattr(config, "SYMBOL", "GOLD") == "GOLD"}
+
+
+@app.get("/readiness", response_class=HTMLResponse)
+async def readiness(request: Request):
+    return templates.TemplateResponse(
+        request=request, name="readiness.html", context=readiness_context())
 
 
 @app.get("/scalp", response_class=HTMLResponse)
