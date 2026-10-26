@@ -1,0 +1,431 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>{{ title }} — Scalp</title>
+  <meta http-equiv="refresh" content="15" />
+  {% include "_style.html" %}
+  <style>
+    .mono { font-family: ui-monospace, monospace; }
+    .kicker { color: var(--muted); font-size: 0.75rem; text-transform: uppercase;
+              letter-spacing: 0.05em; font-weight: 600; }
+    .trade-price { font-size: 1.05rem; font-weight: 700; }
+    .chips { display: flex; flex-wrap: wrap; gap: 0.4rem; margin-top: 0.5rem; }
+    .chip { font-size: 0.72rem; padding: 0.1rem 0.45rem; border-radius: 9999px;
+            border: 1px solid var(--border); color: var(--muted); }
+    .chip.hot { border-color: rgba(34,197,94,0.5); color: var(--green); }
+    .track { position: relative; height: 12px; border-radius: 9999px;
+             background: rgba(148,163,184,0.18); margin: 0.7rem 0 0.45rem; overflow: visible; }
+    .track .fill { position: absolute; left: 0; top: 0; bottom: 0;
+                   border-radius: 9999px;
+                   background: linear-gradient(90deg, rgba(239,68,68,0.55), rgba(34,197,94,0.75)); }
+    .track .marker { position: absolute; top: -3px; width: 2px; height: 18px;
+                     background: var(--text); border-radius: 2px; }
+    .track-labels { display: flex; justify-content: space-between;
+                    font-size: 0.75rem; color: var(--muted); }
+    .filters { display: flex; flex-wrap: wrap; gap: 0.4rem; align-items: center;
+               margin-bottom: 0.9rem; }
+    .filters a { text-decoration: none; color: var(--muted); font-size: 0.8rem;
+                 padding: 0.25rem 0.65rem; border-radius: 9999px;
+                 border: 1px solid var(--border); font-weight: 600; }
+    .filters a:hover { color: var(--text); }
+    .filters a.active { background: var(--card); color: var(--text);
+                        border-color: rgba(59,130,246,0.7); }
+    .filters .count { opacity: 0.7; font-weight: 400; }
+    .table-wrap { overflow-x: auto; }
+    .metric { display: flex; justify-content: space-between; gap: 0.75rem;
+              font-size: 0.85rem; padding: 0.28rem 0;
+              border-bottom: 1px dashed rgba(51,65,85,0.7); }
+    .metric:last-child { border-bottom: none; }
+    .metric .k { color: var(--muted); }
+    .metric .v { font-weight: 600; }
+    .empty { color: var(--muted); padding: 0.5rem 0; }
+    svg.spark { width: 100%; height: 90px; display: block; }
+    .note { color: var(--muted); font-size: 0.78rem; margin-top: 0.6rem; }
+    a.tablink { color: var(--blue); }
+  </style>
+</head>
+<body>
+  {% include "_nav.html" %}
+
+  <h1>{{ title }} — Scalp</h1>
+  <p class="subtitle">
+    {{ config.symbol }} &nbsp;•&nbsp; current trade and the closed-trade record
+    &nbsp;•&nbsp; Last refresh: {{ now }} &nbsp;•&nbsp; Auto-refresh every 15s
+  </p>
+
+  {% if not scalp.available %}
+  <div class="card">
+    <h2>Nothing booked yet</h2>
+    <div class="empty">
+      No <code>SIM_ENTRY</code> / <code>SIM_EXIT</code> rows have been written to
+      <code>{{ scalp.sources.sources|join(", ") if scalp.sources.sources else "logs/" }}</code>.
+      This tab fills in on the first trade the engine takes — it never invents state.
+    </div>
+  </div>
+  {% else %}
+
+  <!-- ------------------------------------------------ current open scalp -->
+  <h2 class="section-title">Current scalp</h2>
+  <div class="two-col" style="margin-bottom:1.5rem">
+    {% if scalp.position %}
+    {% set p = scalp.position %}
+    <div class="card">
+      <h2>
+        Open position
+        <span class="badge {{ 'buy' if p.side == 'BUY' else 'sell' }}"
+              style="margin-left:0.4rem">{{ p.side }}</span>
+      </h2>
+      <div class="chips">
+        <span class="chip">ticket {{ p.ticket }}</span>
+        <span class="chip">vol {{ p.volume }}</span>
+        {% if p.be_armed %}<span class="chip hot">BE armed — stop at entry</span>{% endif %}
+        <span class="chip">opened {{ p.opened or "—" }}</span>
+        {% if p.held_min is not none %}<span class="chip">held {{ "%g"|format(p.held_min) }} min</span>{% endif %}
+      </div>
+
+      <table style="margin-top:0.9rem">
+        <tbody>
+          <tr><th>Entry</th><td class="trade-price">{{ "%.2f"|format(p.entry) }}</td>
+              <th>Mark</th>
+              <td class="trade-price">{% if p.mark is not none %}{{ "%.2f"|format(p.mark) }}{% else %}—{% endif %}</td></tr>
+          <tr><th>Stop</th>
+              <td class="negative">{% if p.sl is not none %}{{ "%.2f"|format(p.sl) }}{% else %}—{% endif %}
+                {% if p.sl_dist %}<span class="note">({{ p.sl_dist }} away)</span>{% endif %}</td>
+              <th>Target</th>
+              <td class="positive">{% if p.tp is not none %}{{ "%.2f"|format(p.tp) }}{% else %}—<span class="note">(none)</span>{% endif %}
+                {% if p.tp_dist %}<span class="note">(+{{ p.tp_dist }})</span>{% endif %}</td></tr>
+          <tr><th>To stop</th>
+              <td>{{ p.to_sl_points if p.to_sl_points is not none else "—" }} pts</td>
+              <th>To target</th>
+              <td>{{ p.to_tp_points if p.to_tp_points is not none else "—" }} pts</td></tr>
+        </tbody>
+      </table>
+
+      {% if p.progress_pct is not none %}
+      <div class="track">
+        <div class="fill" style="width: {{ p.progress_pct }}%"></div>
+        <div class="marker" style="left: calc({{ p.progress_pct }}% - 1px)"></div>
+      </div>
+      <div class="track-labels">
+        <span>stop {{ "%.2f"|format(p.sl) }}</span>
+        <span>{{ p.progress_pct }}% of the way to target</span>
+        <span>target {{ "%.2f"|format(p.tp) }}</span>
+      </div>
+      {% else %}
+      <div class="note">No target on this trade, so there is no band to draw.
+        It exits on the opposite signal / the time rule.</div>
+      {% endif %}
+    </div>
+
+    <div class="card">
+      <h2>Unrealized</h2>
+      {% if p.unrealized is not none %}
+      <div class="value {% if p.unrealized >= 0 %}positive{% else %}negative{% endif %}">
+        {{ "%+.2f"|format(p.unrealized) }} USD
+      </div>
+      <div style="color:var(--muted)">
+        {% if p.unrealized_r is not none %}
+          <strong class="{% if p.unrealized_r >= 0 %}positive{% else %}negative{% endif %}">
+            {{ "%+.2f"|format(p.unrealized_r) }}R</strong> of the risk taken
+        {% else %}
+          R unavailable (no stop distance on this position)
+        {% endif %}
+      </div>
+      {% else %}
+      <div class="value small">—</div>
+      <div class="note">No live quote in <code>live_status.json</code>, so the
+        mark-to-market cannot be computed. Entry and stops above are the
+        engine's own numbers.</div>
+      {% endif %}
+
+      <div style="margin-top:1rem">
+        <div class="metric"><span class="k">Risk if stopped</span>
+          <span class="v negative">{{ "-%.2f"|format(p.risk) if p.risk is not none else "—" }} USD</span></div>
+        <div class="metric"><span class="k">Reward at target</span>
+          <span class="v positive">{{ "+%.2f"|format(p.reward) if p.reward is not none else "—" }} USD</span></div>
+        <div class="metric"><span class="k">Reward : risk</span>
+          <span class="v">{{ "%.2f"|format(p.rr) if p.rr is not none else "—" }} : 1</span></div>
+        <div class="metric"><span class="k">Balance</span>
+          <span class="v">{{ "%.2f"|format(scalp.balance) if scalp.balance is not none else "—" }}</span></div>
+      </div>
+    </div>
+    {% else %}
+    <div class="card">
+      <h2>Open position</h2>
+      <div class="value small" style="color:var(--muted)">Flat</div>
+      <div class="note">
+        No open trade on this book right now. The engine is waiting for the next
+        entry that clears the gates.
+      </div>
+      {% if scalp.trades %}
+      {% set last = scalp.trades[0] %}
+      <div class="chips">
+        <span class="chip">last exit {{ last.exit_time }}</span>
+        <span class="chip {{ 'hot' if last.outcome == 'WIN' else '' }}">{{ last.outcome }}</span>
+        <span class="chip">{% if last.profit is not none %}{{ "%+.2f"|format(last.profit) }} USD{% endif %}</span>
+        <span class="chip">{{ last.reason }}</span>
+      </div>
+      {% endif %}
+    </div>
+
+    <div class="card">
+      <h2>Book</h2>
+      <div class="value {% if scalp.stats.net >= 0 %}positive{% else %}negative{% endif %}">
+        {{ "%+.2f"|format(scalp.stats.net) }} USD
+      </div>
+      <div style="color:var(--muted)">over the last {{ scalp.stats.n }} closed trades</div>
+      <div style="margin-top:1rem">
+        <div class="metric"><span class="k">Balance</span>
+          <span class="v">{{ "%.2f"|format(scalp.balance) if scalp.balance is not none else "—" }}</span></div>
+        <div class="metric"><span class="k">Win rate</span>
+          <span class="v">{{ scalp.stats.win_rate if scalp.stats.win_rate is not none else "—" }}%</span></div>
+        <div class="metric"><span class="k">Profit factor</span>
+          <span class="v">{{ scalp.stats.pf if scalp.stats.pf is not none else "—" }}</span></div>
+      </div>
+    </div>
+    {% endif %}
+  </div>
+
+  <!-- ------------------------------------------------------ book at a glance -->
+  <div class="grid">
+    <div class="card">
+      <h2>Closed trades</h2>
+      <div class="value">{{ scalp.stats.n }}</div>
+      <div style="color:var(--muted)">
+        <span class="positive">{{ scalp.stats.wins }}W</span> /
+        <span class="negative">{{ scalp.stats.losses }}L</span>
+        {% if scalp.stats.be %}<span class="note">(includes {{ scalp.stats.be }} breakeven exit{{ "" if scalp.stats.be == 1 else "s" }})</span>{% endif %}
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>Win rate</h2>
+      <div class="value">{{ scalp.stats.win_rate if scalp.stats.win_rate is not none else "—" }}%</div>
+      <div style="color:var(--muted)">
+        last 10: {{ scalp.stats.last10_win_rate if scalp.stats.last10_win_rate is not none else "—" }}%
+        &nbsp;•&nbsp; last 20: {{ scalp.stats.last20_win_rate if scalp.stats.last20_win_rate is not none else "—" }}%
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>Net / profit factor</h2>
+      <div class="value {% if scalp.stats.net >= 0 %}positive{% else %}negative{% endif %}">
+        {{ "%+.2f"|format(scalp.stats.net) }}
+      </div>
+      <div style="color:var(--muted)">
+        PF {{ "%.2f"|format(scalp.stats.pf) if scalp.stats.pf is not none else "— (no losses yet)" }}
+        &nbsp;•&nbsp; {{ "%+.2f"|format(scalp.stats.gross_win) }} won /
+        {{ ("-%.2f"|format(scalp.stats.gross_loss)) if scalp.stats.gross_loss else "0.00" }} lost
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>Expectancy</h2>
+      <div class="value {% if scalp.stats.expectancy and scalp.stats.expectancy >= 0 %}positive{% else %}negative{% endif %}">
+        {% if scalp.stats.expectancy is not none %}{{ "%+.2f"|format(scalp.stats.expectancy) }}{% else %}—{% endif %}
+      </div>
+      <div style="color:var(--muted)">
+        USD per closed trade &nbsp;•&nbsp;
+        avg {{ scalp.stats.avg_r if scalp.stats.avg_r is not none else "—" }}R
+        &nbsp;•&nbsp; total {{ scalp.stats.sum_r if scalp.stats.sum_r is not none else "—" }}R
+      </div>
+    </div>
+  </div>
+
+  <!-- --------------------------------------------------------- equity curve -->
+  {% if scalp.sparkline %}
+  <div class="card" style="margin-bottom:1.5rem">
+    <h2>Cumulative P&amp;L, current book ({{ scalp.stats.n }} trades, oldest → newest)</h2>
+    <svg class="spark" viewBox="0 0 {{ scalp.sparkline.width }} {{ scalp.sparkline.height }}"
+         preserveAspectRatio="none">
+      <line x1="0" y1="{{ scalp.sparkline.zero_y }}" x2="{{ scalp.sparkline.width }}"
+            y2="{{ scalp.sparkline.zero_y }}"
+            stroke="#475569" stroke-width="0.4" stroke-dasharray="1.5 1.5" />
+      <polyline points="{{ scalp.sparkline.points }}" fill="none" stroke="#3b82f6"
+                stroke-width="0.9" vector-effect="non-scaling-stroke"
+                stroke-linejoin="round" stroke-linecap="round" />
+    </svg>
+    <div class="track-labels">
+      <span>max drawdown {{ "%.2f"|format(scalp.stats.max_drawdown) }} USD</span>
+      <span>dashed line = break-even</span>
+    </div>
+  </div>
+  {% endif %}
+
+  <!-- --------------------------------------------------------- trade record -->
+  <h2 class="section-title">Trade record — winning and losing trades</h2>
+  <div class="filters">
+    {% for key, label in [("all", "All"), ("wins", "Wins"), ("losses", "Losses"), ("breakeven", "Breakeven / time")] %}
+    <a href="/scalp?result={{ key }}&amp;limit={{ scalp.limit }}"
+       class="{% if scalp.filtered.key == key %}active{% endif %}">{{ label }}
+      <span class="count">
+        {%- if key == "all" %} ({{ scalp.stats.n }})
+        {%- elif key == "wins" %} ({{ scalp.stats.wins }})
+        {%- elif key == "losses" %} ({{ scalp.stats.losses }})
+        {%- else %} ({{ scalp.stats.be + scalp.stats.time_exits }}){% endif -%}
+      </span></a>
+    {% endfor %}
+    {% if scalp.filtered.key != "all" %}
+    <span style="color:var(--muted);font-size:0.8rem">
+      filtered net {{ "%+.2f"|format(scalp.filtered.stats.net) }} USD over
+      {{ scalp.filtered.count }} trade{{ "" if scalp.filtered.count == 1 else "s" }},
+      PF {{ scalp.filtered.stats.pf if scalp.filtered.stats.pf is not none else "—" }}
+    </span>
+    {% endif %}
+    <span style="margin-left:auto;color:var(--muted);font-size:0.8rem">
+      showing {{ scalp.trades|length }} of {{ scalp.filtered.count }} (newest first)
+    </span>
+  </div>
+
+  <div class="card" style="margin-bottom:1.5rem">
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th>#</th><th>Opened</th><th>Side</th><th>Entry</th><th>Exit</th>
+            <th>Result</th><th>Why</th><th>Hold</th><th>R</th>
+            <th style="text-align:right">P&amp;L</th><th style="text-align:right">Balance</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for t in scalp.trades %}
+          <tr class="log-row">
+            <td style="color:var(--muted)">{{ t.seq }}</td>
+            <td>{{ t.entry_time[5:16] if t.entry_time else "—" }}</td>
+            <td><span class="badge {{ 'buy' if t.side == 'BUY' else 'sell' }}">{{ t.side }}</span></td>
+            <td>{{ "%.2f"|format(t.entry) if t.entry is not none else "—" }}</td>
+            <td>{{ "%.2f"|format(t.exit) if t.exit is not none else "—" }}</td>
+            <td>
+              {% if t.outcome == "WIN" %}<span class="badge buy">WIN</span>
+              {% elif t.outcome == "LOSS" %}<span class="badge sell">LOSS</span>
+              {% elif t.outcome == "BE" %}<span class="badge skip">BE</span>
+              {% elif t.outcome == "TIME" %}<span class="badge skip">TIME</span>
+              {% else %}<span class="badge">{{ t.outcome }}</span>{% endif %}
+            </td>
+            <td style="color:var(--muted)">{{ t.reason }}</td>
+            <td>{{ ("%g"|format(t.hold_min) ~ "m") if t.hold_min is not none else "—" }}</td>
+            <td class="{% if t.r is not none and t.r >= 0 %}positive{% elif t.r is not none %}negative{% endif %}">
+              {% if t.r is not none %}{{ "%+.2f"|format(t.r) }}R{% else %}—{% endif %}
+            </td>
+            <td style="text-align:right"
+                class="{% if t.profit is not none and t.profit >= 0 %}positive{% elif t.profit is not none %}negative{% endif %}">
+              {% if t.profit is not none %}{{ "%+.2f"|format(t.profit) }}{% else %}—{% endif %}
+            </td>
+            <td style="text-align:right;color:var(--muted)">
+              {{ "%.2f"|format(t.balance_after) if t.balance_after is not none else "—" }}
+            </td>
+          </tr>
+          {% else %}
+          <tr><td colspan="11" class="empty">No trades match this filter.</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% if scalp.stats.unpriced %}
+    <div class="note">
+      {{ scalp.stats.unpriced }} LIVE trade(s) here were recorded without a fill price
+      (the <code>ENTRY</code> event does not carry one), so their entry and R show
+      “—”. The P&amp;L is MT5's own <code>profit + swap + commission</code>.
+    </div>
+    {% endif %}
+    <div class="note">
+      Wins are <code>profit &gt; 0</code>, losses are <code>profit ≤ 0</code>, which
+      is the book's own convention in <code>paper.py</code> — so a breakeven exit
+      counts as a loss here exactly as it does in <code>paper_account.json</code>.
+      TIME exits are held out of the tally on both sides.
+      {% if scalp.state_closed is not none %}
+      The record covers the current book (last {{ scalp.state_closed }} closed
+      trade{{ "" if scalp.state_closed == 1 else "s" }}) — a
+      <code>paper.py --reset</code> starts a new one.
+      {% endif %}
+    </div>
+  </div>
+
+  <!-- ------------------------------------------------------------ breakdown -->
+  <div class="two-col" style="margin-bottom:1.5rem">
+    <div class="card">
+      <h2>How trades ended</h2>
+      {% for reason, count in scalp.stats.by_reason.items()|sort %}
+      <div class="metric">
+        <span class="k">{{ reason }}</span>
+        <span class="v">{{ count }} <span class="note">({{ "%.0f"|format(100 * count / scalp.stats.n) }}%)</span></span>
+      </div>
+      {% else %}
+      <div class="empty">No closed trades yet.</div>
+      {% endfor %}
+    </div>
+
+    <div class="card">
+      <h2>Shape of the record</h2>
+      <div class="metric"><span class="k">Best trade</span>
+        <span class="v positive">{{ "%+.2f"|format(scalp.stats.best) if scalp.stats.best is not none else "—" }}</span></div>
+      <div class="metric"><span class="k">Worst trade</span>
+        <span class="v negative">{{ "%+.2f"|format(scalp.stats.worst) if scalp.stats.worst is not none else "—" }}</span></div>
+      <div class="metric"><span class="k">Average win / loss</span>
+        <span class="v">
+          {% if scalp.stats.avg_win is not none %}{{ "%+.2f"|format(scalp.stats.avg_win) }}{% else %}—{% endif %}
+          /
+          {% if scalp.stats.avg_loss is not none %}{{ ("-%.2f"|format(scalp.stats.avg_loss)) if scalp.stats.avg_loss else "0.00" }}{% else %}—{% endif %}
+        </span></div>
+      <div class="metric"><span class="k">Longest losing streak</span>
+        <span class="v">{{ scalp.stats.max_loss_streak }}</span></div>
+      <div class="metric"><span class="k">Longest winning streak</span>
+        <span class="v">{{ scalp.stats.max_win_streak }}</span></div>
+      <div class="metric"><span class="k">Current streak</span>
+        <span class="v">
+          {% if scalp.stats.current_streak %}
+            {{ scalp.stats.current_streak }}
+            {{ "win" if scalp.stats.current_streak_kind == "WIN" else "loss" }}{{ "" if scalp.stats.current_streak == 1 else "es" }}
+          {% else %}—{% endif %}
+        </span></div>
+      <div class="metric"><span class="k">Max drawdown</span>
+        <span class="v negative">{{ ("-%.2f"|format(scalp.stats.max_drawdown)) if scalp.stats.max_drawdown else "0.00" }}</span></div>
+      <div class="metric"><span class="k">Average hold</span>
+        <span class="v">{{ ("%g"|format(scalp.stats.avg_hold_min) ~ " min") if scalp.stats.avg_hold_min is not none else "—" }}</span></div>
+    </div>
+  </div>
+
+  <!-- ---------------------------------------------------------------- rules -->
+  <div class="card" style="margin-bottom:1.5rem">
+    <h2>What this book is doing right now</h2>
+    <div class="two-col" style="gap:1.5rem">
+      <div>
+        <div class="metric"><span class="k">Symbol / lot / contract</span>
+          <span class="v">{{ config.symbol }} • {{ config.lot_size }} • {{ config.contract_size }}</span></div>
+        <div class="metric"><span class="k">Session window</span>
+          <span class="v">{{ rules.session if rules.session else "no session filter" }}</span></div>
+        <div class="metric"><span class="k">ATR floor</span>
+          <span class="v">{{ rules.atr_min if rules.atr_min is not none else "off" }}</span></div>
+        <div class="metric"><span class="k">Target</span>
+          <span class="v">{{ rules.tp_atr_mult }}× ATR</span></div>
+      </div>
+      <div>
+        <div class="metric"><span class="k">Breakeven ratchet</span>
+          <span class="v">{{ rules.be_trigger_r }}R</span></div>
+        <div class="metric"><span class="k">Hold cap</span>
+          <span class="v">{{ rules.max_hold_minutes ~ " min" if rules.max_hold_minutes else "off" }}</span></div>
+        <div class="metric"><span class="k">Weekend flat</span>
+          <span class="v">{{ ("Fri " ~ rules.weekend_flat_hour ~ ":00 UTC") if rules.weekend_flat else "off" }}</span></div>
+        <div class="metric"><span class="k">Risk sizing</span>
+          <span class="v">{{ ("RISK_PCT " ~ rules.risk_pct ~ "%") if rules.risk_pct else "fixed lot" }}</span></div>
+      </div>
+    </div>
+    <div class="note">
+      Every number in this tab is derived from files the engine already writes —
+      <code>{{ scalp.sources.sources|join(", ") if scalp.sources.sources else "logs/" }}</code>
+      plus <code>paper_account.json</code> / <code>live_status.json</code>.
+      The dashboard never opens MT5 and never writes to the book.
+      JSON: <a class="tablink" href="/api/scalp">/api/scalp</a>.
+    </div>
+  </div>
+  {% endif %}
+
+  <footer>
+    {{ title }} — Scalp tab &nbsp;•&nbsp; Auto-refresh 15s &nbsp;•&nbsp;
+    <a href="/" style="color:var(--blue)">Overview</a> &nbsp;•&nbsp;
+    <a href="/api/scalp" style="color:var(--blue)">JSON</a>
+  </footer>
+</body>
+</html>

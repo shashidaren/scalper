@@ -1,0 +1,150 @@
+  <style>
+    :root {
+      --bg: #0f172a;
+      --card: #1e293b;
+      --border: #334155;
+      --text: #e2e8f0;
+      --muted: #94a3b8;
+      --green: #22c55e;
+      --red: #ef4444;
+      --blue: #3b82f6;
+      --yellow: #eab308;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: system-ui, -apple-system, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      line-height: 1.5;
+      padding: 1.5rem;
+    }
+    h1 { font-size: 1.5rem; margin-bottom: 0.25rem; }
+    .subtitle { color: var(--muted); font-size: 0.875rem; margin-bottom: 1.5rem; }
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+      gap: 1rem;
+      margin-bottom: 1.5rem;
+    }
+    .card {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 0.75rem;
+      padding: 1.25rem;
+    }
+    .card h2 {
+      font-size: 0.8rem;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      color: var(--muted);
+      margin-bottom: 0.75rem;
+    }
+    .value { font-size: 1.6rem; font-weight: 700; }
+    .value.small { font-size: 1.15rem; }
+    .positive { color: var(--green); }
+    .negative { color: var(--red); }
+    .status-dot {
+      display: inline-block;
+      width: 10px; height: 10px;
+      border-radius: 50%;
+      margin-right: 6px;
+    }
+    .status-dot.on { background: var(--green); }
+    .status-dot.off { background: var(--red); }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 0.875rem;
+    }
+    th, td {
+      padding: 0.5rem 0.75rem;
+      text-align: left;
+      border-bottom: 1px solid var(--border);
+    }
+    th { color: var(--muted); font-weight: 500; }
+    .badge {
+      display: inline-block;
+      padding: 0.15rem 0.5rem;
+      border-radius: 9999px;
+      font-size: 0.75rem;
+      font-weight: 600;
+    }
+    .badge.buy { background: rgba(34,197,94,0.2); color: var(--green); }
+    .badge.sell { background: rgba(239,68,68,0.2); color: var(--red); }
+    .badge.skip { background: rgba(234,179,8,0.2); color: var(--yellow); }
+    .badge.signal { background: rgba(59,130,246,0.2); color: var(--blue); }
+    .log-row { font-family: ui-monospace, monospace; font-size: 0.8rem; }
+    .section-title {
+      font-size: 1.1rem;
+      margin: 1.5rem 0 0.75rem;
+    }
+    .two-col {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 1rem;
+    }
+    @media (max-width: 800px) {
+      .two-col { grid-template-columns: 1fr; }
+    }
+    footer {
+      margin-top: 2rem;
+      color: var(--muted);
+      font-size: 0.8rem;
+      text-align: center;
+    }
+    .portfolio-banner {
+      background: #1e293b;
+      border: 1px solid var(--border);
+      border-radius: 0.75rem;
+      padding: 0.85rem 1.1rem;
+      margin-bottom: 1.1rem;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      flex-wrap: wrap;
+      gap: 0.5rem;
+      font-size: 0.9rem;
+    }
+    .portfolio-banner.blocked {
+      background: rgba(239,68,68,0.12);
+      border-color: rgba(239,68,68,0.4);
+    }
+    .portfolio-banner.warn {
+      background: rgba(245,158,11,0.12);
+      border-color: rgba(245,158,11,0.4);
+    }
+    .portfolio-banner .label {
+      color: var(--muted);
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+      font-size: 0.75rem;
+      font-weight: 600;
+    }
+    /* Tab bar — one app, several read-only views. */
+    .tabs {
+      display: flex;
+      align-items: center;
+      gap: 0.25rem;
+      margin-bottom: 1.1rem;
+      border-bottom: 1px solid var(--border);
+      padding-bottom: 0.5rem;
+      flex-wrap: wrap;
+    }
+    .tabs a {
+      color: var(--muted);
+      text-decoration: none;
+      font-size: 0.875rem;
+      font-weight: 600;
+      padding: 0.4rem 0.8rem;
+      border-radius: 0.5rem;
+      border: 1px solid transparent;
+    }
+    .tabs a:hover { color: var(--text); background: rgba(148,163,184,0.08); }
+    .tabs a.active {
+      color: var(--text);
+      background: var(--card);
+      border-color: var(--border);
+    }
+    .tabs .spacer { flex: 1; }
+    .tabs .meta { color: var(--muted); font-size: 0.8rem; }
+  </style>
