@@ -6,7 +6,7 @@ This file orients you on the BTC book only; it is not a second status page.
 > **Corrected 2026-10-24.** This file previously said the 1,500-point spread
 > placeholder was vetoing the live feed and that "0 trades is correct", and
 > that Phase 1c had not been run. All three were false (the gate moved to
-> 6,250 on 2026-10-07, the book has 106 closed trades, and Phase 1c ran on
+> 6,250 on 2026-10-07, the book had closed trades (141 by 2026-10-28), and Phase 1c ran on
 > 2026-10-07 and failed). If you are reading a copy that says otherwise, it is
 > stale — `STATUS.md` and `btc/logs/` win.
 
@@ -29,19 +29,20 @@ root's `run.py` / `paper.py` / `strategy.py` run unchanged. Full picture:
 
 ## Current state (2026-10-24)
 
-From `btc/logs/paper_account.json`, last trade **2026-10-23 09:25:32**:
+From `btc/logs/paper_account.json`, last change **2026-10-28 20:50:07**:
 
 | | |
 |---|---|
-| balance | **$287.59** (book started $300 on 2026-10-07) |
-| closed | **106** — 22 wins / 84 losses |
-| profit factor | **0.89** (gross $102.27 won vs $114.68 lost) |
-| exits | 69 SL · 22 TP · 15 BE |
-| open position | none |
+| balance | **$276.91** (book started $300 on 2026-10-07) |
+| closed | **141** — 29 wins / 112 losses |
+| profit factor | **0.846** (gross $126.68 won vs $149.77 lost) |
+| exits | 92 SL · 29 TP · 20 BE |
+| open position | one BUY (entry 81090.25) |
 
-That is a **−4.1% paper drawdown over 16 days**. It is consistent with the
+That is a **−7.7% paper drawdown over 21 days**. It is consistent with the
 Phase 1 result, not with a working edge: the book is losing for the reason the
-research predicted, not because of a bug. Nothing here is a go-live signal.
+research predicted, not because of a bug. Nothing here is a go-live signal, and
+these trades do not count as evidence for any successor hypothesis.
 
 ## Is it running?
 
@@ -77,12 +78,20 @@ cat btc/logs/live_status.json          # updated_at should be seconds old
 module and opens no bridge connection. It reports `unknown` rather than a
 guess, which is the point.
 
-**Expect quiet on weekends.** `WEEKEND_FLAT_ENABLED` is effectively `True`
-(see the open question below), so both books stop taking entries from Friday
-20:00 UTC and resume Monday 00:00 UTC. Gold's last action before this snapshot
-was exactly that rule firing: `SIM_EXIT reason=WEEKEND` at
-`2026-10-23 20:00:00` (a SELL closed for −$1.14). A weekend with zero trades
-is the system working, not stalling.
+The BTC dashboard (`:8089`) has its own **Readiness** tab (`/readiness`). It
+renders BTC's gates, not gold's: the two failed hypotheses, the placeholder
+parameters still inherited from gold, the recon/swap work, the demo drill, the
+shared-account question, and a forward cohort that starts at zero once a
+strategy is frozen. The only live number on it is this book's published paper
+state; it cannot change `TRADING_MODE`. Gold's 300-trade reference is
+deliberately absent — see `docs/dashboard_readiness_btc_2026-10-28.md`.
+
+**Do not expect quiet weekends on BTC.** `WEEKEND_FLAT_ENABLED = False`
+(settled 2026-10-24, section below), so this book takes weekend entries and
+holds through them; only *gold* flattens Friday 20:00 → Monday 00:00 UTC. A BTC
+weekend with zero trades therefore means no signal fired — not that a rule
+fired. This paragraph used to claim the opposite; it contradicted both
+`btc/config.py` and `STATUS.md`, and was corrected 2026-10-28.
 
 ## Why this book has no validated edge
 

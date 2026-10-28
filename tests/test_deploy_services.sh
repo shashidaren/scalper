@@ -200,6 +200,12 @@ run_case docs_only_commit_skips_all_four '' \
 run_case tools_only_commit_skips_all_four '' \
   DEPLOY_SERVICES='scalper-bot scalper-dashboard scalper-btc-bot scalper-btc-dashboard' \
   GIT_DIFF=$'tools/autosync.sh\ntools/smoke_test.py'
+# plans/ is the machine-readable execution plan (tools/execution_plan.py). No
+# service imports it, so editing the roadmap must not restart a book mid-session
+# - the same contract docs/ and tools/ have.
+run_case plans_only_commit_skips_all_four '' \
+  DEPLOY_SERVICES='scalper-bot scalper-dashboard scalper-btc-bot scalper-btc-dashboard' \
+  GIT_DIFF=$'plans/gold.json\nplans/btc.json\nAGENTS.md'
 run_case engine_commit_restarts_all_four 'scalper-bot scalper-dashboard scalper-btc-bot scalper-btc-dashboard' \
   DEPLOY_SERVICES='scalper-bot scalper-dashboard scalper-btc-bot scalper-btc-dashboard' \
   GIT_DIFF='config.py'

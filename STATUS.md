@@ -5,8 +5,9 @@ A session may edit this file and add one changelog row. Do not paste a new statu
 
 Last verified on `scalping`: 2026-10-19 17:31 UTC (user-supplied box output: 17:30 timer run completed cleanly).
 
-Last verified **from published data only**: 2026-10-26 (book state, ledger
-integrity, deploy gate — see the changelog). The box was **not** contacted:
+Last verified **from published data only**: 2026-10-28 (book state, ledger
+integrity, deploy gate, both readiness tabs — see the changelog). The box was
+**not** contacted:
 `live_status.json` / `connection_status.json` / `system.jsonl` are
 machine-local and cannot be read from a repo checkout. To re-verify liveness
 run `python3 btc/server_check.py` on the box (see `btc/HANDOFF.md`).
@@ -15,7 +16,7 @@ run `python3 btc/server_check.py` on the box (see `btc/HANDOFF.md`).
 
 - Production book. Engine is the repo root (`run.py` + `config.py`). Dashboard `:8088`. Unit `scalper-bot`.
 - `TRADING_MODE` stays `FORWARD_TEST` until an explicit live decision. Kill switch is `logs/KILL_SWITCH` (blocks new entries only).
-- Paper track record (2026-10-26 14:20:04, `logs/paper_account.json`): balance **$294.10**, **69 closed, 17 wins / 52 state losses**, one open BUY. Reset-aware ledger audit: **17 positive / 45 negative / 7 zero** exits, net **−$5.90**, PF **0.98**, closed-equity max drawdown **$103.95**. State losses include zero-P&L BE exits. Published heartbeat at 19:00:26 UTC reports engine connected; terminal not independently contacted. See `docs/existing_gold_audit_2026-10-26.md`. LIVE still no-go.
+- Paper track record (2026-10-28 19:32:30, `logs/paper_account.json`): balance **$239.58**, **80 closed, 19 wins / 61 state losses**, no open position. Reset-aware ledger audit: **21 positive / 51 negative / 8 zero** exits, net **−$60.42**, PF **0.855**, closed-equity max drawdown **$103.95**. State losses include zero-P&L BE exits. Published heartbeat at 22:00:21 UTC reports engine connected; terminal not independently contacted. Twelve more closed trades since the 2026-10-26 audit (−$54.52), so PF moved 0.98 → 0.855. See `docs/existing_gold_audit_2026-10-26.md`, `docs/dashboard_readiness_btc_2026-10-28.md`. LIVE still no-go.
 - **Effectiveness plan CLOSED 2026-10-24** (`docs/effectiveness_plan_2026-10-24.md`). Fresh `GOLD_M5.csv` (2026-07-15 → 2026-10-23, 20k bars): current config **257 trades / +$29.15 / PF 1.02 / avg R 0.03 / max DD $255**. Sep and Oct both negative. TP 6.0 **rejected** (OOS −$181). ATR floor 3.0/3.5 not adopted (OOS still negative). Walk-forward adopted 1/4 folds. **No strategy parameter changed.** Edge has degraded vs the old spent-file reference (255 / +$456 / PF 1.32).
 - **VOL-REGIME-A CLOSED 2026-10-24** (`docs/research_plan_vol_regime_2026-10-24.md`). Absolute-floor candidates maxed at avgR +0.059 / PF 1.04 on the spent window — failed the pre-registered gate. Pure percentile filter was not active offline. Not adopted.
 - **Active research track: BREAKOUT-B** (`docs/research_plan_breakout_2026-10-24.md`). Pre-registered same day. Before any sweep: clarify the grid (162 combinations listed vs ≤54 cap), precise exit rules, and genuinely unseen OOS timestamps; a fresh download of inspected history is not cold OOS. Then fresh pull via `tools/pull_gold_m5.sh` under the corrected pre-registered protocol.
@@ -26,7 +27,7 @@ run `python3 btc/server_check.py` on the box (see `btc/HANDOFF.md`).
 
 ## BTC
 
-- Paper book 2026-10-23 09:25:32 UTC: balance **`$287.59`** (started $300 on 2026-10-07), **106 closed, 22 wins / 84 losses**, PF **0.89** (gross $102.27 won vs $114.68 lost), net −$12.41, no open position. 69 SL / 22 TP / 15 BE. Snapshots: 2026-10-19 `$295.90`, 85 closed, 19W/66L. Phase 1 and 1c remain FAIL; nothing here changes that.
+- Paper book 2026-10-28 20:50:07 UTC: balance **`$276.91`** (started $300 on 2026-10-07), **141 closed, 29 wins / 112 losses**, PF **0.846** (gross $126.68 won vs $149.77 lost), net −$23.09, one open BUY. 92 SL / 29 TP / 20 BE. Snapshots: 2026-10-23 `$287.59` / 106 closed / 22W-84L; 2026-10-19 `$295.90` / 85 closed / 19W-66L. Phase 1 and 1c remain FAIL; nothing here changes that.
 - This is a **loss-making paper book**, which is the expected result of running a shape that failed its gate. Do not read 106 trades as evidence.
 
 - Instance dir `btc/`. Same engine, `btc/config.py` swapped in via `btc/_instance.py`. Dashboard `:8089`. Units `scalper-btc-bot` and `scalper-btc-dashboard`.
@@ -61,12 +62,17 @@ run `python3 btc/server_check.py` on the box (see `btc/HANDOFF.md`).
 
 ## Open
 
+- **Execution plans are the checklist now** (`plans/gold.json`, `plans/btc.json`; `python3 tools/execution_plan.py gold|bitcoin`).
+  They mirror the `/readiness` tabs and are validated in the smoke gate. `AGENTS.md` is the entry contract. Editing a plan
+  restarts nothing (`plans/*` is inert for all four units) but it does not replace a decision recorded here.
 - **BREAKOUT-B** is the active Gold research track (`docs/research_plan_breakout_2026-10-24.md`). Before any sweep: clarify the grid (162 combinations listed vs ≤54 cap), precise exit rules, and genuinely unseen OOS timestamps; a fresh download of inspected history is not cold OOS. Then fresh pull via `tools/pull_gold_m5.sh` under the corrected pre-registered protocol.
 - VOL-REGIME-A closed (failed gate). Effectiveness parameter pass closed earlier the same day.
 - Rotate the MT5 and VNC passwords (they were pasted in plain text; change at the broker, update `.env`).
 - Re-apply the two mt5linux image patches if the container is ever recreated from stock `lprett/mt5linux`. Details: `docs/archive/HANDOFF_2026-10-07.md` §4.
 - File the two upstream mt5linux bugs (fifo `mkfifo` crash, `config.sh` `return` under `set -e`).
 - A new BTC hypothesis needs its own pre-registered rule and a fresh pull. Phase 1 and Phase 1c are both closed.
+  Nothing is pre-registered for BTC as of 2026-10-28 — the first item on the BTC `/readiness` tab is that missing document,
+  and the 141-trade paper book does not count toward any successor's evidence.
 - Gold paper book continues under current geometry; LIVE remains no-go until a powered positive gate and the demo execution drill.
 - Risk controls shipped 2026-10-23 (`docs/risk_controls_2026-10-23.md`): Friday 20:00 UTC weekend flat is now ON in both books (BTC explicitly off), the hold cap stays off, equity floor latched at 50%. No useful equity floor at $300 — minimum live balance ~$1,000 for a 20–25% floor.
 - LIVE stop + BE (`live_position.py`) only tested against a fake terminal. Demo drill before real money: `docs/live_readiness_review_2026-10-23.md` §6.3.
@@ -103,3 +109,5 @@ run `python3 btc/server_check.py` on the box (see `btc/HANDOFF.md`).
 
 | 2026-10-26 | Read-only Gold existing-data audit: 69 closed / −$5.90 / PF 0.98; BUY −$96.36 vs SELL +$90.46 is exploratory, not a filter recommendation. M1 ends Sep 11, before current book; cannot validate its intrabar execution. Flagged BREAKOUT-B grid/OOS ambiguities before sweep. Added reproducible stdlib audit; integrity 0 fail / 0 warn. No runtime or strategy changes. |
 | 2026-10-27 | Added Gold dashboard `/readiness` tab: conditional planning timeline, research/forward/demo/account gates, dynamic published paper count and explicit no-go (never automatic approval). BTC does not inherit Gold gates. Roadmap dates are estimates; manual decisions remain evidence-backed in STATUS. Three readiness route/context tests pass. No trading strategy or mode changes. Dashboard restart required on deployment. |
+| 2026-10-28 | **Readiness tab extended to BTC** (`/readiness` now renders a per-book document; nav shows it on both boards). `dashboard.book_kind()` derives gold/btc from `SYMBOL`; gold's 2026-10-27 body moved verbatim to `templates/_readiness_gold.html`; new `templates/_readiness_btc.html` carries BTC's own gates (Phase 1 FAIL / Phase 1c FAIL, PLACEHOLDER parameters, recon+swap, demo drill, shared account, forward cohort from zero). The route no longer applies gold's `300 - closed` countdown to a non-gold book: BTC shows "0 qualifying trades" because its book runs the shape that already failed. Read-only, viewer-only paths (`dashboard.py` + `templates/*`), so a deploy restarts both dashboards and neither book; no strategy parameter, `TRADING_MODE` or unit changed. Tests 3 → 7 (`tests/test_readiness.py`), now in the deploy gate (SKIPs without fastapi/httpx); smoke **19/19, 0 skipped**. Same-day published check: gold **$239.58 / 80 closed / PF 0.855**, BTC **$276.91 / 141 closed / PF 0.846**, `check_data` 0 fail / 0 warn, heartbeat `ok`. **LIVE no-go for both.** Doc: `docs/dashboard_readiness_btc_2026-10-28.md`. |
+| 2026-10-28 | **Execution plans are executable** (`plans/gold.json`, `plans/btc.json`, `tools/execution_plan.py`, `AGENTS.md`). The gate documents that lived as prose in the `/readiness` tabs are now data: per phase a status, ordered steps, an exit gate, blockers, real commands, sources and the evidence it must produce, plus a per-book `never` list (no `TRADING_MODE` change, no strategy-parameter edits, no re-pinned golden baseline, no re-tuning on inspected history, no LIVE on the shared account). `python3 tools/execution_plan.py gold|bitcoin` resolves "follow execution plan <book>" into the next phase only; `--validate` fails closed on duplicate/dangling ids, a `done` phase with an open blocker, a missing cited file, or a `next` that points at a blocked/done phase. Read-only and stdlib-only (no `config` import — the two configs cannot coexist); `--root` for tests. `plans/*` added to the inert lists in `deploy.sh` and `tools/autosync.sh`, so roadmap edits restart nothing; deploy policy test 53 → 54. Tests: `tests/test_execution_plan.py` (23) in the smoke gate. Doc: `docs/execution_plan_2026-10-28.md`. |

@@ -11,11 +11,16 @@ run.py                         engine loop (risk gates, kill switch, stale-tick,
   live_ledger.LiveLedger       LIVE realized PnL, logs/live_ledger.json
   spread_gate.py               entry veto + dashboard banner (does not change the gate)
   logger.py                    logs/{system,trades}.jsonl, live_status.json, …
-dashboard.py                   reads those files only, :8088 — Overview + Scalp tab
+dashboard.py                   reads those files only, :8088 — Overview + Scalp +
+                               Readiness (per-book document: gold vs Bitcoin)
 scalp_view.py                  read-only projections for the Scalp tab: the open
                                trade and the paired win/loss record (no new state)
 deploy.sh                      manual deploy: git pull --ff-only; restart only if a runtime path changed
 tools/autosync.sh              cron: publish paper state, merge origin/main behind a smoke gate
+plans/gold.json                machine-readable execution plan (phases, exit gates,
+plans/btc.json                 blockers, hard rules) — read by tools/, inert for services
+tools/execution_plan.py        resolves "follow execution plan <book>" into a brief;
+                               validates the plans (fail closed); read-only, stdlib
 tools/smoke_test.py            the deploy gate (hermetic suites + engine imports)
 tools/check_data.py            read-only ledger/state integrity
 tools/ledger_export.py         distils logger's event log into logs/ledger.jsonl (published)

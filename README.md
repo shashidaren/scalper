@@ -6,7 +6,59 @@ An experimental algorithmic trading and backtesting framework for **GOLD / XAUUS
 
 ---
 
+## Working on this repo
+
+Start with [`AGENTS.md`](AGENTS.md), then:
+
+```bash
+python3 tools/execution_plan.py gold        # or: bitcoin
+```
+
+That prints the **next phase** of that book's execution plan, its exit gate, its
+commands and the hard rules that must not be broken while executing it. The same
+roadmap is on `/readiness` (`:8088` gold, `:8089` bitcoin) and the machine-readable
+copy is `plans/gold.json` / `plans/btc.json`. "follow execution plan gold" means
+exactly that command and nothing outside the phase it names.
+
 ## Changelog
+
+### 2026-10-28 – Execution plans are executable (`plans/`, `tools/execution_plan.py`)
+
+- "Follow execution plan gold" / "… bitcoin" is now a deterministic instruction:
+  `python3 tools/execution_plan.py <book>` prints the **next** phase, its steps,
+  its exit gate, its commands, the files it cites and that book's hard rules.
+- The gate documents moved from prose into `plans/gold.json` (5 phases) and
+  `plans/btc.json` (7 phases): status, blockers, exit gate, sources, evidence
+  per phase, plus a `never` list (no `TRADING_MODE` change, no strategy-parameter
+  edits, no re-pinning the gate, no LIVE on the shared account).
+- `--validate` fails closed: duplicate ids/orders, dangling or self blockers,
+  unknown statuses, missing source files, or a `next` that points at a blocked
+  or done phase all exit 1. That suite runs in `tools/smoke_test.py`.
+- `plans/` is inert for all four systemd units, so editing the roadmap restarts
+  nothing; a deploy only restarts a unit when a runtime input changed.
+- `AGENTS.md` is the entry contract (trigger phrases, hard rules, definition of
+  done). Write-up: `docs/execution_plan_2026-10-28.md`.
+
+### 2026-10-28 – Readiness tab now covers BTC too (`/readiness`)
+
+- `/readiness` used to be a Gold-only view: the nav hid the tab on the BTC
+  board and the route printed "applies to Gold only". It is now instance-aware
+  — `dashboard.book_kind()` picks the document, `templates/_readiness_gold.html`
+  (2026-10-27 text, unchanged) or `templates/_readiness_btc.html` (new).
+- BTC's page carries BTC's own gates: both failed hypotheses (Phase 1 PF 0.75,
+  Phase 1c PF 0.96), the parameters still marked PLACEHOLDER in
+  `btc/config.py`, the outstanding `btc/recon.py` work (symbol spec, swap,
+  server offset — `ENTRY_BLACKOUTS_ENABLED` stays off until then), the
+  never-run demo execution drill, the shared-account brake, and a forward
+  cohort that counts from zero after a strategy is frozen.
+- Gold's 300-trade forward reference is **not** applied to BTC: the running BTC
+  book trades the shape that already failed, so counting it toward a launch
+  number would imply an approval path that does not exist. Its card says
+  "0 qualifying trades" and why.
+- Read-only, and viewer-only paths (`dashboard.py`, `templates/*`), so a deploy
+  restarts both dashboards and neither book. `TRADING_MODE` unchanged on both.
+  `tests/test_readiness.py` (3 → 7 cases) now runs in the deploy gate.
+  Write-up: `docs/dashboard_readiness_btc_2026-10-28.md`.
 
 ### 2026-10-26 – Dashboard SCALP tab (`/scalp`)
 
@@ -128,8 +180,10 @@ python run.py
 uvicorn dashboard:app --host 0.0.0.0 --port 8088
 ```
 
-Dashboard: http://YOUR_SERVER_IP:8088          (overview)
-           http://YOUR_SERVER_IP:8088/scalp    (current trade + win/loss record)
+Dashboard: http://YOUR_SERVER_IP:8088              (overview)
+           http://YOUR_SERVER_IP:8088/scalp        (current trade + win/loss record)
+           http://YOUR_SERVER_IP:8088/readiness    (gates + planning roadmap)
+           http://YOUR_SERVER_IP:8089/readiness    (same tab, BTC's own gates)
 
 ---
 

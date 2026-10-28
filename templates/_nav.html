@@ -2,7 +2,9 @@
 <div class="tabs">
   <a href="/" class="{% if tab == 'overview' %}active{% endif %}">Overview</a>
   <a href="/scalp" class="{% if tab == 'scalp' %}active{% endif %}">Scalp</a>
-  {% if config is defined and config.symbol == "GOLD" %}<a href="/readiness" class="{% if tab == 'readiness' %}active{% endif %}">Readiness</a>{% endif %}
+  {# Both instances have a roadmap now: gold's gates and BTC's gates are
+     separate documents, rendered by the same /readiness route. #}
+  <a href="/readiness" class="{% if tab == 'readiness' %}active{% endif %}">Readiness</a>
   <span class="spacer"></span>
   <span class="meta">
     {% if config is defined and config %}{{ config.symbol }}{% endif %}

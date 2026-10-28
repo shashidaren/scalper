@@ -1,0 +1,216 @@
+{
+  "schema": 1,
+  "book": "btc",
+  "title": "Bitcoin execution plan",
+  "symbol": "BTCUSD",
+  "version": "2026-10-28",
+  "reviewed": "2026-10-28",
+  "verdict": "NO-GO",
+  "verdict_reason": "No validated strategy at all. Phase 1 (M5 RSI pullback) failed cold OOS at PF 0.75 and Phase 1c (H1 Donchian) failed at PF 0.96, so the running book is an observation feed: 141 closed / PF 0.846 at 2026-10-28. Those trades are not evidence for any successor.",
+  "mode_expected": "FORWARD_TEST",
+  "next": "btc-hypothesis",
+  "summary": "Nothing unblocks until a NEW hypothesis passes its own cold-OOS gate on bars nobody has inspected. Every parameter in btc/config.py is still a gold-derived placeholder.",
+  "never": [
+    "Never change TRADING_MODE, the BTC service units, or MAX_SPREAD_POINTS without an explicit user decision in this session.",
+    "Never set BTC_STRATEGY=donchian: Phase 1c failed (cold OOS -$40.03, PF 0.96) and the plumbing existing is not evidence.",
+    "Never treat proxy (Binance) or exchange CSVs as BTC evidence; the gate reads XM bars only.",
+    "Never re-pull or re-rank on the inspected windows, or reuse data/BTCUSD_H1.csv (sha256 f7305461...ab21).",
+    "Never count the current paper book toward a successor's evidence, or re-tune the RSI-pullback / Donchian shape on overlapping data.",
+    "Never add a second WEEKEND_FLAT_ENABLED assignment to btc/config.py; that exact duplication ran the wrong rule for a day.",
+    "Never flip to LIVE on the shared XM account: portfolio.py caps the pair at $38/day and gold's own $30 can consume most of it."
+  ],
+  "paths": {
+    "paper_state": "btc/logs/paper_account.json",
+    "ledger": "btc/logs/ledger.jsonl",
+    "live_status": "btc/logs/live_status.json",
+    "readiness": "/readiness on dashboard :8089",
+    "status_doc": "STATUS.md"
+  },
+  "phases": [
+    {
+      "id": "btc-hypothesis",
+      "order": 1,
+      "status": "active",
+      "title": "Pre-register a new BTC hypothesis on untouched bars",
+      "window": "blocking everything else",
+      "goal": "Produce a dated pre-registration whose TRAIN/OOS split uses timestamps that have never been inspected.",
+      "steps": [
+        "Write the hypothesis, the parameter grid (bounded), the selection statistic and the exact exit rule into one dated doc.",
+        "Pull fresh XM bars through btc/recon.py and record the sha256 and the TRAIN/OOS boundaries in the doc BEFORE any sweep.",
+        "State the gate in advance: net > 0, PF >= 1.2, n >= 60 cold OOS, gross > cost, and one look at OOS only.",
+        "Record the pre-registration in the STATUS changelog and in plans/btc.json (this file)."
+      ],
+      "exit_gate": "A committed pre-registration with fresh hashes and boundaries, and no result inspected yet.",
+      "blocked_by": [],
+      "commands": [
+        "python3 tools/execution_plan.py bitcoin",
+        "mt5env/bin/python btc/recon.py --bars 20000   # read-only pull + contract spec; safe while gold trades"
+      ],
+      "sources": [
+        "btc/HANDOFF.md",
+        "docs/btc_phase1_result_2026-10-03.md",
+        "docs/btc_phase1c_result_2026-10-07.md"
+      ],
+      "evidence": "The dated pre-registration doc with hashes, plus the STATUS row."
+    },
+    {
+      "id": "btc-hypothesis-test",
+      "order": 2,
+      "status": "blocked",
+      "title": "Train-select once, freeze, cold OOS",
+      "window": "1-2 weeks after the pre-registration",
+      "goal": "Accept or reject the new shape on its own reserved window.",
+      "steps": [
+        "Screen on TRAIN only with btc/edge_screen.py, select by the pre-registered statistic, freeze the winner.",
+        "Run btc/train_select.py for the cold-OOS confirmation. One look; no re-selection.",
+        "Write the dated result. On failure, close it and pre-register a new hypothesis, not a new split of the same bars."
+      ],
+      "exit_gate": "A dated result report with net > 0, PF >= 1.2, n >= 60 and gross > cost, or an explicit close.",
+      "blocked_by": [
+        "btc-hypothesis"
+      ],
+      "commands": [
+        "mt5env/bin/python btc/tool.py btc/edge_screen.py --family <name> --csv <fresh-file>",
+        "mt5env/bin/python btc/tool.py btc/train_select.py --family <name> --csv <fresh-file>",
+        "mt5env/bin/python btc/tool.py btc/strategy_btc_test.py"
+      ],
+      "sources": [
+        "docs/btc_phase1c_result_2026-10-07.md",
+        "btc/HANDOFF.md"
+      ],
+      "evidence": "The dated report and the STATUS decision row."
+    },
+    {
+      "id": "btc-parameters",
+      "order": 3,
+      "status": "blocked",
+      "title": "Derive BTC parameters instead of inheriting gold's",
+      "window": "after a passing strategy exists",
+      "goal": "Replace every PLACEHOLDER in btc/config.py with a value derived from BTC data, with provenance.",
+      "steps": [
+        "Derive ATR_MIN from the BTC ATR distribution (a 10-20th percentile) or leave 0.0 and say so honestly.",
+        "Re-derive MAX_SPREAD_POINTS with the 1.25x TRAIN p90 rule from the same file the strategy was validated on.",
+        "Size MAX_DAILY_LOSS and MAX_TRADES_PER_DAY from the passing strategy's own trade distribution (0.01 lots risks ~$1-3 per BTC stop).",
+        "Record the quantile -> file -> date provenance next to each value in btc/config.py."
+      ],
+      "exit_gate": "A reviewed parameter table with provenance, committed together with the doc that justifies it.",
+      "blocked_by": [
+        "btc-hypothesis-test"
+      ],
+      "commands": [
+        "mt5env/bin/python btc/derive_params.py --help"
+      ],
+      "sources": [
+        "btc/config.py",
+        "btc/HANDOFF.md"
+      ],
+      "evidence": "The provenance comment block plus the config diff reviewed as a deployment decision."
+    },
+    {
+      "id": "btc-recon",
+      "order": 4,
+      "status": "parallel",
+      "title": "Broker recon: symbol spec, swap and the server offset",
+      "window": "parallel; independent of the strategy outcome",
+      "goal": "Learn what a BTC trade actually costs and when the broker is closed or charging financing.",
+      "steps": [
+        "Confirm symbol name, digits, contract size, stops level, filling mode and volume limits with btc/recon.py.",
+        "Record swap_long / swap_short and the Friday triple-swap day; the engine models no swap P&L at all.",
+        "Pin the server's UTC offset, then decide on ENTRY_BLACKOUTS_ENABLED (rollover and Saturday maintenance) and record the decision.",
+        "Revisit WEEKEND_FLAT_ENABLED = False in writing: it is a risk judgement (2026-10-24), not a measured BTC result."
+      ],
+      "exit_gate": "A recon report with the offset and swap values in it, plus an explicit blackout/weekend decision.",
+      "blocked_by": [],
+      "commands": [
+        "mt5env/bin/python btc/recon.py --self-test   # offline sanity, no bridge",
+        "mt5env/bin/python btc/recon.py --bars 20000",
+        "mt5env/bin/python btc/preflight.py           # would the spread gate let it trade?"
+      ],
+      "sources": [
+        "docs/btc_market_reference_2026-10-03.md",
+        "btc/HANDOFF.md",
+        "btc/config.py"
+      ],
+      "evidence": "The filled spec table and the decided offset."
+    },
+    {
+      "id": "btc-execution-drill",
+      "order": 5,
+      "status": "blocked",
+      "title": "Demo execution drill, BTC-specific",
+      "window": "after phases 2 and 4",
+      "goal": "Prove execution on this broker for an instrument whose stop is ~$275 of price.",
+      "steps": [
+        "Run the same 20-trade 0.01-lot demo drill as gold: requested vs filled, attached SL, one BE round-trip.",
+        "Sample spread in thin hours and during the Saturday maintenance window; hold one position through a rollover and record the swap actually charged.",
+        "Verify minimum stop distance and the margin a 2xATR stop implies at 0.01 lots.",
+        "Only BTC_STRATEGY=donchian is refused in code outside FORWARD_TEST; every other BTC LIVE block is documentary, so this drill is the barrier."
+      ],
+      "exit_gate": "A demo execution report plus a pre-agreed realized-R tolerance.",
+      "blocked_by": [
+        "btc-parameters",
+        "btc-recon"
+      ],
+      "commands": [
+        "python3 btc/server_check.py",
+        "python3 tools/execution_plan.py bitcoin --status"
+      ],
+      "sources": [
+        "docs/live_readiness_review_2026-10-23.md"
+      ],
+      "evidence": "The filled-trade table including the swap charge."
+    },
+    {
+      "id": "btc-account",
+      "order": 6,
+      "status": "blocked",
+      "title": "Separate account or a hard combined risk gate",
+      "window": "before any live decision",
+      "goal": "Stop a BTC pilot from trading on the residual of gold's risk budget.",
+      "steps": [
+        "Decide explicitly: a separate BTC account, or one combined gate that is tested rather than assumed.",
+        "If combined: write a test that proves the cap binds across both books, then land it.",
+        "Agree the pilot funding and loss limit; $300 of paper balance is not live capital."
+      ],
+      "exit_gate": "A signed account-risk decision plus the test that enforces it.",
+      "blocked_by": [
+        "btc-execution-drill"
+      ],
+      "commands": [
+        "python3 -m pytest tests/ -q   # or the smoke gate",
+        "python3 tools/smoke_test.py"
+      ],
+      "sources": [
+        "portfolio.py",
+        "STATUS.md"
+      ],
+      "evidence": "The decision doc and the enforcing test."
+    },
+    {
+      "id": "btc-forward-evidence",
+      "order": 7,
+      "status": "blocked",
+      "title": "A forward cohort that starts at zero",
+      "window": "after the strategy is frozen",
+      "goal": "Measure the frozen BTC engine, with nothing carried over from the failed shape.",
+      "steps": [
+        "Freeze the strategy and exit engine; a material change starts a NEW cohort.",
+        "Review weekly on mean R with a bootstrap CI, not on trade count.",
+        "Signal supply is not the constraint (141 trades in three weeks); edge is."
+      ],
+      "exit_gate": "A powered positive cohort on the frozen engine.",
+      "blocked_by": [
+        "btc-hypothesis-test"
+      ],
+      "commands": [
+        "python3 tools/execution_plan.py bitcoin --status",
+        "python3 tools/check_data.py"
+      ],
+      "sources": [
+        "STATUS.md",
+        "btc/HANDOFF.md"
+      ],
+      "evidence": "Weekly review rows in STATUS.md."
+    }
+  ]
+}
