@@ -305,7 +305,7 @@ svc_active()    { systemctl is-active --quiet "$1" 2>/dev/null; }
 # --------------------------------------------------------------------------- #
 is_inert_for_engine() {
     case "$1" in
-        docs/*|research/*|tests/*|tools/*|*.md|deploy.sh) return 0 ;;
+        docs/*|research/*|tests/*|plans/*|tools/*|*.md|deploy.sh) return 0 ;;
         dashboard.py|scalp_view.py|templates/*) return 0 ;;
         backtest.py|fetch_data.py|gold.py|balance.py|wait_for_mt5.py) return 0 ;;
         btc/*)
@@ -329,7 +329,7 @@ is_inert_for_dashboard() {
 
 is_inert_for_btc_engine() {
     case "$1" in
-        docs/*|research/*|tests/*|tools/*|*.md|deploy.sh) return 0 ;;
+        docs/*|research/*|tests/*|plans/*|tools/*|*.md|deploy.sh) return 0 ;;
         dashboard.py|scalp_view.py|templates/*) return 0 ;;
         backtest.py|fetch_data.py|gold.py|balance.py|wait_for_mt5.py) return 0 ;;
         btc/config.py|btc/run.py|btc/strategy_btc.py|btc/_instance.py) return 1 ;;

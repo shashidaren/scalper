@@ -6,7 +6,38 @@ An experimental algorithmic trading and backtesting framework for **GOLD / XAUUS
 
 ---
 
+## Working on this repo
+
+Start with [`AGENTS.md`](AGENTS.md), then:
+
+```bash
+python3 tools/execution_plan.py gold        # or: bitcoin
+```
+
+That prints the **next phase** of that book's execution plan, its exit gate, its
+commands and the hard rules that must not be broken while executing it. The same
+roadmap is on `/readiness` (`:8088` gold, `:8089` bitcoin) and the machine-readable
+copy is `plans/gold.json` / `plans/btc.json`. "follow execution plan gold" means
+exactly that command and nothing outside the phase it names.
+
 ## Changelog
+
+### 2026-10-28 – Execution plans are executable (`plans/`, `tools/execution_plan.py`)
+
+- "Follow execution plan gold" / "… bitcoin" is now a deterministic instruction:
+  `python3 tools/execution_plan.py <book>` prints the **next** phase, its steps,
+  its exit gate, its commands, the files it cites and that book's hard rules.
+- The gate documents moved from prose into `plans/gold.json` (5 phases) and
+  `plans/btc.json` (7 phases): status, blockers, exit gate, sources, evidence
+  per phase, plus a `never` list (no `TRADING_MODE` change, no strategy-parameter
+  edits, no re-pinning the gate, no LIVE on the shared account).
+- `--validate` fails closed: duplicate ids/orders, dangling or self blockers,
+  unknown statuses, missing source files, or a `next` that points at a blocked
+  or done phase all exit 1. That suite runs in `tools/smoke_test.py`.
+- `plans/` is inert for all four systemd units, so editing the roadmap restarts
+  nothing; a deploy only restarts a unit when a runtime input changed.
+- `AGENTS.md` is the entry contract (trigger phrases, hard rules, definition of
+  done). Write-up: `docs/execution_plan_2026-10-28.md`.
 
 ### 2026-10-28 – Readiness tab now covers BTC too (`/readiness`)
 

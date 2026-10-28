@@ -2,6 +2,25 @@
 
 All of these run on `scalping`, from `/root/scalper`, unless noted. The sandbox cannot reach the server.
 
+## Follow the execution plan (start here on a new session)
+
+The roadmap for each book is data, not memory:
+
+```bash
+python3 tools/execution_plan.py gold                # next phase + exit gate + hard rules
+python3 tools/execution_plan.py bitcoin --status    # same, plus the published paper book
+python3 tools/execution_plan.py gold --list         # every phase and its status
+python3 tools/execution_plan.py --validate          # both plans; exit 1 = the plan rotted
+python3 tools/execution_plan.py bitcoin --json      # resolved plan for tooling
+```
+
+The files are `plans/gold.json` and `plans/btc.json`; read `AGENTS.md` before
+editing either. Editing a plan is safe for the books — `plans/` is inert for
+all four units, so no service restarts — but a plan that cites a missing file
+or points `next` at a blocked phase fails `--validate` and the smoke gate.
+
+The same roadmap in prose: `/readiness` on `:8088` (gold) and `:8089` (bitcoin).
+
 ## Health
 
 ```bash

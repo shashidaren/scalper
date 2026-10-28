@@ -94,7 +94,9 @@ pull_failed() {   # reason, current sha, captured git output
 # counters, stale-tick counters), which is why a BTC-only commit must not
 # restart the gold book mid-session.
 #
-#  * docs/, research/, tests/, *.md  - never imported by a service
+#  * docs/, research/, tests/, plans/, *.md  - never imported by a service
+#    (plans/ is the machine-readable execution plan read by tools/, never by a
+#    bot or a dashboard)
 #  * tools/                          - checks/repair/autosync, never imported
 #  * deploy.sh                       - the cron's own script, not runtime
 #  * scalper-bot (gold engine): btc/ is a separate instance with its own
@@ -116,7 +118,7 @@ pull_failed() {   # reason, current sha, captured git output
 is_inert_for() {
   local svc="$1" path="$2"
   case "$path" in
-    docs/*|research/*|tests/*|tools/*|*.md|deploy.sh) return 0 ;;
+    docs/*|research/*|tests/*|plans/*|tools/*|*.md|deploy.sh) return 0 ;;
   esac
   case "$svc" in
     scalper-bot)

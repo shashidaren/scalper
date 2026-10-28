@@ -1,0 +1,168 @@
+{
+  "schema": 1,
+  "book": "gold",
+  "title": "Gold execution plan",
+  "symbol": "GOLD",
+  "version": "2026-10-28",
+  "reviewed": "2026-10-28",
+  "verdict": "NO-GO",
+  "verdict_reason": "No passing edge and no qualifying forward cohort: the deployed geometry measures 257 / +$29 / PF 1.02 on the fresh pull, and the paper book is 80 closed / PF 0.855 going into 2026-10-28. LIVE needs a fresh pre-registered hypothesis, a cold-OOS pass, the demo execution drill, and a powered forward cohort.",
+  "mode_expected": "FORWARD_TEST",
+  "next": "breakout-b-protocol",
+  "summary": "BREAKOUT-B is the only active track. Nothing may be tuned on inspected history, and no milestone short of the full gate list enables LIVE.",
+  "never": [
+    "Never change TRADING_MODE (stays FORWARD_TEST), the service units, or MAX_SPREAD_POINTS without an explicit user decision in this session.",
+    "Never edit ATR_MIN, TP_ATR_MULT, session hours or RSI levels: the 2026-10-24 candidate pass failed OOS and those edits are closed.",
+    "Never enable ATR_REGIME_ENABLED (VOL-REGIME-A closed after failing its gate).",
+    "Never re-pin a golden baseline in btc/golden.py, edit tests, or weaken tools/smoke_test.py to make a red check green.",
+    "Never read a profitable sweep on already-inspected bars as a pass: a fresh download of inspected history is not cold OOS.",
+    "Never flip to LIVE on the shared XM account; a separate account or a hard combined risk gate comes first."
+  ],
+  "paths": {
+    "paper_state": "logs/paper_account.json",
+    "ledger": "logs/ledger.jsonl",
+    "live_status": "logs/live_status.json",
+    "readiness": "/readiness on dashboard :8088",
+    "status_doc": "STATUS.md"
+  },
+  "phases": [
+    {
+      "id": "breakout-b-protocol",
+      "order": 1,
+      "status": "active",
+      "title": "Repair and freeze the BREAKOUT-B research protocol",
+      "window": "1-2 sessions, before any sweep",
+      "goal": "Turn docs/research_plan_breakout_2026-10-24.md into a versioned pre-registration with no room left for a post-hoc choice.",
+      "steps": [
+        "Resolve the grid contradiction: the plan lists 162 combinations against a <=54 cap. Pick the exact subset and write it down.",
+        "Specify the precise exit rule (opposite-channel close), the selection statistic, and the single train-selected winner.",
+        "Reserve genuinely unseen OOS timestamps. Record file hashes, TRAIN/OOS boundaries and exclusions BEFORE looking at any result.",
+        "Amend the dated research plan in place (do not start a second document) and record the decision in the STATUS changelog."
+      ],
+      "exit_gate": "A reviewed, versioned pre-registration with hashes and boundaries committed. If no unseen timestamps exist, stop and wait for collection; dates slide.",
+      "blocked_by": [],
+      "commands": [
+        "python3 tools/execution_plan.py gold",
+        "bash tools/pull_gold_m5.sh   # fresh M5 pull; leaves data/GOLD_M5.csv dirty, so commit or discard before the next deploy tick",
+        "python3 research/strategy_sweep.py --verify   # replay engine == backtest.py before trusting any sweep"
+      ],
+      "sources": [
+        "docs/research_plan_breakout_2026-10-24.md",
+        "docs/existing_gold_audit_2026-10-26.md",
+        "docs/effectiveness_plan_2026-10-24.md"
+      ],
+      "evidence": "The committed pre-registration, with the grid subset, exit rule and OOS window hashes."
+    },
+    {
+      "id": "breakout-b-test",
+      "order": 2,
+      "status": "blocked",
+      "title": "Train-select once, freeze, then cold OOS",
+      "window": "1-2 weeks after fresh data exists",
+      "goal": "Accept or reject BREAKOUT-B on data that never informed the choice.",
+      "steps": [
+        "Run the frozen grid on TRAIN only; select one winner by the pre-registered statistic and freeze it.",
+        "Evaluate that winner on the reserved cold OOS window. One look, no re-selection.",
+        "Compute the gate numbers: mean R >= 0.12, PF >= 1.25, bootstrap 95% CI above zero (or P(net>0) >= 0.90), >= 3/4 profitable folds, >= 1.5 trades/day, OOS drawdown <= 1.3x baseline.",
+        "Write a dated result report. On failure, close the track and pre-register a new hypothesis; do not re-split the same data."
+      ],
+      "exit_gate": "A dated report with an explicit accept/reject. Research acceptance is NOT live approval: the live-readiness review still requires its own cold-OOS and walk-forward evidence.",
+      "blocked_by": [
+        "breakout-b-protocol"
+      ],
+      "commands": [
+        "python3 research/parity_test.py   # live signal == replay before the numbers mean anything",
+        "python3 research/strategy_sweep.py --csv data/GOLD_M5.csv --sweep <frozen-name> --oos --bootstrap 2000",
+        "python3 backtest.py               # reproduce the adopted-config reference"
+      ],
+      "sources": [
+        "docs/research_plan_breakout_2026-10-24.md",
+        "docs/effectiveness_plan_2026-10-24.md",
+        "docs/live_readiness_review_2026-10-23.md"
+      ],
+      "evidence": "The dated result report and the STATUS changelog row that records the decision."
+    },
+    {
+      "id": "execution-drill",
+      "order": 3,
+      "status": "parallel",
+      "title": "Run the 20-trade demo execution drill",
+      "window": "parallel with phase 1-2; independent of the strategy outcome",
+      "goal": "Prove the broker actually fills, attaches stops and accepts BE modifications; live_position.py has only ever seen a fake terminal.",
+      "steps": [
+        "Run 20 demo trades at 0.01 lots: record requested vs filled price on every fill.",
+        "Verify the stop is attached after each fill and repair it if not (live_position.py's post-fill check).",
+        "Round-trip one BREAKEVEN modify (TRADE_ACTION_SLTP) and one close, noting stop-distance and filling-mode rejections.",
+        "Agree a realized-R tolerance before the drill, then compare. Also drill the kill switch and the latched equity floor.",
+        "Check monitoring, restart/reconnect behaviour, dashboard access and broker minimum volume."
+      ],
+      "exit_gate": "A demo execution report plus account-risk sign-off. A green unit test in tests/test_live_position_guards.py is not a broker drill.",
+      "blocked_by": [],
+      "commands": [
+        "python3 tools/execution_plan.py gold --status   # is the book quiet enough to drill?",
+        "touch logs/KILL_SWITCH && rm logs/KILL_SWITCH  # kill-switch drill (blocks new entries only)"
+      ],
+      "sources": [
+        "docs/live_readiness_review_2026-10-23.md",
+        "docs/live_protection_2026-10-23.md",
+        "docs/risk_controls_2026-10-23.md"
+      ],
+      "evidence": "The filled-trade table with requested/filled/SL-verified columns."
+    },
+    {
+      "id": "forward-evidence",
+      "order": 4,
+      "status": "blocked",
+      "title": "Collect a qualifying forward cohort on the frozen engine",
+      "window": "100-200 trading days at 1.5-3 trades/day for ~300 trades",
+      "goal": "Measure the frozen strategy on exactly the engine intended for LIVE.",
+      "steps": [
+        "Freeze the strategy and exit engine; any material change starts a NEW cohort (no carry-over of the current 80 trades).",
+        "Review weekly: net R, PF, bootstrap uncertainty, drawdown, costs, side imbalance, operational incidents.",
+        "Require ~300+ qualifying trades or a positive mean R with a bootstrap CI above zero. Quantity cannot rescue a negative or uncertain edge.",
+        "Do not fit BUY/SELL filters or ATR floors from this small sample; the 2026-10-26 audit numbers are exploratory."
+      ],
+      "exit_gate": "A powered positive cohort on the frozen engine. The current book (80 closed, PF 0.855) does not qualify and must not be counted toward it.",
+      "blocked_by": [
+        "breakout-b-test"
+      ],
+      "commands": [
+        "python3 tools/execution_plan.py gold --status",
+        "python3 tools/check_data.py   # ledger integrity before quoting any numbers",
+        "python3 tools/heartbeat.py --check"
+      ],
+      "sources": [
+        "docs/live_readiness_review_2026-10-23.md",
+        "STATUS.md"
+      ],
+      "evidence": "The weekly review rows in STATUS.md, chained to the ledger."
+    },
+    {
+      "id": "go-no-go",
+      "order": 5,
+      "status": "blocked",
+      "title": "Formal go/no-go review, then a minimum-size pilot",
+      "window": "only after every gate above; no target date",
+      "goal": "Make an explicit human decision on evidence, then pilot at minimum size if approved.",
+      "steps": [
+        "Review research, cold OOS, forward cohort, demo execution, account controls and available capital together.",
+        "Record explicit human approval. The dashboard and this plan cannot approve anything, and nothing auto-promotes.",
+        "If approved: minimum-size pilot consistent with broker limits and the signed risk budget; keep kill switch and halt rules active.",
+        "Schedule a 30-day post-launch review. Stop on safety failures or breached limits; never increase size to recover losses."
+      ],
+      "exit_gate": "A signed decision document in the repo. Until then TRADING_MODE stays FORWARD_TEST.",
+      "blocked_by": [
+        "forward-evidence",
+        "execution-drill"
+      ],
+      "commands": [
+        "python3 tools/execution_plan.py gold --list"
+      ],
+      "sources": [
+        "docs/live_readiness_review_2026-10-23.md",
+        "STATUS.md"
+      ],
+      "evidence": "The signed decision, plus the 30-day review."
+    }
+  ]
+}
