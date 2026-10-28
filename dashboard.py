@@ -133,8 +133,40 @@ def error_page(e: Exception) -> HTMLResponse:
     )
 
 
-def readiness_context() -> dict:
-    """Gold planning view only; never promotes a book or writes trading state."""
+# --- readiness tab ---------------------------------------------------------
+# Forward-evidence reference counts. Gold's "~300+" is the shorthand from the
+# 2026-10-23 live-readiness review (~330 trades for 80% power); it is a
+# reference, never an approval countdown.
+#
+# BTC deliberately has NO reference count. The present BTC book runs the
+# Phase-1 shape that already failed its cold-OOS gate (PF 0.75), so its trades
+# are an observation feed, not a qualifying cohort. Counting them toward a
+# launch number would imply an approval path that does not exist.
+GOLD_REFERENCE_TRADES = 300
+BTC_REFERENCE_TRADES = None
+
+
+def book_kind() -> str:
+    """'gold', 'btc' or 'other' for the running instance.
+
+    Derived from SYMBOL rather than a new config key on purpose: btc/config.py
+    is a runtime input for `scalper-btc-bot`, so adding a viewer-only key there
+    would restart the BTC engine on deploy for no trading reason.
+    """
+    symbol = str(getattr(config, "SYMBOL", "GOLD") or "").upper()
+    if symbol == "GOLD":
+        return "gold"
+    if symbol.startswith("BTC"):
+        return "btc"
+    return "other"
+
+
+def readiness_snapshot(book: str):
+    """(snapshot, warning) from this instance's published paper state.
+
+    Read-only and fail-closed: an unreadable or nonsense state file yields
+    (None, warning), so the page says "unknown" instead of implying progress.
+    """
     snapshot = None
     warning = None
     try:
@@ -148,20 +180,56 @@ def readiness_context() -> dict:
         if stamp.tzinfo is None:
             stamp = stamp.replace(tzinfo=timezone.utc)
         age = (datetime.now(timezone.utc) - stamp).total_seconds() / 3600
-        snapshot = {"closed": closed, "balance": balance,
-                    "updated_at": data["updated_at"], "stale": age > 24 or age < 0,
-                    "remaining": max(0, 300 - closed)}
+        wins = data.get("wins")
+        losses = data.get("losses")
+        reference = GOLD_REFERENCE_TRADES if book == "gold" else BTC_REFERENCE_TRADES
+        snapshot = {
+            "closed": closed,
+            "balance": balance,
+            "updated_at": data["updated_at"],
+            "stale": age > 24 or age < 0,
+            # Both are None when the state file predates the counters; the
+            # template omits the line rather than printing a fake 0.
+            "wins": wins if type(wins) is int else None,
+            "losses": losses if type(losses) is int else None,
+            # `remaining` exists only where a reference cohort does.
+            "reference": reference,
+            "remaining": (max(0, reference - closed)
+                          if reference is not None else None),
+        }
     except (OSError, ValueError, TypeError, KeyError):
         warning = "Paper snapshot unavailable or invalid. Progress is unknown, not passed."
+    return snapshot, warning
+
+
+def readiness_context() -> dict:
+    """Planning view for the current instance; never promotes a book or writes
+    trading state. Gold and BTC have separate gate documents — a gold milestone
+    does not approve BTC, and vice versa."""
+    book = book_kind()
+    snapshot, warning = readiness_snapshot(book)
+    subtitles = {
+        "gold": "Gold • Evidence before capital • Planning baseline: 27 October 2026",
+        "btc": "Bitcoin (BTCUSD) • Separate gates, separate evidence • Planning baseline: 28 October 2026",
+        "other": "No readiness roadmap exists for this instance",
+    }
     return {"tab": "readiness", "title": DASHBOARD_TITLE,
             "config": config_snapshot(), "snapshot": snapshot, "warning": warning,
-            "is_gold": getattr(config, "SYMBOL", "GOLD") == "GOLD"}
+            "book": book, "is_gold": book == "gold",
+            # Read-only mode/connection badge for the nav; the file is
+            # machine-local, so absent means "no data", never "connected".
+            "live": get_live_status(),
+            "subtitle": subtitles[book]}
 
 
 @app.get("/readiness", response_class=HTMLResponse)
 async def readiness(request: Request):
-    return templates.TemplateResponse(
-        request=request, name="readiness.html", context=readiness_context())
+    """Per-book planning roadmap. Same route, different document (gold / BTC)."""
+    try:
+        return templates.TemplateResponse(
+            request=request, name="readiness.html", context=readiness_context())
+    except Exception as e:
+        return error_page(e)
 
 
 @app.get("/scalp", response_class=HTMLResponse)

@@ -11,7 +11,8 @@ run.py                         engine loop (risk gates, kill switch, stale-tick,
   live_ledger.LiveLedger       LIVE realized PnL, logs/live_ledger.json
   spread_gate.py               entry veto + dashboard banner (does not change the gate)
   logger.py                    logs/{system,trades}.jsonl, live_status.json, …
-dashboard.py                   reads those files only, :8088 — Overview + Scalp tab
+dashboard.py                   reads those files only, :8088 — Overview + Scalp +
+                               Readiness (per-book document: gold vs BTC)
 scalp_view.py                  read-only projections for the Scalp tab: the open
                                trade and the paired win/loss record (no new state)
 deploy.sh                      manual deploy: git pull --ff-only; restart only if a runtime path changed

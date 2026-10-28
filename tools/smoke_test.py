@@ -58,6 +58,10 @@ SCRIPTS = [
     ("heartbeat", ["tests/test_heartbeat.py"], []),
     ("ledger export", ["tests/test_ledger_export.py"], []),
     ("scalp view", ["tests/test_scalp_view.py"], []),
+    # Read-only /readiness route: gold and BTC render different gate documents
+    # and the snapshot fails closed. Needs the dashboard's own web deps — the
+    # gate SKIPs (never fails) where fastapi/httpx are not installed.
+    ("readiness", ["tests/test_readiness.py"], ["fastapi", "httpx"]),
     ("btc preflight", ["btc/preflight_test.py"], ["pandas", "numpy"]),
     ("btc edge screen", ["btc/edge_screen_test.py"], ["pandas", "numpy"]),
     ("btc strategy", ["btc/strategy_btc_test.py"], ["pandas", "numpy", "rpyc"]),
