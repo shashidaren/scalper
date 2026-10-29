@@ -1,9 +1,9 @@
 {
-  "as_of_utc": "2026-10-28T23:00:25Z",
+  "as_of_utc": "2026-10-29T00:00:26Z",
   "books": {
     "btc": {
       "engine_connected": true,
-      "engine_status_age_min": 0.0,
+      "engine_status_age_min": 0.2,
       "last_ledger_event": "2026-10-28 20:50:07",
       "mode": "FORWARD_TEST",
       "open_positions": 1,
@@ -28,7 +28,7 @@
       "verdict": "ok"
     }
   },
-  "bucket": "498119",
+  "bucket": "498120",
   "host": "scalping",
   "notes": [
     "gold: engine alive; last paper change 2026-10-28 19:32:30 (quiet periods are normal)",
