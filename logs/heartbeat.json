@@ -1,5 +1,5 @@
 {
-  "as_of_utc": "2026-10-31T00:00:26Z",
+  "as_of_utc": "2026-10-31T01:00:26Z",
   "books": {
     "btc": {
       "engine_connected": true,
@@ -23,12 +23,12 @@
       "paper_balance": 265.48,
       "paper_closed": 83,
       "paper_updated_at": "2026-10-30 11:55:52",
-      "reconnects": 7,
+      "reconnects": 9,
       "spread_gate_state": "ok",
       "verdict": "ok"
     }
   },
-  "bucket": "498168",
+  "bucket": "498169",
   "host": "scalping",
   "notes": [
     "gold: engine alive; last paper change 2026-10-30 11:55:52 (quiet periods are normal)",
