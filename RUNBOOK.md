@@ -171,6 +171,30 @@ mt5env/bin/python research/loss_analysis.py
 
 Read-only. Do not edit `btc/config.py` from these.
 
+Hypothesis D (`BTC-ORB-EU-H1`) is pre-registered but **not run**. The deciding
+window is XM H1 `time < 2024-06-25 22:00 UTC` — the only era this repo has never
+read. Freeze it in this order, before any sweep (phase 1 of `plans/btc.json`):
+
+```bash
+mt5env/bin/python btc/recon.py --timeframe H1 --bars 44000 --out data/BTCUSD_H1_pre2024.csv
+python3 btc/freeze.py --csv data/BTCUSD_H1_pre2024.csv --timeframe H1 \
+    --cutoff "2024-06-25 22:00:00" \
+    --out btc/manifests/btc_orb_eu_h1_2026-10-31.json
+git add btc/manifests/ && git commit -m "freeze BTC-ORB-EU-H1 window"   # hash BEFORE any sweep
+```
+
+`btc/freeze.py` refuses the burnt H1 sha256, a cutoff inside the inspected era,
+duplicate/out-of-order timestamps, a pull too short for the pre-declared
+minimums, and it will not overwrite an existing manifest. `--bars 20000` is
+wrong here: 20k H1 bars start in 2024-06, i.e. inside the inspected era.
+
+The screen that justified the hypothesis (proxy only — never evidence):
+
+```bash
+python3 btc/session_screen.py --self-test
+python3 btc/session_screen.py --csv /tmp/proxy/BTC_1h.csv --family orb --entry-mode stop --eras
+```
+
 ```bash
 cd /root/scalper && bash docs/collect-2026-10-07/collect_phase1c.sh
 # writes /root/ops/collect-2026-10-07/collection.md

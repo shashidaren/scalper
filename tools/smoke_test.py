@@ -68,6 +68,12 @@ SCRIPTS = [
     ("execution plan", ["tests/test_execution_plan.py"], []),
     ("btc preflight", ["btc/preflight_test.py"], ["pandas", "numpy"]),
     ("btc edge screen", ["btc/edge_screen_test.py"], ["pandas", "numpy"]),
+    # The 2026-10-31 screen behind BTC-ORB-EU-H1 and the freeze tool that guards
+    # the reserved untouched window. Both are stdlib-only and self-testing, so a
+    # broken screen or a broken cutoff guard fails the deploy gate instead of a
+    # research session.
+    ("btc session screen", ["btc/session_screen.py", "--self-test"], []),
+    ("btc freeze", ["btc/freeze.py", "--self-test"], []),
     ("btc strategy", ["btc/strategy_btc_test.py"], ["pandas", "numpy", "rpyc"]),
     ("deploy service policy", ["tests/test_deploy_services.sh"], []),
     # Skipped inside autosync's own gate: this suite runs autosync.sh, and
