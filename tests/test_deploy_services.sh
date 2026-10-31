@@ -188,6 +188,11 @@ run_case gold_config_restarts_btc_bot_failsafe 'scalper-btc-bot' \
   DEPLOY_SERVICES='scalper-btc-bot' GIT_DIFF=config.py
 run_case gold_tooling_skips_btc_bot '' \
   DEPLOY_SERVICES='scalper-btc-bot' GIT_DIFF='backtest.py'
+# Read-only BTC research tooling (screen + freeze, 2026-10-31) is never imported
+# by the engine: adding a research tool must not restart the BTC book.
+run_case btc_research_tools_skip_btc_bot '' \
+  DEPLOY_SERVICES='scalper-btc-bot' \
+  GIT_DIFF=$'btc/session_screen.py\nbtc/freeze.py'
 run_case btc_dashboard_file_skips_btc_bot '' \
   DEPLOY_SERVICES='scalper-btc-bot' GIT_DIFF='btc/dashboard.py'
 run_case btc_dashboard_commit_restarts_btc_dashboard_only 'scalper-btc-dashboard' \

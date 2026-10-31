@@ -138,6 +138,11 @@ is_inert_for() {
       case "$path" in
         btc/dashboard.py|dashboard.py|scalp_view.py|templates/*) return 0 ;;
         backtest.py|fetch_data.py|gold.py|balance.py) return 0 ;;
+        # Read-only research tooling, never imported by the engine. autosync.sh
+        # already treats every btc/ path except config/run/strategy_btc/_instance
+        # as inert; keep this classifier in step so a research commit cannot
+        # restart a book (2026-10-31).
+        btc/session_screen.py|btc/freeze.py) return 0 ;;
       esac
       ;;
     scalper-btc-dashboard)

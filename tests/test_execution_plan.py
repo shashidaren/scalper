@@ -21,6 +21,7 @@ import json
 import sys
 import tempfile
 import unittest
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -154,8 +155,20 @@ class RunnerTests(unittest.TestCase):
                     path = self.root / rel
                     path.parent.mkdir(parents=True, exist_ok=True)
                     path.touch()
+        # Inject the clock: this fixture used to pin 2026-10-28 as "fresh" and
+        # went red two days later. A red deploy gate makes autosync roll back
+        # every merge, so a wall-clock-dependent fixture is the same bug the
+        # risk-guard suite was fixed for ("clock cases inject now").
         self.state = {"closed": 80, "balance": 239.58, "wins": 19, "losses": 61,
-                      "position": None, "updated_at": "2026-10-28 19:32:30"}
+                      "position": None, "updated_at": self.stamp(hours=-1)}
+        self.write_state()
+
+    @staticmethod
+    def stamp(hours: float) -> str:
+        when = datetime.now(timezone.utc) + timedelta(hours=hours)
+        return when.strftime("%Y-%m-%d %H:%M:%S")
+
+    def write_state(self) -> None:
         (self.root / "logs" / "paper_account.json").write_text(json.dumps(self.state))
 
     def tearDown(self):
@@ -183,12 +196,21 @@ class RunnerTests(unittest.TestCase):
         self.assertIn("Never change TRADING_MODE", text)
 
     def test_brief_reports_paper_state_and_staleness(self):
-        plan = ep.load("gold", self.root)
+        plan = ep.load("gold", self.root)          # fixture: 1 hour old
         fresh = ep.paper_state(plan, self.root)
         self.assertEqual(fresh["closed"], 80)
         self.assertFalse(fresh["stale"])
-        stub = dict(fresh, stale=True)
-        self.assertIn("STALE", ep.render_brief(plan, stub, "FORWARD_TEST"))
+        self.assertNotIn("STALE", ep.render_brief(plan, fresh, "FORWARD_TEST"))
+        # More than the 24 h window -> stale, computed (not just a stub).
+        self.state["updated_at"] = self.stamp(hours=-48)
+        self.write_state()
+        stale = ep.paper_state(plan, self.root)
+        self.assertTrue(stale["stale"])
+        self.assertIn("STALE", ep.render_brief(plan, stale, "FORWARD_TEST"))
+        # A timestamp in the future is not "fresh" either.
+        self.state["updated_at"] = self.stamp(hours=+2)
+        self.write_state()
+        self.assertTrue(ep.paper_state(plan, self.root)["stale"])
 
     def test_missing_paper_state_is_unknown_not_zero(self):
         (self.root / "logs" / "paper_account.json").unlink()
