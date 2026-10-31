@@ -54,7 +54,7 @@ accident while "just fixing" something.
 
 ## Definition of done for any change
 
-- `python3 tools/smoke_test.py` passes (19 suites, 0 failures) and
+- `python3 tools/smoke_test.py` passes (21 suites, 0 failures) and
   `python3 tools/execution_plan.py --validate` passes.
 - Follow the existing conventions: read-only views never write engine state;
   anything exported to git is published through `tools/autosync.sh`, not by hand.

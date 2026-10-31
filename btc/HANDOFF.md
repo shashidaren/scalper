@@ -109,6 +109,25 @@ reason the book stays in paper.
 The paper book therefore runs the shape that already failed, on purpose: it is
 an observation feed, and it is allowed to look bad.
 
+## Hypothesis D pre-registered 2026-10-31 — pending freeze
+
+`BTC-ORB-EU-H1`: a session-anchored opening-range breakout on XM H1, stop-entry
+at the range level, ATR stop, hard time-flat at the 20:00 UTC close, no TP / BE
+/ trailing, nothing held overnight, no Saturday entries. Full protocol and the
+reasons for it: [`../docs/btc_hypothesis_orb_h1_2026-10-31.md`](../docs/btc_hypothesis_orb_h1_2026-10-31.md).
+
+- Chosen from a screen, not from data: `btc/session_screen.py` on Binance proxy
+  H1 (3 families x 6 cells x 2 fill modes). It is the only family whose gross
+  edge pays the spread in every era, and it is **thin** — the doc states the
+  concentration, the 2022 loss and the 2x-spread sensitivity.
+- **Status: reserved, not run.** The deciding window is XM H1
+  `time < 2024-06-25 22:00 UTC` — the only era this repo has never read. The
+  freeze manifest is pending: `btc/recon.py --bars 44000` then `btc/freeze.py`
+  on `scalping` (RUNBOOK "BTC gate"). No sweep may run before that manifest is
+  committed.
+- **Nothing is configured.** `BTC_STRATEGY` stays `scalp`, `btc/config.py` is
+  untouched, and the `orb` family is not implemented yet (phase 2).
+
 ## Weekend flat — settled 2026-10-24, and why it was confusing
 
 `WEEKEND_FLAT_ENABLED = False`. **BTC trades through the weekend.**
@@ -146,6 +165,10 @@ its Friday flat.
   file is inspected; reusing it makes any new gate worthless.
 - Re-tune the same RSI-pullback / EMA200 shape on overlapping data. A new BTC
   hypothesis needs its own pre-registered rule and a fresh pull.
+- Consume the reserved pre-2024-06-25 window on anything other than
+  `BTC-ORB-EU-H1`, widen its 6-cell grid, or read its cold OOS twice. Use
+  `btc/freeze.py`: it refuses the burnt H1 sha256 and any cutoff inside the
+  inspected era.
 
 ## Research plumbing (read-only)
 

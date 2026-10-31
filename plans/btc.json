@@ -3,13 +3,51 @@
   "book": "btc",
   "title": "Bitcoin execution plan",
   "symbol": "BTCUSD",
-  "version": "2026-10-28",
-  "reviewed": "2026-10-28",
+  "version": "2026-10-31",
+  "reviewed": "2026-10-31",
   "verdict": "NO-GO",
-  "verdict_reason": "No validated strategy at all. Phase 1 (M5 RSI pullback) failed cold OOS at PF 0.75 and Phase 1c (H1 Donchian) failed at PF 0.96, so the running book is an observation feed: 141 closed / PF 0.846 at 2026-10-28. Those trades are not evidence for any successor.",
+  "verdict_reason": "No validated strategy. Phase 1 (M5 RSI pullback) failed cold OOS at PF 0.75 and Phase 1c (H1 Donchian) failed at PF 0.96, so the running book is an observation feed: 158 closed / $255.12 at 2026-10-31. Those trades are not evidence for any successor. The 2026-10-31 screen of three further families (36 proxy runs, proxy only) found one candidate with a gross edge in every era; it is pre-registered as BTC-ORB-EU-H1 and has no XM result.",
   "mode_expected": "FORWARD_TEST",
   "next": "btc-hypothesis",
-  "summary": "Nothing unblocks until a NEW hypothesis passes its own cold-OOS gate on bars nobody has inspected. Every parameter in btc/config.py is still a gold-derived placeholder.",
+  "summary": "Everything downstream waits on the BTC-ORB-EU-H1 pre-registration being frozen: the pre-2024-06-25 XM window is reserved, the freeze manifest is still pending on scalping, and no result has been read. Every parameter in btc/config.py is still a gold-derived placeholder.",
+  "pre_registration": {
+    "id": "BTC-ORB-EU-H1",
+    "doc": "docs/btc_hypothesis_orb_h1_2026-10-31.md",
+    "registered": "2026-10-31",
+    "family": "orb",
+    "fill": "stop-entry at the opening-range level (not the bar close)",
+    "grid_cells": 6,
+    "grid_cap": 12,
+    "selection": "TRAIN mean net R; requires TRAIN n >= 80 and grossR > costR before ranking",
+    "gate": [
+      "net > 0",
+      "PF >= 1.2",
+      "n >= 60 on cold OOS",
+      "grossR > costR on the same OOS trades",
+      "1-4 survive an extra half-spread of entry slippage"
+    ],
+    "window": {
+      "cutoff_exclusive": "2024-06-25 22:00:00",
+      "train_frac": 0.6,
+      "embargo_bars": 200,
+      "warmup_bars": 1000
+    },
+    "freeze": {
+      "tool": "btc/freeze.py",
+      "manifest": "btc/manifests/btc_orb_eu_h1_2026-10-31.json",
+      "state": "pending",
+      "raw_sha256": null
+    },
+    "results_inspected": false,
+    "screen": {
+      "tool": "btc/session_screen.py",
+      "families": 3,
+      "cells": 18,
+      "fill_modes": 2,
+      "runs": 36,
+      "evidence_class": "proxy only - not XM evidence"
+    }
+  },
   "never": [
     "Never change TRADING_MODE, the BTC service units, or MAX_SPREAD_POINTS without an explicit user decision in this session.",
     "Never set BTC_STRATEGY=donchian: Phase 1c failed (cold OOS -$40.03, PF 0.96) and the plumbing existing is not evidence.",
@@ -17,7 +55,9 @@
     "Never re-pull or re-rank on the inspected windows, or reuse data/BTCUSD_H1.csv (sha256 f7305461...ab21).",
     "Never count the current paper book toward a successor's evidence, or re-tune the RSI-pullback / Donchian shape on overlapping data.",
     "Never add a second WEEKEND_FLAT_ENABLED assignment to btc/config.py; that exact duplication ran the wrong rule for a day.",
-    "Never flip to LIVE on the shared XM account: portfolio.py caps the pair at $38/day and gold's own $30 can consume most of it."
+    "Never flip to LIVE on the shared XM account: portfolio.py caps the pair at $38/day and gold's own $30 can consume most of it.",
+    "Never freeze or sweep bars that reach 2024-06-25 22:00 UTC or later without a new explicit decision: that era is inspected (H1 sha256 f7305461...ab21) and btc/freeze.py refuses it.",
+    "Never widen the BTC-ORB-EU-H1 grid (6 cells), drop a cell that screened badly, or read the cold OOS more than once."
   ],
   "paths": {
     "paper_state": "btc/logs/paper_account.json",
@@ -33,25 +73,30 @@
       "status": "active",
       "title": "Pre-register a new BTC hypothesis on untouched bars",
       "window": "blocking everything else",
-      "goal": "Produce a dated pre-registration whose TRAIN/OOS split uses timestamps that have never been inspected.",
+      "goal": "Freeze the pre-registered BTC-ORB-EU-H1 protocol on the only XM era this repo has never read, without inspecting a single result.",
       "steps": [
-        "Write the hypothesis, the parameter grid (bounded), the selection statistic and the exact exit rule into one dated doc.",
-        "Pull fresh XM bars through btc/recon.py and record the sha256 and the TRAIN/OOS boundaries in the doc BEFORE any sweep.",
-        "State the gate in advance: net > 0, PF >= 1.2, n >= 60 cold OOS, gross > cost, and one look at OOS only.",
-        "Record the pre-registration in the STATUS changelog and in plans/btc.json (this file)."
+        "DONE 2026-10-31: screened three new families on proxy bars first (btc/session_screen.py, 3 families x 6 cells x 2 fill modes) and pre-registered the one that clears gross > cost in every era - docs/btc_hypothesis_orb_h1_2026-10-31.md.",
+        "Pull 44,000 XM H1 bars (btc/recon.py) and freeze them with btc/freeze.py: cutoff 2024-06-25 22:00, 60/40 split, 200-bar embargo. Commit the manifest BEFORE any sweep.",
+        "Confirm the gate in the doc is unchanged: net > 0, PF >= 1.2, n >= 60 cold OOS, gross > cost, plus the half-spread slippage stress - and one look at the OOS only.",
+        "Record the frozen sha256 in STATUS and in pre_registration.freeze, then mark this phase done."
       ],
       "exit_gate": "A committed pre-registration with fresh hashes and boundaries, and no result inspected yet.",
       "blocked_by": [],
       "commands": [
         "python3 tools/execution_plan.py bitcoin",
-        "mt5env/bin/python btc/recon.py --bars 20000   # read-only pull + contract spec; safe while gold trades"
+        "python3 btc/session_screen.py --self-test   # the screen behind the pre-registration",
+        "mt5env/bin/python btc/recon.py --timeframe H1 --bars 44000 --out data/BTCUSD_H1_pre2024.csv",
+        "python3 btc/freeze.py --csv data/BTCUSD_H1_pre2024.csv --timeframe H1 --cutoff \"2024-06-25 22:00:00\" --out btc/manifests/btc_orb_eu_h1_2026-10-31.json"
       ],
       "sources": [
         "btc/HANDOFF.md",
         "docs/btc_phase1_result_2026-10-03.md",
-        "docs/btc_phase1c_result_2026-10-07.md"
+        "docs/btc_phase1c_result_2026-10-07.md",
+        "docs/btc_hypothesis_orb_h1_2026-10-31.md",
+        "btc/session_screen.py",
+        "btc/freeze.py"
       ],
-      "evidence": "The dated pre-registration doc with hashes, plus the STATUS row."
+      "evidence": "The committed pre-registration plus btc/manifests/btc_orb_eu_h1_2026-10-31.json with state=frozen and results_inspected=false, plus the STATUS row."
     },
     {
       "id": "btc-hypothesis-test",
@@ -61,7 +106,7 @@
       "window": "1-2 weeks after the pre-registration",
       "goal": "Accept or reject the new shape on its own reserved window.",
       "steps": [
-        "Screen on TRAIN only with btc/edge_screen.py, select by the pre-registered statistic, freeze the winner.",
+        "Screen on TRAIN only with btc/edge_screen.py --family orb, select by the pre-registered statistic (mean net R, TRAIN n >= 80, grossR > costR), freeze the winner.",
         "Run btc/train_select.py for the cold-OOS confirmation. One look; no re-selection.",
         "Write the dated result. On failure, close it and pre-register a new hypothesis, not a new split of the same bars."
       ],
@@ -76,7 +121,8 @@
       ],
       "sources": [
         "docs/btc_phase1c_result_2026-10-07.md",
-        "btc/HANDOFF.md"
+        "btc/HANDOFF.md",
+        "docs/btc_hypothesis_orb_h1_2026-10-31.md"
       ],
       "evidence": "The dated report and the STATUS decision row."
     },
