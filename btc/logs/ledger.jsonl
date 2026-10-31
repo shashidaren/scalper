@@ -300,3 +300,4 @@
 {"balance_after":257.29,"entry":78546.05,"event":"SIM_EXIT","exit":78763.28,"profit":-2.17,"reason":"SL","side":"SELL","time":"2026-10-30 06:30:12"}
 {"entry":77424.05,"event":"SIM_ENTRY","side":"BUY","sl":77268.66,"sl_dist":155.39,"time":"2026-10-31 02:40:06","tp":77812.54,"tp_dist":388.49,"volume":0.01}
 {"balance_after":255.74,"entry":77424.05,"event":"SIM_EXIT","exit":77268.66,"profit":-1.55,"reason":"SL","side":"BUY","time":"2026-10-31 03:09:30"}
+{"entry":77198.35,"event":"SIM_ENTRY","side":"SELL","sl":77383.82,"sl_dist":185.47,"time":"2026-10-31 05:50:09","tp":76734.66,"tp_dist":463.69,"volume":0.01}
