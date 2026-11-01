@@ -1,10 +1,10 @@
 {
-  "balance": 256.12,
+  "balance": 255.54,
   "position": null,
-  "closed": 162,
+  "closed": 163,
   "wins": 32,
-  "losses": 130,
+  "losses": 131,
   "time_exits": 0,
   "weekend_exits": 0,
-  "updated_at": "2026-11-01 08:35:03"
+  "updated_at": "2026-11-01 12:11:43"
 }
