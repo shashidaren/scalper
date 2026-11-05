@@ -1,10 +1,20 @@
 {
   "balance": 266.64,
-  "position": null,
+  "position": {
+    "side": "BUY",
+    "entry": 80578.95,
+    "sl": 80283.46,
+    "tp": 81317.66,
+    "sl_dist": 295.48571428571347,
+    "tp_dist": 738.7142857142837,
+    "volume": 0.01,
+    "be_armed": false,
+    "time": "2026-11-05 01:35:09"
+  },
   "closed": 181,
   "wins": 38,
   "losses": 143,
   "time_exits": 0,
   "weekend_exits": 0,
-  "updated_at": "2026-11-05 01:17:00"
+  "updated_at": "2026-11-05 01:35:09"
 }
