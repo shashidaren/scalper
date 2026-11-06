@@ -3,12 +3,12 @@
   "position": {
     "side": "SELL",
     "entry": 76146.25,
-    "sl": 76330.05,
+    "sl": 76146.25,
     "tp": 75686.75,
     "sl_dist": 183.8000000000029,
     "tp_dist": 459.5000000000073,
     "volume": 0.01,
-    "be_armed": false,
+    "be_armed": true,
     "time": "2026-11-06 12:35:03"
   },
   "closed": 188,
@@ -16,5 +16,5 @@
   "losses": 149,
   "time_exits": 0,
   "weekend_exits": 0,
-  "updated_at": "2026-11-06 12:35:03"
+  "updated_at": "2026-11-06 13:13:07"
 }
