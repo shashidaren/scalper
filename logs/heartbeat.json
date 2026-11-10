@@ -1,9 +1,9 @@
 {
-  "as_of_utc": "2026-11-09T23:00:37Z",
+  "as_of_utc": "2026-11-10T00:00:37Z",
   "books": {
     "btc": {
       "engine_connected": true,
-      "engine_status_age_min": 1236.7,
+      "engine_status_age_min": 1296.7,
       "last_ledger_event": "2026-11-09 02:24:02",
       "mode": "FORWARD_TEST",
       "open_positions": 1,
@@ -28,11 +28,11 @@
       "verdict": "ok"
     }
   },
-  "bucket": "498407",
+  "bucket": "498408",
   "host": "scalping",
   "notes": [
     "gold: engine alive; last paper change 2026-11-09 19:40:43 (quiet periods are normal)",
-    "btc: live_status.json is 1237 min old (limit 10) - engine is not looping"
+    "btc: live_status.json is 1297 min old (limit 10) - engine is not looping"
   ],
   "stale_after_minutes": 10.0,
   "verdict": "stale"
