@@ -82,6 +82,11 @@ Both live in `risk_guard.py`; the measurements are in
 python3 risk_guard.py                 # floor status: start, peak, floor, halted_at
 python3 risk_guard.py --reset         # clear a latched floor (deliberate action)
 cat logs/equity_floor.json
+
+# BTC has its OWN floor state (btc/logs/equity_floor.json). The plain command
+# above only ever touches gold's.
+python3 btc/tool.py risk_guard.py
+python3 btc/tool.py risk_guard.py --reset
 grep -E 'RISK|weekend flat|closed at market' logs/system.jsonl | tail -20
 ```
 
@@ -95,6 +100,11 @@ grep -E 'RISK|weekend flat|closed at market' logs/system.jsonl | tail -20
 - **Equity floor** — `[RISK] EQUITY FLOOR HIT` latches: new entries stop, open
   positions keep their stops, and the engine keeps managing them. It does not
   un-latch on a bounce; reset it deliberately once you know why it fired.
+  **The state is per instance**, and both bots read the same shared MT5 equity,
+  so one bad enough day latches both. Resetting gold does not reset BTC: you
+  need both `--reset` commands above. Confirm with
+  `grep "Equity floor" logs/system.jsonl btc/logs/system.jsonl | tail -2` —
+  each line prints the reference it latched (`start`) and the resulting floor.
 - **Hold cap** — `MAX_HOLD_MINUTES = 0` (off). Measured as noise; the weekend
   rule already bounds the worst hold at ~72h.
 
@@ -176,12 +186,24 @@ window is XM H1 `time < 2024-06-25 22:00 UTC` — the only era this repo has nev
 read. Freeze it in this order, before any sweep (phase 1 of `plans/btc.json`):
 
 ```bash
+python3 btc/freeze.py --status        # PENDING / FROZEN / DRIFT. Start here.
+
 mt5env/bin/python btc/recon.py --timeframe H1 --bars 44000 --out data/BTCUSD_H1_pre2024.csv
 python3 btc/freeze.py --csv data/BTCUSD_H1_pre2024.csv --timeframe H1 \
     --cutoff "2024-06-25 22:00:00" \
     --out btc/manifests/btc_orb_eu_h1_2026-10-31.json
-git add btc/manifests/ && git commit -m "freeze BTC-ORB-EU-H1 window"   # hash BEFORE any sweep
+python3 btc/freeze.py --status        # after the freeze: FROZEN, no [DRIFT] lines
+git add btc/manifests/ plans/btc.json && git commit \
+    -m "freeze BTC-ORB-EU-H1 window"   # hash BEFORE any sweep
 ```
+
+`--status` is read-only and reconciles the two records: the manifest on disk and
+`pre_registration.freeze` in `plans/btc.json`. Exit 0 = they agree (pending or
+frozen), 1 = drift or an unsafe manifest (rejected, already inspected, cutoff
+inside the inspected era, sha256 mismatch), 2 = unreadable plan. Between the
+freeze and the commit it deliberately reports `DRIFT` ("manifest exists but the
+plan does not record it") — that is the cue to record `state: "frozen"` and the
+sha256 in the same commit, not a fault.
 
 `btc/freeze.py` refuses the burnt H1 sha256, a cutoff inside the inspected era,
 duplicate/out-of-order timestamps, a pull too short for the pre-declared

@@ -39,6 +39,28 @@ It is stdlib-only and imports no `config`, so it can run on the box next to a
 live gold book. It never reads or writes engine state.
 
     python3 btc/freeze.py --self-test      # offline checks, no data needed
+
+`--status` — the readiness half
+-------------------------------
+A freeze recorded in `btc/manifests/` and the `pre_registration.freeze` block in
+`plans/btc.json` are two records of the same fact, written at different times by
+different hands. Drift between them is how a sweep ends up running on a window
+nobody hashed (or on one that has already been read). `--status` reconciles them
+and writes nothing:
+
+    python3 btc/freeze.py --status            # PENDING / FROZEN / DRIFT, exit 0|1
+    python3 btc/freeze.py --status --json     # the same report, machine-readable
+
+exit 0 = the plan and the disk agree (nothing frozen yet, or frozen and recorded);
+exit 1 = they disagree, or the manifest is unsafe (rejected / already inspected /
+sha mismatch / cutoff inside the inspected era); exit 2 = the plan is unreadable.
+
+It is deliberately **not** part of the deploy gate. Creating a manifest on the box
+is a legitimate step that happens *before* the commit which updates the plan, so
+a gate that ran this would red-line every autosync tick between the two — the
+2026-10-24 incident, where a red gate made `autosync.sh` roll back its own
+merges. `--self-test` covers every case hermetically instead, and the operator
+runs `--status` as step 2b of the phase-1 protocol (RUNBOOK "BTC gate").
 """
 from __future__ import annotations
 
@@ -50,7 +72,13 @@ import os
 import tempfile
 from datetime import datetime
 
-TOOL_VERSION = "1.0"
+TOOL_VERSION = "1.1"
+
+ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+PLAN_REL = os.path.join("plans", "btc.json")
+
+# --status exit codes (see the docstring).
+STATUS_OK, STATUS_DRIFT, STATUS_UNREADABLE = 0, 1, 2
 
 # Published, inspected XM files (see STATUS.md "Do not" and
 # docs/btc_phase1c_result_2026-10-07.md). A new pre-registration must never
@@ -218,6 +246,209 @@ def freeze(path: str, timeframe: str, cutoff_text: str, train_frac: float,
     return manifest, problems
 
 
+def status(root: str = ROOT, plan_rel: str = PLAN_REL) -> tuple[int, dict]:
+    """Reconcile the plan's freeze block with the manifest on disk. Read-only.
+
+    Returns (exit_code, report). Every check is a recorded fact, not a guess:
+    a missing file is reported as missing, never as "probably fine".
+    """
+    root = os.path.abspath(root)
+    plan_path = os.path.join(root, plan_rel)
+    report = {
+        "root": root, "plan": plan_rel, "plan_version": None,
+        "hypothesis": None, "plan_state": None, "plan_sha256": None,
+        "manifest": None, "manifest_exists": False, "manifest_state": None,
+        "results_inspected": None, "manifest_sha256": None,
+        "cutoff_exclusive": None, "segments": None,
+        "csv": None, "csv_exists": False, "csv_sha256": None,
+        "phase": None, "phase_status": None,
+        "verdict": None, "problems": [], "warnings": [],
+    }
+    try:
+        with open(plan_path) as f:
+            plan = json.load(f)
+    except FileNotFoundError:
+        report["problems"].append(f"{plan_rel} not found under {root}")
+        report["verdict"] = "UNREADABLE"
+        return STATUS_UNREADABLE, report
+    except (ValueError, OSError) as exc:
+        report["problems"].append(f"{plan_rel} unreadable: {exc}")
+        report["verdict"] = "UNREADABLE"
+        return STATUS_UNREADABLE, report
+
+    report["plan_version"] = plan.get("version")
+    pre = plan.get("pre_registration")
+    if not isinstance(pre, dict):
+        report["problems"].append("plan: no pre_registration block")
+        pre = {}
+    report["hypothesis"] = pre.get("id")
+    block = pre.get("freeze") if isinstance(pre.get("freeze"), dict) else {}
+    report["plan_state"] = block.get("state")
+    report["plan_sha256"] = block.get("raw_sha256")
+    report["csv"] = block.get("csv")
+    phase_id = block.get("phase")
+    report["phase"] = phase_id
+    for ph in plan.get("phases") or []:
+        if isinstance(ph, dict) and ph.get("id") == phase_id:
+            report["phase_status"] = ph.get("status")
+            break
+
+    if not block:
+        report["problems"].append("plan: pre_registration.freeze block is missing")
+    if block.get("state") not in ("pending", "frozen"):
+        report["problems"].append(
+            f"plan: freeze.state {block.get('state')!r} is neither 'pending' nor 'frozen'")
+    if phase_id and report["phase_status"] is None:
+        report["problems"].append(
+            f"plan: freeze.phase {phase_id!r} names no phase in this plan")
+
+    manifest_rel = block.get("manifest")
+    report["manifest"] = manifest_rel
+    if not manifest_rel:
+        report["problems"].append("plan: freeze.manifest path is missing")
+        report["verdict"] = "DRIFT"
+        return STATUS_DRIFT, report
+
+    manifest_path = os.path.join(root, manifest_rel)
+    report["manifest_exists"] = os.path.exists(manifest_path)
+
+    if not report["manifest_exists"]:
+        # The honest pending state: nothing frozen, nothing claimed frozen.
+        if block.get("state") == "frozen":
+            report["problems"].append(
+                f"plan: freeze.state='frozen' but {manifest_rel} does not exist")
+        if report["plan_sha256"]:
+            report["problems"].append(
+                "plan: a raw_sha256 is recorded but no manifest exists to hold it")
+        if block.get("state") == "pending" and not report["plan_sha256"]:
+            report["warnings"].append(
+                "nothing is frozen yet: the reserved window must not be swept")
+        csv_rel = report["csv"]
+        if csv_rel:
+            report["csv_exists"] = os.path.exists(os.path.join(root, csv_rel))
+            if not report["csv_exists"]:
+                report["warnings"].append(
+                    f"{csv_rel} is not in this checkout (data/*.csv stays off git)")
+        report["verdict"] = "DRIFT" if report["problems"] else "PENDING"
+        return (STATUS_DRIFT if report["problems"] else STATUS_OK), report
+
+    try:
+        with open(manifest_path) as f:
+            manifest = json.load(f)
+    except (ValueError, OSError) as exc:
+        report["problems"].append(f"{manifest_rel} unreadable: {exc}")
+        report["verdict"] = "DRIFT"
+        return STATUS_DRIFT, report
+
+    report["manifest_state"] = manifest.get("state")
+    report["results_inspected"] = manifest.get("results_inspected")
+    report["manifest_sha256"] = manifest.get("raw_sha256")
+    report["cutoff_exclusive"] = manifest.get("cutoff_exclusive")
+    report["segments"] = manifest.get("segments")
+
+    if manifest.get("state") != "frozen":
+        report["problems"].append(
+            f"manifest: state={manifest.get('state')!r} — a rejected freeze must "
+            f"not be swept (problems: {manifest.get('problems') or 'none recorded'})")
+    if manifest.get("results_inspected") is not False:
+        report["problems"].append(
+            "manifest: results_inspected is not False — the cold OOS has been read")
+    if not manifest.get("raw_sha256"):
+        report["problems"].append("manifest: no raw_sha256")
+    elif manifest["raw_sha256"] in INSPECTED_SHA256:
+        report["problems"].append(
+            f"manifest: raw_sha256 is an INSPECTED file "
+            f"({INSPECTED_SHA256[manifest['raw_sha256']]})")
+    if pre.get("id") and manifest.get("hypothesis") != pre.get("id"):
+        report["problems"].append(
+            f"manifest: hypothesis {manifest.get('hypothesis')!r} != plan "
+            f"pre_registration.id {pre.get('id')!r}")
+    try:
+        if parse_time(manifest.get("cutoff_exclusive")) > parse_time(INSPECTED_ERA_START):
+            report["problems"].append(
+                f"manifest: cutoff {manifest.get('cutoff_exclusive')} is inside the "
+                f"inspected era (starts {INSPECTED_ERA_START})")
+    except (ValueError, TypeError):
+        report["problems"].append(
+            f"manifest: cutoff_exclusive {manifest.get('cutoff_exclusive')!r} "
+            f"is not a time")
+
+    if block.get("state") != "frozen":
+        report["problems"].append(
+            f"plan: freeze.state={block.get('state')!r} but {manifest_rel} exists — "
+            f"record state='frozen' and its raw_sha256 in the same commit")
+    if report["plan_sha256"] and report["plan_sha256"] != manifest.get("raw_sha256"):
+        report["problems"].append(
+            f"plan: raw_sha256 {str(report['plan_sha256'])[:12]}… != manifest "
+            f"{str(manifest.get('raw_sha256'))[:12]}…")
+
+    csv_rel = report["csv"]
+    if csv_rel:
+        csv_path = os.path.join(root, csv_rel)
+        report["csv_exists"] = os.path.exists(csv_path)
+        if report["csv_exists"]:
+            report["csv_sha256"] = sha256_file(csv_path)
+            if report["csv_sha256"] != manifest.get("raw_sha256"):
+                report["problems"].append(
+                    f"{csv_rel} sha256 {report['csv_sha256'][:12]}… != manifest "
+                    f"raw_sha256 — the manifest is not for this file")
+        else:
+            report["warnings"].append(
+                f"{csv_rel} is not in this checkout, so the manifest sha256 can "
+                f"only be re-verified on the box that froze it")
+
+    if report["phase_status"] == "active" and not report["problems"]:
+        report["warnings"].append(
+            f"phase {phase_id!r} is still 'active': record the sha in STATUS.md, "
+            f"then mark it done and move 'next' forward")
+
+    report["verdict"] = "DRIFT" if report["problems"] else "FROZEN"
+    return (STATUS_DRIFT if report["problems"] else STATUS_OK), report
+
+
+def print_status(report: dict) -> None:
+    print("=" * 78)
+    print(f"PHASE-1 FREEZE READINESS — {report['verdict']}")
+    print("=" * 78)
+    print(f"plan        : {report['plan']}  v{report['plan_version']}"
+          + (f"   phase {report['phase']!r} [{report['phase_status']}]"
+             if report["phase"] else ""))
+    print(f"hypothesis  : {report['hypothesis']}")
+    print(f"manifest    : {report['manifest']}   "
+          f"({'present' if report['manifest_exists'] else 'absent'})")
+    print(f"plan freeze : state={report['plan_state']}  "
+          f"raw_sha256={report['plan_sha256'] or 'null'}")
+    if report["manifest_exists"]:
+        print(f"frozen      : state={report['manifest_state']}  "
+              f"results_inspected={report['results_inspected']}")
+        print(f"sha256      : {report['manifest_sha256']}")
+        print(f"cutoff      : < {report['cutoff_exclusive']}")
+        for name in ("train", "embargo", "cold_oos"):
+            seg = (report["segments"] or {}).get(name)
+            if seg:
+                print(f"{name:<11} : {seg['bars']:>6} bars  {seg['first_bar']} .. "
+                      f"{seg['last_bar']}")
+    print(f"source csv  : {report['csv']}   "
+          f"({'present' if report['csv_exists'] else 'absent'})")
+    for w in report["warnings"]:
+        print(f"  [NOTE] {w}")
+    for p in report["problems"]:
+        print(f"  [DRIFT] {p}")
+    if report["verdict"] == "PENDING":
+        print("\nNothing is frozen: no sweep may run against the reserved window.")
+        print("Next, on `scalping` (RUNBOOK \"BTC gate\"):")
+        print("  $ mt5env/bin/python btc/recon.py --timeframe H1 --bars 44000 "
+              "--out data/BTCUSD_H1_pre2024.csv")
+        print("  $ python3 btc/freeze.py --csv data/BTCUSD_H1_pre2024.csv "
+              f"--out {report['manifest']}")
+        print("  $ python3 btc/freeze.py --status      # must print FROZEN")
+    elif report["verdict"] == "FROZEN":
+        print("\nThe window is frozen and the plan records it. Phase 1's remaining "
+              "work is the STATUS.md row + marking the phase done.")
+    elif report["verdict"] == "DRIFT":
+        print("\nNot consistent. Fix the record before any sweep reads this window.")
+
+
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     ap.add_argument("--csv", help="fresh bar pull to freeze")
@@ -240,12 +471,26 @@ def main(argv=None) -> int:
                     help="extra sha256 to refuse (repeatable)")
     ap.add_argument("--force", action="store_true",
                     help="overwrite an existing manifest (a freeze is a one-way door)")
+    ap.add_argument("--status", action="store_true",
+                    help="reconcile plans/btc.json's freeze block with the manifest "
+                         "(read-only; exit 0 consistent, 1 drift, 2 unreadable)")
+    ap.add_argument("--root", default=ROOT,
+                    help="repo root for --status (default: this checkout)")
+    ap.add_argument("--json", action="store_true",
+                    help="with --status: print the report as JSON")
     ap.add_argument("--self-test", action="store_true")
     args = ap.parse_args(argv)
     if args.self_test:
         return self_test()
+    if args.status:
+        code, report = status(args.root)
+        if args.json:
+            print(json.dumps(report, indent=2, sort_keys=True))
+        else:
+            print_status(report)
+        return code
     if not args.csv:
-        ap.error("--csv is required (or use --self-test)")
+        ap.error("--csv is required (or use --self-test / --status)")
 
     out = args.out or os.path.join("btc", "manifests",
                                    f"{args.hypothesis.lower().replace('-', '_')}.json")
@@ -386,8 +631,116 @@ def self_test() -> int:
     for key in ("raw_sha256", "cutoff_exclusive", "segments", "state",
                 "results_inspected", "protocol"):
         assert key in data, key
+
+    # ------------------------------------------------------------------ #
+    # --status: the plan's freeze block and the manifest must agree
+    # ------------------------------------------------------------------ #
+    import contextlib
+    import io
+
+    sroot = os.path.join(tmp, "repo")
+    man_rel, csv_rel = "btc/manifests/m.json", "data/pull.csv"
+    os.makedirs(os.path.join(sroot, "plans"))
+    os.makedirs(os.path.join(sroot, os.path.dirname(man_rel)))
+    os.makedirs(os.path.join(sroot, os.path.dirname(csv_rel)))
+    def copy_bytes(src, dst):          # bytes, not text: sha256 is byte-exact
+        with open(src, "rb") as a, open(dst, "wb") as b:
+            b.write(a.read())
+
+    copy_bytes(good, os.path.join(sroot, csv_rel))
+    frozen, _ = freeze(good, "H1", INSPECTED_ERA_START, 0.60, 50, 100, 1000, 300,
+                       100, INSPECTED_ERA_START, {}, "TEST", "doc.md")
+    man_path = os.path.join(sroot, man_rel)
+
+    def write_plan(state="pending", sha=None):
+        plan = {"version": "test",
+                "phases": [{"id": "btc-hypothesis", "status": "active"}],
+                "pre_registration": {"id": "TEST", "freeze": {
+                    "manifest": man_rel, "csv": csv_rel, "phase": "btc-hypothesis",
+                    "state": state, "raw_sha256": sha}}}
+        with open(os.path.join(sroot, "plans", "btc.json"), "w") as f:
+            json.dump(plan, f)
+
+    def write_manifest(**over):
+        m = json.loads(json.dumps(frozen))
+        m.update(over)
+        with open(man_path, "w") as f:
+            json.dump(m, f)
+
+    # 1. honest pending state: nothing frozen, nothing claimed frozen
+    write_plan()
+    code, rep = status(sroot)
+    assert code == STATUS_OK and rep["verdict"] == "PENDING", (code, rep)
+    assert rep["manifest_exists"] is False and rep["csv_exists"] is True
+    assert not rep["problems"], rep["problems"]
+
+    # 2. a plan that claims a freeze it does not have
+    write_plan(state="frozen")
+    code, rep = status(sroot)
+    assert code == STATUS_DRIFT and any("does not exist" in p for p in rep["problems"]), rep
+
+    # 3. a manifest on disk that the plan has not recorded yet (the box, pre-commit)
+    write_plan()
+    write_manifest()
+    code, rep = status(sroot)
+    assert code == STATUS_DRIFT and any("exists" in p for p in rep["problems"]), rep
+
+    # 4. consistent: manifest frozen, plan records the same hash
+    write_plan(state="frozen", sha=frozen["raw_sha256"])
+    code, rep = status(sroot)
+    assert code == STATUS_OK and rep["verdict"] == "FROZEN", (code, rep)
+    assert rep["csv_sha256"] == frozen["raw_sha256"]
+    assert any("still 'active'" in w for w in rep["warnings"]), rep["warnings"]
+
+    # 5. unsafe manifests: inspected already / rejected / cutoff inside the era
+    for over, needle in (
+            ({"results_inspected": True}, "results_inspected"),
+            ({"state": "rejected"}, "rejected"),
+            ({"cutoff_exclusive": "2025-01-01 00:00:00"}, "inspected era"),
+            ({"hypothesis": "SOMETHING-ELSE"}, "hypothesis"),
+            ({"raw_sha256": sorted(INSPECTED_SHA256)[0]}, "INSPECTED file")):
+        write_manifest(**over)
+        code, rep = status(sroot)
+        assert code == STATUS_DRIFT and any(needle in p for p in rep["problems"]), \
+            (over, rep["problems"])
+    write_manifest()
+
+    # 6. the plan records the wrong hash, and the CSV is not the frozen one
+    write_plan(state="frozen", sha="0" * 64)
+    code, rep = status(sroot)
+    assert code == STATUS_DRIFT and any("raw_sha256" in p for p in rep["problems"]), rep
+    write_plan(state="frozen", sha=frozen["raw_sha256"])
+    with open(os.path.join(sroot, csv_rel), "ab") as f:
+        f.write(b"2020-01-01 00:00:00,1,2,0.5,1,10,4000\r\n")
+    code, rep = status(sroot)
+    assert code == STATUS_DRIFT and any("not for this file" in p
+                                        for p in rep["problems"]), rep
+    copy_bytes(good, os.path.join(sroot, csv_rel))   # restore: identical again
+    assert status(sroot)[0] == STATUS_OK
+
+    # 7. --status is read-only, and --json parses
+    before = {p: open(os.path.join(sroot, p), "rb").read()
+              for p in ("plans/btc.json", man_rel, csv_rel)}
+    listing = sorted(os.listdir(sroot))
+    buf = io.StringIO()
+    with contextlib.redirect_stdout(buf):
+        rc = main(["--status", "--root", sroot, "--json"])
+    assert rc == STATUS_OK, rc
+    payload = json.loads(buf.getvalue())
+    assert payload["verdict"] == "FROZEN" and payload["manifest_exists"] is True
+    after_files = {p: open(os.path.join(sroot, p), "rb").read() for p in before}
+    assert after_files == before, "no state file may change"
+    assert sorted(os.listdir(sroot)) == listing, "a status run must not create files"
+
+    # 8. no plan at all is UNREADABLE, not "fine"
+    empty = os.path.join(tmp, "empty")
+    os.makedirs(empty)
+    code, rep = status(empty)
+    assert code == STATUS_UNREADABLE and rep["verdict"] == "UNREADABLE", (code, rep)
+    assert not os.listdir(os.path.join(empty)), "a status run must write nothing"
+
     print("freeze self-test OK — sha256, cutoff guard, split+embargo, integrity, "
-          "one-way manifest, CLI exit codes")
+          "one-way manifest, CLI exit codes, plan/manifest reconciliation")
     return 0
 
 
