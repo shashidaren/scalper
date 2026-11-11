@@ -1,5 +1,5 @@
 {
-  "as_of_utc": "2026-11-11T05:00:37Z",
+  "as_of_utc": "2026-11-11T06:00:31Z",
   "books": {
     "btc": {
       "engine_connected": true,
@@ -28,7 +28,7 @@
       "verdict": "ok"
     }
   },
-  "bucket": "498437",
+  "bucket": "498438",
   "host": "scalping",
   "notes": [
     "gold: engine alive; last paper change 2026-11-10 19:47:14 (quiet periods are normal)",
