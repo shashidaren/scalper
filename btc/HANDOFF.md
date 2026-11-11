@@ -27,22 +27,28 @@ root's `run.py` / `paper.py` / `strategy.py` run unchanged. Full picture:
 | spread gate | `MAX_SPREAD_POINTS = 6250` (1.25× TRAIN p90; live board quotes ~4,000) |
 | risk gates | `MAX_DAILY_LOSS = 8.0`, `MAX_TRADES_PER_DAY = 15` |
 
-## Current state (2026-10-24)
+## Current state (2026-11-11)
 
-From `btc/logs/paper_account.json`, last change **2026-10-28 20:50:07**:
+From `btc/logs/paper_account.json`, last change **2026-11-11 02:11:04 UTC**:
 
 | | |
 |---|---|
-| balance | **$276.91** (book started $300 on 2026-10-07) |
-| closed | **141** — 29 wins / 112 losses |
-| profit factor | **0.846** (gross $126.68 won vs $149.77 lost) |
-| exits | 92 SL · 29 TP · 20 BE |
-| open position | one BUY (entry 81090.25) |
+| balance | **$244.42** (book started $300 on 2026-10-07) |
+| closed | **213** — 42 wins / 171 losses |
+| profit factor | **0.763** (gross $179.08 won vs $234.66 lost) |
+| exits | 142 SL · 42 TP · 29 BE |
+| open position | one SELL (entry 73836.75, BE armed) |
 
-That is a **−7.7% paper drawdown over 21 days**. It is consistent with the
+That is a **−18.5% paper drawdown over 35 days**. It is consistent with the
 Phase 1 result, not with a working edge: the book is losing for the reason the
-research predicted, not because of a bug. Nothing here is a go-live signal, and
-these trades do not count as evidence for any successor hypothesis.
+research predicted, not because of a bug. The 55 trades closed since the
+2026-10-31 pre-registration cost a further −$10.70 (PF 0.82), which is the same
+result restated, not a new fact. Nothing here is a go-live signal, and these
+trades do not count as evidence for any successor hypothesis.
+
+Snapshots: 2026-10-31 `$255.12` / 158 / 31W-127L; 2026-10-28 `$276.91` / 141 /
+29W-112L; 2026-10-23 `$287.59` / 106 / 22W-84L; 2026-10-19 `$295.90` / 85 /
+19W-66L.
 
 ## Is it running?
 
@@ -122,9 +128,17 @@ reasons for it: [`../docs/btc_hypothesis_orb_h1_2026-10-31.md`](../docs/btc_hypo
   concentration, the 2022 loss and the 2x-spread sensitivity.
 - **Status: reserved, not run.** The deciding window is XM H1
   `time < 2024-06-25 22:00 UTC` — the only era this repo has never read. The
-  freeze manifest is pending: `btc/recon.py --bars 44000` then `btc/freeze.py`
-  on `scalping` (RUNBOOK "BTC gate"). No sweep may run before that manifest is
-  committed.
+  freeze manifest is **pending**: `btc/recon.py --bars 44000` then
+  `btc/freeze.py` on `scalping` (RUNBOOK "BTC gate"). No sweep may run before
+  that manifest is committed.
+- **Ask the repo, don't guess: `python3 btc/freeze.py --status`.** It reconciles
+  the manifest on disk with `pre_registration.freeze` in `plans/btc.json` and
+  prints `PENDING`, `FROZEN` or `DRIFT` (exit 0/0/1). Today it prints `PENDING`:
+  no manifest, no pulled CSV, no XM result. It is read-only and inert for every
+  unit. Why the state is not simply "finish it": the pull needs the MT5 bridge
+  and `mt5env` on `scalping`, and a checkout that cannot read XM bars cannot
+  produce a hash that proves anything — see
+  [`../docs/btc_readiness_2026-11-11.md`](../docs/btc_readiness_2026-11-11.md).
 - **Nothing is configured.** `BTC_STRATEGY` stays `scalp`, `btc/config.py` is
   untouched, and the `orb` family is not implemented yet (phase 2).
 
@@ -178,6 +192,7 @@ active config; a bare `import config` picks up gold.
 ```bash
 mt5env/bin/python btc/tool.py btc/edge_screen.py --family donchian --csv data/BTCUSD_H1.csv
 mt5env/bin/python btc/tool.py btc/train_select.py --family donchian --csv data/BTCUSD_H1.csv
+python3 btc/freeze.py --status          # phase-1 readiness: PENDING / FROZEN / DRIFT
 python3 btc/server_check.py              # the "is anything running" collector
 mt5env/bin/python btc/preflight.py       # would the spread gate let it trade?
 ```

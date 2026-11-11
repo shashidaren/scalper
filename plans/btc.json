@@ -3,10 +3,10 @@
   "book": "btc",
   "title": "Bitcoin execution plan",
   "symbol": "BTCUSD",
-  "version": "2026-10-31",
-  "reviewed": "2026-10-31",
+  "version": "2026-11-11",
+  "reviewed": "2026-11-11",
   "verdict": "NO-GO",
-  "verdict_reason": "No validated strategy. Phase 1 (M5 RSI pullback) failed cold OOS at PF 0.75 and Phase 1c (H1 Donchian) failed at PF 0.96, so the running book is an observation feed: 158 closed / $255.12 at 2026-10-31. Those trades are not evidence for any successor. The 2026-10-31 screen of three further families (36 proxy runs, proxy only) found one candidate with a gross edge in every era; it is pre-registered as BTC-ORB-EU-H1 and has no XM result.",
+  "verdict_reason": "No validated strategy. Phase 1 (M5 RSI pullback) failed cold OOS at PF 0.75 and Phase 1c (H1 Donchian) failed at PF 0.96, so the running book is an observation feed: 213 closed / $244.42 (PF 0.76) at 2026-11-11, against $300 on 2026-10-07. Those trades are not evidence for any successor. The 2026-10-31 screen of three further families (36 proxy runs, proxy only) found one candidate with a gross edge in every era; it is pre-registered as BTC-ORB-EU-H1, has no XM result, and its reserved window is still unfrozen (python3 btc/freeze.py --status).",
   "mode_expected": "FORWARD_TEST",
   "next": "btc-hypothesis",
   "summary": "Everything downstream waits on the BTC-ORB-EU-H1 pre-registration being frozen: the pre-2024-06-25 XM window is reserved, the freeze manifest is still pending on scalping, and no result has been read. Every parameter in btc/config.py is still a gold-derived placeholder.",
@@ -35,8 +35,11 @@
     "freeze": {
       "tool": "btc/freeze.py",
       "manifest": "btc/manifests/btc_orb_eu_h1_2026-10-31.json",
+      "csv": "data/BTCUSD_H1_pre2024.csv",
+      "phase": "btc-hypothesis",
       "state": "pending",
-      "raw_sha256": null
+      "raw_sha256": null,
+      "status_command": "python3 btc/freeze.py --status"
     },
     "results_inspected": false,
     "screen": {
@@ -77,13 +80,15 @@
       "steps": [
         "DONE 2026-10-31: screened three new families on proxy bars first (btc/session_screen.py, 3 families x 6 cells x 2 fill modes) and pre-registered the one that clears gross > cost in every era - docs/btc_hypothesis_orb_h1_2026-10-31.md.",
         "Pull 44,000 XM H1 bars (btc/recon.py) and freeze them with btc/freeze.py: cutoff 2024-06-25 22:00, 60/40 split, 200-bar embargo. Commit the manifest BEFORE any sweep.",
+        "Reconcile the record: python3 btc/freeze.py --status must print FROZEN with the same sha256 the manifest and the plan carry - run it on scalping right after the freeze, and again before any sweep.",
         "Confirm the gate in the doc is unchanged: net > 0, PF >= 1.2, n >= 60 cold OOS, gross > cost, plus the half-spread slippage stress - and one look at the OOS only.",
-        "Record the frozen sha256 in STATUS and in pre_registration.freeze, then mark this phase done."
+        "Record the frozen sha256 in STATUS and in pre_registration.freeze (state=frozen, raw_sha256, phase=btc-hypothesis), then mark this phase done and move `next` to btc-hypothesis-test."
       ],
       "exit_gate": "A committed pre-registration with fresh hashes and boundaries, and no result inspected yet.",
       "blocked_by": [],
       "commands": [
         "python3 tools/execution_plan.py bitcoin",
+        "python3 btc/freeze.py --status            # PENDING / FROZEN / DRIFT, read-only",
         "python3 btc/session_screen.py --self-test   # the screen behind the pre-registration",
         "mt5env/bin/python btc/recon.py --timeframe H1 --bars 44000 --out data/BTCUSD_H1_pre2024.csv",
         "python3 btc/freeze.py --csv data/BTCUSD_H1_pre2024.csv --timeframe H1 --cutoff \"2024-06-25 22:00:00\" --out btc/manifests/btc_orb_eu_h1_2026-10-31.json"
@@ -94,9 +99,10 @@
         "docs/btc_phase1c_result_2026-10-07.md",
         "docs/btc_hypothesis_orb_h1_2026-10-31.md",
         "btc/session_screen.py",
-        "btc/freeze.py"
+        "btc/freeze.py",
+        "docs/btc_readiness_2026-11-11.md"
       ],
-      "evidence": "The committed pre-registration plus btc/manifests/btc_orb_eu_h1_2026-10-31.json with state=frozen and results_inspected=false, plus the STATUS row."
+      "evidence": "The committed pre-registration plus btc/manifests/btc_orb_eu_h1_2026-10-31.json with state=frozen and results_inspected=false, `btc/freeze.py --status` printing FROZEN, the STATUS row, and pre_registration.freeze updated to state=frozen with the sha256."
     },
     {
       "id": "btc-hypothesis-test",
