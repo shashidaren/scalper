@@ -4,7 +4,7 @@
   "title": "Bitcoin execution plan",
   "symbol": "BTCUSD",
   "version": "2026-11-11",
-  "reviewed": "2026-11-11",
+  "reviewed": "2026-11-17",
   "verdict": "NO-GO",
   "verdict_reason": "No validated strategy. Phase 1 (M5 RSI pullback) failed cold OOS at PF 0.75 and Phase 1c (H1 Donchian) failed at PF 0.96, so the running book is an observation feed: 213 closed / $244.42 (PF 0.76) at 2026-11-11, against $300 on 2026-10-07. Those trades are not evidence for any successor. The 2026-10-31 screen of three further families (36 proxy runs, proxy only) found one candidate with a gross edge in every era; it is pre-registered as BTC-ORB-EU-H1, has no XM result, and its reserved window is still unfrozen (python3 btc/freeze.py --status).",
   "mode_expected": "FORWARD_TEST",
@@ -75,7 +75,7 @@
       "order": 1,
       "status": "active",
       "title": "Pre-register a new BTC hypothesis on untouched bars",
-      "window": "blocking everything else",
+      "window": "Blocked in this checkout: broker-side pull and freeze still required; no sweep.",
       "goal": "Freeze the pre-registered BTC-ORB-EU-H1 protocol on the only XM era this repo has never read, without inspecting a single result.",
       "steps": [
         "DONE 2026-10-31: screened three new families on proxy bars first (btc/session_screen.py, 3 families x 6 cells x 2 fill modes) and pre-registered the one that clears gross > cost in every era - docs/btc_hypothesis_orb_h1_2026-10-31.md.",
