@@ -5,8 +5,8 @@ A session may edit this file and add one changelog row. Do not paste a new statu
 
 Last verified on `scalping`: 2026-10-19 17:31 UTC (user-supplied box output: 17:30 timer run completed cleanly).
 
-Last verified **from published data only**: 2026-10-28 (book state, ledger
-integrity, deploy gate, both readiness tabs — see the changelog). The box was
+Last reviewed **from published data only**: 2026-11-17 (book state, ledger
+integrity and readiness plans — see the changelog). This is not a box or live-mode verification. The box was
 **not** contacted:
 `live_status.json` / `connection_status.json` / `system.jsonl` are
 machine-local and cannot be read from a repo checkout. To re-verify liveness
@@ -14,6 +14,7 @@ run `python3 btc/server_check.py` on the box (see `btc/HANDOFF.md`).
 
 ## Gold
 
+- Published snapshot 2026-11-17 15:23:12 UTC (`logs/paper_account.json`): **$217.13**, **122 closed**, 30 state wins / 92 non-wins. `tools/check_data.py`: 0 fail / 0 warn across both books. Not a qualifying forward cohort.
 - Production book. Engine is the repo root (`run.py` + `config.py`). Dashboard `:8088`. Unit `scalper-bot`.
 - `TRADING_MODE` stays `FORWARD_TEST` until an explicit live decision. Kill switch is `logs/KILL_SWITCH` (blocks new entries only).
 - Paper track record (2026-10-28 19:32:30, `logs/paper_account.json`): balance **$239.58**, **80 closed, 19 wins / 61 state losses**, no open position. Reset-aware ledger audit: **21 positive / 51 negative / 8 zero** exits, net **−$60.42**, PF **0.855**, closed-equity max drawdown **$103.95**. State losses include zero-P&L BE exits. Published heartbeat at 22:00:21 UTC reports engine connected; terminal not independently contacted. Twelve more closed trades since the 2026-10-26 audit (−$54.52), so PF moved 0.98 → 0.855. See `docs/existing_gold_audit_2026-10-26.md`, `docs/dashboard_readiness_btc_2026-10-28.md`. LIVE still no-go.
@@ -27,6 +28,7 @@ run `python3 btc/server_check.py` on the box (see `btc/HANDOFF.md`).
 
 ## BTC
 
+- Published snapshot 2026-11-17 09:05:23 UTC (`btc/logs/paper_account.json`): **$260.88**, **249 closed**, 52 state wins / 197 non-wins. This is the failed-shape observation feed, not successor evidence.
 - Paper book 2026-11-11 02:11:04 UTC: balance **`$244.42`** (started $300 on 2026-10-07), **213 closed, 42 wins / 171 losses**, PF **0.763** (gross $179.08 won / $234.66 lost), exits 142 SL · 42 TP · 29 BE, one open SELL (BE armed). Snapshots: 2026-10-31 `$255.12` / 158 / 31W-127L; 2026-10-28 `$276.91` / 141 / 29W-112L; 2026-10-23 `$287.59` / 106 / 22W-84L; 2026-10-19 `$295.90` / 85 / 19W-66L. That is −18.5% over 35 days; the 55 trades since the pre-registration cost a further −$10.70 (PF 0.82). Phase 1 and 1c remain FAIL; nothing here changes that.
 - This is a **loss-making paper book**, which is the expected result of running a shape that failed its gate. Do not read 106 trades as evidence.
 - **2026-11-11 published snapshot (gold):** balance **`$228.68`**, **103 closed** in the current (post-2026-10-04-reset) book, 24 state wins / 79 non-wins (13 of them zero-P&L BE exits), PF **0.868** (gross $469.94 won / $541.26 lost) over those 103 exits, 1 weekend exit, no open position, `paper_account.json` updated 2026-11-10 19:47:14 UTC. `tools/check_data.py`: **0 fail / 0 warn** on both books. Unchanged verdict: LIVE no-go, and the 2026-10-28 audit's conclusions (PF 0.855 then) still stand as a *dated* measurement, not as today's number.
@@ -74,8 +76,7 @@ run `python3 btc/server_check.py` on the box (see `btc/HANDOFF.md`).
 - Re-apply the two mt5linux image patches if the container is ever recreated from stock `lprett/mt5linux`. Details: `docs/archive/HANDOFF_2026-10-07.md` §4.
 - File the two upstream mt5linux bugs (fifo `mkfifo` crash, `config.sh` `return` under `set -e`).
 - A new BTC hypothesis needs its own pre-registered rule and a fresh pull. Phase 1 and Phase 1c are both closed.
-  Nothing is pre-registered for BTC as of 2026-10-28 — the first item on the BTC `/readiness` tab is that missing document,
-  and the 141-trade paper book does not count toward any successor's evidence.
+  `BTC-ORB-EU-H1` is pre-registered, but the broker-side freeze remains pending; the observation book does not count toward successor evidence.
 - Gold paper book continues under current geometry; LIVE remains no-go until a powered positive gate and the demo execution drill.
 - Risk controls shipped 2026-10-23 (`docs/risk_controls_2026-10-23.md`): Friday 20:00 UTC weekend flat is now ON in both books (BTC explicitly off), the hold cap stays off, equity floor latched at 50%. No useful equity floor at $300 — minimum live balance ~$1,000 for a 20–25% floor.
 - LIVE stop + BE (`live_position.py`) only tested against a fake terminal. Demo drill before real money: `docs/live_readiness_review_2026-10-23.md` §6.3.
@@ -84,6 +85,7 @@ run `python3 btc/server_check.py` on the box (see `btc/HANDOFF.md`).
 
 | Date | What |
 |---|---|
+| 2026-11-17 | Reviewed both active execution phases from published data only. Gold protocol and genuinely unseen hashed data remain unresolved; BTC freeze is PENDING in this checkout and requires `scalping`. Neither phase advanced and LIVE remains NO-GO. Ledger integrity 0 fail / 0 warn; snapshot counts above. See `plans/gold.json`, `plans/btc.json`, `docs/btc_readiness_2026-11-11.md` and `RUNBOOK.md`. |
 | 2026-10-07 | Docs consolidated. Full handoffs moved to `docs/archive/`. No runtime path changed. |
 | 2026-10-07 | BTC `MAX_SPREAD_POINTS` 1500 → 6250 (1.25× measured TRAIN p90). Paper observation only. Phase 1 still FAIL. |
 | 2026-10-08 | `deploy.sh` restarts an already-active BTC unit when its runtime path changes. A stopped unit is still not started. The 6250 gate still needs one manual `systemctl restart scalper-btc-bot` if that unit was not restarted after PR #27. |

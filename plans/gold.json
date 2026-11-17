@@ -4,7 +4,7 @@
   "title": "Gold execution plan",
   "symbol": "GOLD",
   "version": "2026-10-28",
-  "reviewed": "2026-10-28",
+  "reviewed": "2026-11-17",
   "verdict": "NO-GO",
   "verdict_reason": "No passing edge and no qualifying forward cohort: the deployed geometry measures 257 / +$29 / PF 1.02 on the fresh pull, and the paper book is 80 closed / PF 0.855 going into 2026-10-28. LIVE needs a fresh pre-registered hypothesis, a cold-OOS pass, the demo execution drill, and a powered forward cohort.",
   "mode_expected": "FORWARD_TEST",
@@ -31,7 +31,7 @@
       "order": 1,
       "status": "active",
       "title": "Repair and freeze the BREAKOUT-B research protocol",
-      "window": "1-2 sessions, before any sweep",
+      "window": "Blocked in this checkout: corrected protocol and demonstrably unseen, hashed data still required; no sweep.",
       "goal": "Turn docs/research_plan_breakout_2026-10-24.md into a versioned pre-registration with no room left for a post-hoc choice.",
       "steps": [
         "Resolve the grid contradiction: the plan lists 162 combinations against a <=54 cap. Pick the exact subset and write it down.",
