@@ -1,79 +1,91 @@
-# Gold Research Plan — Breakout / Momentum
-**Date locked:** 2026-10-24  
-**Status:** PRE-REGISTERED (no results yet)  
-**Hypothesis ID:** BREAKOUT-B
+# Gold research protocol — BREAKOUT-B
 
-Previous track VOL-REGIME-A was closed the same day (no candidate cleared the gate on the spent Jul–Oct window).
+**v2, 2026-11-19. Rules locked; input freeze pending.** This amends the
+2026-10-24 proposal before testing. The question is whether a trend-filtered
+M5 close breakout has positive after-spread expectancy on unseen XM GOLD
+bars. It is not a re-tune of the deployed RSI pullback. Phase 1 cannot finish
+until the inventory and provenance below are reviewed and committed.
 
-## 1. Motivation
+## Grid and execution rules
 
-VOL-REGIME-A (volatility filter on the existing RSI-pullback shape) failed to clear the gate.  
-The current mean-reversion geometry has a thin and degrading edge (~0.03R on the recent window).  
-A clean breakout / momentum shape is a different payoff profile and is the highest-value next test.
+Test the Cartesian product in the order shown (leftmost changes slowest):
 
-## 2. Exact hypothesis
+| Dimension | Ordered values |
+|---|---|
+| Prior channel length N | 10, 20, 30 |
+| Trend EMA span | 50, 100, 200 |
+| Initial stop distance in ATR(14) | 1.5, 2.0, 2.5 |
+| Profit exit | fixed 3R, opposite channel |
 
-**Statement:**  
-Entries on a clean M5 close break of the prior N-bar high/low (Donchian-style), filtered by a longer EMA trend, with ATR-based stop and either a fixed reward multiple or opposite-channel exit, will produce a higher mean R and more stable walk-forward performance than the current RSI-pullback geometry.
+That's **54 cells**. Drop the 2.5R target and unfiltered session: retaining
+both exit families tests the payoff hypothesis without also selecting hours.
 
-**Null hypothesis:** The breakout shape does not produce a statistically meaningful edge on completely unseen data.
+- At the last completed bar `s`, go long if its close is strictly above both
+  the highest high of bars `[s-N,s)` and its EMA; short below both the lowest
+  low and EMA. Equality is not a signal. Use `research/strategy_sweep.py` at
+  `c96f3d3` for the windowed EMA, simple ATR, 202-bar warm-up and replay fill
+  convention (signal close, first managed bar `s+1`). One position at a time;
+  entries only at decision hours `[07:00,20:00)` UTC and ATR ≥ 0.50.
+- `R` distance is fixed at entry. Keep Gold's 1.5R breakeven ratchet and the
+  replay ordering: arm BE on the managed bar's favorable extreme, then check
+  stop before profit exit. Fixed target is entry ± 3 initial stop distances.
+  Channel style has **no target**: exit a surviving long at bar `t`'s close
+  if strictly below the lowest low of `[t-N,t)`; mirror above the highest high
+  for a short. No touch exit, second lookback, reversal on the exit bar, or
+  session restriction on exits. No trailing, time exit or other overlays.
+- Use the pinned Gold replay economics for both candidate and comparator:
+  0.01 lot, 100 oz/lot, deduct exit-bar spread × 0.01 in price once. Like
+  the pinned Gold `--verify` replay, do not simulate the live entry spread
+  veto. These are research fill assumptions, not broker execution evidence.
 
-## 3. Pre-registered search space
+## Prospective reservation and exclusions
 
-Only these knobs will be searched. Everything else stays fixed.
+Use **only** completed XM GOLD M5 bars, by exported UTC bar-open timestamp.
+Reserve ten calendar weeks, split 60:40 **by time**, not by row count:
 
-| Parameter            | Values to test                         | Notes |
-|----------------------|----------------------------------------|-------|
-| Entry channel (N)    | 10, 20, 30                             | Prior bars for high/low break |
-| Trend EMA            | 50, 100, 200                           | Close must be on the correct side of EMA |
-| SL ATR multiple      | 1.5, 2.0, 2.5                          | |
-| TP style             | Fixed 2.5R / 3.0R **or** opposite-channel exit | Two exit families |
-| Session filter       | Current 07–20 **or** none              | |
+| Slice | Inclusive start UTC | Exclusive end UTC | Input SHA-256 |
+|---|---|---|---|
+| TRAIN | 2026-11-23 00:00 | 2027-01-04 00:00 | pending collection |
+| Cold OOS | 2027-01-04 00:00 | 2027-02-01 00:00 | pending collection |
 
-Maximum combinations kept deliberately small (≤ 54).  
-No other parameters (RSI levels, BE trigger, hour filters, etc.) will be touched.
+Exclude all rows outside those bounds, including every previously downloaded
+window. In particular `data/GOLD_M5.csv` at `c96f3d3` (SHA-256
+`b5bb79e2813c1766dbbe511c2447d56cfec959f29727b2c52e3a4b999ac69d2b`)
+is spent, not a freeze. No proxy, gap filling, discretionary date drops, or
+use of overlapping paper results to change these rules. Leave the reservation
+sealed: no charts, screens or outcome summaries for strategy selection.
 
-## 4. Data splits (locked before any run)
+After the end, collect and fingerprint as in `RUNBOOK.md` (Gold BREAKOUT-B).
+Record the inventory here (raw file hash, first/last timestamps, count and
+hash per slice), retrieval time, broker/source and reviewer confirmation of
+coverage, expected market closures and no prior research inspection. Slice
+hashes cover the original header and selected CSV rows in original byte order.
+A hash identifies bytes; it cannot certify provenance or blindness. If
+coverage or blindness cannot be established, stop. Do not slide the split;
+a replacement requires a new prospective reservation before inspection.
 
-- Fresh pull required (use `tools/pull_gold_m5.sh` or equivalent).  
-- **TRAIN** = earliest 60 % of the new file.  
-- **Cold OOS** = most recent 40 % (must include post-2026-07 data that the old shape already saw).  
-- **Walk-forward** = 4 contiguous non-overlapping folds on the full file.  
-- File hash + exact date range of every split will be recorded in this document *before* the first sweep is run.
+## Selection and decision (phase 2 only)
 
-## 5. Success criteria (all must pass)
-
-A candidate is only considered for paper deployment if **all** of the following are true on the cold OOS + walk-forward:
-
-1. Mean R ≥ 0.12  
-2. Profit Factor ≥ 1.25  
-3. Bootstrap 95 % CI of mean R excludes zero (or P(net > 0) ≥ 0.90)  
-4. At least 3 out of 4 walk-forward folds are profitable  
-5. Average trades per day still ≥ 1.5  
-6. Max DD on OOS is not worse than 1.3× the current geometry’s OOS DD
-
-If no combination meets the bar, the hypothesis is **closed as failed** and we move on without cherry-picking.
-
-## 6. Execution order
-
-1. Fresh data pull + record hash/dates here.  
-2. Implement the breakout shape as a clean optional family (default = current RSI-pullback remains the live path).  
-3. Restricted search over the pre-registered combinations only.  
-4. TRAIN → select best → freeze → evaluate on cold OOS + 4-fold walk-forward.  
-5. Write results into this same document under a new “Results” section.  
-6. Decision: adopt / reject / move to next hypothesis.
-
-## 7. What will NOT be done
-
-- No re-tuning of the old RSI-pullback / EMA200 parameters.  
-- No hour/day filters fitted on this sample.  
-- No enabling the new shape on the paper book until the full gate is cleared.  
-- No expanding the search space without a new pre-registration.
-
-## 8. Next actions after this document is committed
-
-- [ ] Fresh `GOLD_M5.csv` pull via `tools/pull_gold_m5.sh` + record hash/dates here  
-- [ ] Code the breakout family (feature-flagged, live path unchanged)  
-- [ ] Restricted sweep over the locked combinations  
-- [ ] Evaluate against the success criteria above  
-- [ ] Update this file with results and a clear adopt/reject decision
+1. Start each replay segment flat, warm up within it, and omit a position
+   still open at its end as in the pinned replay. On TRAIN only, rank cells
+   with at least one closed trade by highest **unrounded arithmetic mean net
+   R** (signed price move minus spread, divided by initial stop distance).
+   Exact tie: first cell in the table's product order. If none qualifies,
+   close as failed. Commit exactly one winning tuple and its input/code
+   hashes before opening OOS. No runner-up or refitting.
+2. Evaluate that winner once on OOS. Require mean net R ≥ 0.12, dollar PF ≥
+   1.25, ≥ 1.5 closed trades per distinct OOS UTC date with bars (include
+   zero-trade dates), and closed-equity dollar max DD ≤ 1.3× the deployed
+   RSI geometry (`config.py` at `c96f3d3`) replayed on that same slice.
+   Require the 2.5th percentile of 2,000 same-size IID resamples of closed
+   OOS trade mean net R to exceed zero (NumPy default_rng seed 42, linear
+   percentile). No alternative confidence metric after inspection.
+3. For the four-fold stability check use four chronological, non-overlapping
+   slices of the entire reserved file, cut at row indices `floor(k*n/4)`
+   for k=1,2,3. Replay only the frozen tuple, independently per fold; require
+   positive net dollars in ≥3 folds. This includes TRAIN; it is not another
+   independent OOS result. No trades or undefined OOS metrics cannot pass.
+4. Record all results here. A missed gate closes BREAKOUT-B; passing permits
+   further paper evaluation only. `STATUS.md` and `plans/gold.json` govern
+   the separate execution, account and forward-evidence gates. No adoption,
+   mode change or sweep is authorized by this protocol amendment.
