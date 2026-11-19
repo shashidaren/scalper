@@ -177,6 +177,23 @@ mt5env/bin/python research/loss_analysis.py
 
 `--verify` has to reproduce `backtest.py` before a sweep is evidence.
 
+## Gold BREAKOUT-B: collect the reserved window, not the tracked CSV
+
+On `scalping`, **after 2027-02-01 01:00 UTC** (the export must bracket both
+boundaries), from `/root/scalper` run:
+
+```bash
+cd /root/scalper && test ! -e data/GOLD_M5_breakout_b_v2.csv && mt5env/bin/python fetch_data.py --symbol GOLD --timeframe M5 --bars 20000 --start-pos 1 --out data/GOLD_M5_breakout_b_v2.csv
+python3 research/breakout_b_inventory.py data/GOLD_M5_breakout_b_v2.csv
+```
+
+Keep the unmodified ignored CSV on the box; do not replace `data/GOLD_M5.csv`.
+The inventory prints metadata only. Check timestamp coverage against the XM
+session calendar and confirm nobody inspected outcomes to choose the window.
+Record hashes and provenance in `docs/research_plan_breakout_2026-10-24.md`
+for review. If the export is short or the reservation compromised, stop; do
+not substitute a different interval, run a sweep, or mark phase 1 done.
+
 ## BTC gate
 
 Read-only. Do not edit `btc/config.py` from these.

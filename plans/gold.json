@@ -3,8 +3,8 @@
   "book": "gold",
   "title": "Gold execution plan",
   "symbol": "GOLD",
-  "version": "2026-10-28",
-  "reviewed": "2026-11-17",
+  "version": "2026-11-19",
+  "reviewed": "2026-11-19",
   "verdict": "NO-GO",
   "verdict_reason": "No passing edge and no qualifying forward cohort: the deployed geometry measures 257 / +$29 / PF 1.02 on the fresh pull, and the paper book is 80 closed / PF 0.855 going into 2026-10-28. LIVE needs a fresh pre-registered hypothesis, a cold-OOS pass, the demo execution drill, and a powered forward cohort.",
   "mode_expected": "FORWARD_TEST",
@@ -29,27 +29,26 @@
     {
       "id": "breakout-b-protocol",
       "order": 1,
-      "status": "active",
+      "status": "blocked",
       "title": "Repair and freeze the BREAKOUT-B research protocol",
-      "window": "Blocked in this checkout: corrected protocol and demonstrably unseen, hashed data still required; no sweep.",
+      "window": "BREAKOUT-B v2 rules locked. Wait for the reserved XM GOLD M5 window to close on 2027-02-01 UTC; no sweep.",
       "goal": "Turn docs/research_plan_breakout_2026-10-24.md into a versioned pre-registration with no room left for a post-hoc choice.",
       "steps": [
-        "Resolve the grid contradiction: the plan lists 162 combinations against a <=54 cap. Pick the exact subset and write it down.",
-        "Specify the precise exit rule (opposite-channel close), the selection statistic, and the single train-selected winner.",
-        "Reserve genuinely unseen OOS timestamps. Record file hashes, TRAIN/OOS boundaries and exclusions BEFORE looking at any result.",
-        "Amend the dated research plan in place (do not start a second document) and record the decision in the STATUS changelog."
+        "Leave the prospective TRAIN and OOS windows sealed; the 54-cell grid, opposite-channel exit and TRAIN-only selection rule are fixed in the dated protocol.",
+        "After the window closes, follow RUNBOOK.md (Gold BREAKOUT-B) on scalping to collect closed bars and print the inventory.",
+        "Review coverage and blindness, then commit provenance, raw and split hashes in the dated protocol before advancing. If unavailable or compromised, stop."
       ],
       "exit_gate": "A reviewed, versioned pre-registration with hashes and boundaries committed. If no unseen timestamps exist, stop and wait for collection; dates slide.",
       "blocked_by": [],
       "commands": [
-        "python3 tools/execution_plan.py gold",
-        "bash tools/pull_gold_m5.sh   # fresh M5 pull; leaves data/GOLD_M5.csv dirty, so commit or discard before the next deploy tick",
-        "python3 research/strategy_sweep.py --verify   # replay engine == backtest.py before trusting any sweep"
+        "python3 tools/execution_plan.py gold --status",
+        "python3 research/breakout_b_inventory.py data/GOLD_M5_breakout_b_v2.csv   # after the RUNBOOK collection step only"
       ],
       "sources": [
         "docs/research_plan_breakout_2026-10-24.md",
         "docs/existing_gold_audit_2026-10-26.md",
-        "docs/effectiveness_plan_2026-10-24.md"
+        "docs/effectiveness_plan_2026-10-24.md",
+        "RUNBOOK.md"
       ],
       "evidence": "The committed pre-registration, with the grid subset, exit rule and OOS window hashes."
     },
@@ -63,7 +62,7 @@
       "steps": [
         "Run the frozen grid on TRAIN only; select one winner by the pre-registered statistic and freeze it.",
         "Evaluate that winner on the reserved cold OOS window. One look, no re-selection.",
-        "Compute the gate numbers: mean R >= 0.12, PF >= 1.25, bootstrap 95% CI above zero (or P(net>0) >= 0.90), >= 3/4 profitable folds, >= 1.5 trades/day, OOS drawdown <= 1.3x baseline.",
+        "Compute the gate numbers: mean R >= 0.12, PF >= 1.25, bootstrap 95% mean-R CI above zero, >= 3/4 profitable folds, >= 1.5 trades/day, OOS drawdown <= 1.3x baseline.",
         "Write a dated result report. On failure, close the track and pre-register a new hypothesis; do not re-split the same data."
       ],
       "exit_gate": "A dated report with an explicit accept/reject. Research acceptance is NOT live approval: the live-readiness review still requires its own cold-OOS and walk-forward evidence.",
@@ -72,7 +71,7 @@
       ],
       "commands": [
         "python3 research/parity_test.py   # live signal == replay before the numbers mean anything",
-        "python3 research/strategy_sweep.py --csv data/GOLD_M5.csv --sweep <frozen-name> --oos --bootstrap 2000",
+        "python3 research/breakout_b_inventory.py data/GOLD_M5_breakout_b_v2.csv   # verify committed input hashes before implementing the v2 replay",
         "python3 backtest.py               # reproduce the adopted-config reference"
       ],
       "sources": [
