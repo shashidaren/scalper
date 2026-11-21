@@ -1,9 +1,9 @@
 {
-  "as_of_utc": "2026-11-21T09:00:32Z",
+  "as_of_utc": "2026-11-21T10:00:37Z",
   "books": {
     "btc": {
       "engine_connected": true,
-      "engine_status_age_min": 0.1,
+      "engine_status_age_min": 0.2,
       "last_ledger_event": "2026-11-21 08:00:10",
       "mode": "FORWARD_TEST",
       "open_positions": 1,
@@ -23,12 +23,12 @@
       "paper_balance": 280.16,
       "paper_closed": 129,
       "paper_updated_at": "2026-11-20 08:28:04",
-      "reconnects": 204,
+      "reconnects": 206,
       "spread_gate_state": "ok",
       "verdict": "ok"
     }
   },
-  "bucket": "498681",
+  "bucket": "498682",
   "host": "scalping",
   "notes": [
     "gold: engine alive; last paper change 2026-11-20 08:28:04 (quiet periods are normal)",
