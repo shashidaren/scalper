@@ -537,3 +537,5 @@
 {"entry":56166.95,"event":"SIM_ENTRY","side":"SELL","sl":56696.84,"sl_dist":529.89,"time":"2026-11-21 05:25:03","tp":54842.24,"tp_dist":1324.71,"volume":0.01}
 {"balance_after":276.57,"entry":56166.95,"event":"SIM_EXIT","exit":56166.95,"profit":0.0,"reason":"BE","side":"SELL","time":"2026-11-21 06:20:54"}
 {"entry":57957.55,"event":"SIM_ENTRY","side":"SELL","sl":58593.3,"sl_dist":635.75,"time":"2026-11-21 08:00:10","tp":56368.18,"tp_dist":1589.38,"volume":0.01}
+{"balance_after":270.21,"entry":57957.55,"event":"SIM_EXIT","exit":58593.3,"profit":-6.36,"reason":"SL","side":"SELL","time":"2026-11-21 11:32:49"}
+{"entry":58203.25,"event":"SIM_ENTRY","side":"SELL","sl":58497.58,"sl_dist":294.33,"time":"2026-11-21 11:40:08","tp":57467.43,"tp_dist":735.82,"volume":0.01}
