@@ -1,6 +1,6 @@
 # BTC hypothesis D — pre-registration: European opening-range breakout on H1
 
-**Hypothesis ID:** `BTC-ORB-EU-H1` · **Date locked:** 2026-10-31 · **Status:** PRE-REGISTERED — window FROZEN 2026-11-23 on `scalping` (cold OOS unread; one read in phase 2)
+**Hypothesis ID:** `BTC-ORB-EU-H1` · **Date locked:** 2026-10-31 · **Status:** REJECTED ON TRAIN 2026-11-23 (FAIL / No-Go; cold OOS preserved unread)
 
 **Nothing trades differently because of this document.** `TRADING_MODE` stays
 `FORWARD_TEST`, `BTC_STRATEGY` stays `scalp`, `btc/config.py` is untouched, and
@@ -429,3 +429,4 @@ broken screen or freeze fails the gate rather than a research session.
 |---|---|
 | 2026-10-31 | `BTC-ORB-EU-H1` pre-registered. Screen (3 families × 6 cells × 2 fills) rejects `momentum` and close-entry `orb`, keeps stop-entry `orb` and `pdr`; `orb` chosen. Grid 6 cells, gate fixed, untouched pre-2024-06-25 window reserved, freeze manifest **pending** on `scalping`. No config, mode, unit or strategy parameter changed. |
 | 2026-11-23 | Freeze executed on `scalping` and committed (`85037a1`, manifest `btc/manifests/btc_orb_eu_h1_2026-10-31.json`, sha256 `e1bc65a2…0f57f6`, 44,000 raw bars 2021-10-12 → 2026-11-23, cutoff `< 2024-06-25 22:00:00`, TRAIN 13,119 / embargo 200 / cold OOS 8,547, integrity clean, `results_inspected: false`). No sweep run; no config, mode, unit or strategy parameter changed. Protocol §3 and gate §6 unchanged. |
+| 2026-11-23 | Evaluated on TRAIN (`btc/phase2_orb.py --train` on `scalping`, 13,119 bars 2021-12-09 → 2023-06-27). All 6 pre-registered cells failed eligibility: gross edge (+0.049 to +0.135 grossR) failed to cover broker spread (costR 0.115–0.235), resulting in negative net expectation (PF 0.69–0.94, net −$35.85 to −$267.04). No winner selected. Per protocol, cold OOS was not read (`results_inspected: false` preserved). Hypothesis rejected / FAIL; see `docs/btc_orb_result_2026-11-23.md`. |
