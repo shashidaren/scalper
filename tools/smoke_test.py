@@ -74,6 +74,7 @@ SCRIPTS = [
     # research session.
     ("btc session screen", ["btc/session_screen.py", "--self-test"], []),
     ("btc freeze", ["btc/freeze.py", "--self-test"], []),
+    ("btc phase2 orb", ["btc/phase2_orb.py", "--self-test"], []),
     ("btc strategy", ["btc/strategy_btc_test.py"], ["pandas", "numpy", "rpyc"]),
     ("deploy service policy", ["tests/test_deploy_services.sh"], []),
     # Skipped inside autosync's own gate: this suite runs autosync.sh, and
