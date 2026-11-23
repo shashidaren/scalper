@@ -5,16 +5,19 @@ A session may edit this file and add one changelog row. Do not paste a new statu
 
 Last verified on `scalping`: 2026-10-19 17:31 UTC (user-supplied box output: 17:30 timer run completed cleanly).
 
-Last reviewed **from published data only**: 2026-11-17 (book state, ledger
+Last reviewed **from published data only**: 2026-11-23 (book state, ledger
 integrity and readiness plans — see the changelog). This is not a box or live-mode verification. The box was
 **not** contacted:
 `live_status.json` / `connection_status.json` / `system.jsonl` are
 machine-local and cannot be read from a repo checkout. To re-verify liveness
-run `python3 btc/server_check.py` on the box (see `btc/HANDOFF.md`).
+run `python3 btc/server_check.py` on the box (see `btc/HANDOFF.md`). Note: the
+published heartbeat (`logs/heartbeat.json`, 2026-11-23T10:00:37Z) shows gold
+`ok` (engine age 0.2 min) but **BTC `stale`** (last engine heartbeat ≈ 439 min
+old, vs gold's 0.2 min) — a box check is due before the BTC freeze is run.
 
 ## Gold
 
-- Published snapshot 2026-11-17 15:23:12 UTC (`logs/paper_account.json`): **$217.13**, **122 closed**, 30 state wins / 92 non-wins. `tools/check_data.py`: 0 fail / 0 warn across both books. Not a qualifying forward cohort.
+- Published snapshot 2026-11-23 09:10:00 UTC (`logs/paper_account.json`): **$280.16**, **129 closed**, 34 state wins / 95 non-wins, one open BUY (entry 3612.79, SL 3602.96, TP 3637.35, opened 2026-11-23 09:10:00 UTC, BE not armed). Current-book ledger: net **−$19.84**, PF **0.972** (gross +$680.50 / −$700.34), exits 81 SL · 33 TP · 13 BE · 2 WEEKEND. Since the 2026-11-17 snapshot (122 closed, $217.13): +7 closed (+4W), **+$63.03** (Nov 18 TP +25.18, Nov 18 TP +31.06, Nov 19 TP +17.90, Nov 19 TP +32.55). `tools/check_data.py`: 0 fail / 0 warn across both books. Not a qualifying forward cohort.
 - Production book. Engine is the repo root (`run.py` + `config.py`). Dashboard `:8088`. Unit `scalper-bot`.
 - `TRADING_MODE` stays `FORWARD_TEST` until an explicit live decision. Kill switch is `logs/KILL_SWITCH` (blocks new entries only).
 - Paper track record (2026-10-28 19:32:30, `logs/paper_account.json`): balance **$239.58**, **80 closed, 19 wins / 61 state losses**, no open position. Reset-aware ledger audit: **21 positive / 51 negative / 8 zero** exits, net **−$60.42**, PF **0.855**, closed-equity max drawdown **$103.95**. State losses include zero-P&L BE exits. Published heartbeat at 22:00:21 UTC reports engine connected; terminal not independently contacted. Twelve more closed trades since the 2026-10-26 audit (−$54.52), so PF moved 0.98 → 0.855. See `docs/existing_gold_audit_2026-10-26.md`, `docs/dashboard_readiness_btc_2026-10-28.md`. LIVE still no-go.
@@ -28,7 +31,7 @@ run `python3 btc/server_check.py` on the box (see `btc/HANDOFF.md`).
 
 ## BTC
 
-- Published snapshot 2026-11-17 09:05:23 UTC (`btc/logs/paper_account.json`): **$260.88**, **249 closed**, 52 state wins / 197 non-wins. This is the failed-shape observation feed, not successor evidence.
+- Published snapshot 2026-11-23 02:41:54 UTC (`btc/logs/paper_account.json`): **$243.47**, **277 closed**, 57 state wins / 220 non-wins, no open position. Current-book ledger: net **−$56.53**, PF **0.843** (gross +$302.69 / −$359.22), exits 184 SL · 57 TP · 36 BE. Since the 2026-11-17 snapshot (249 closed, $260.88): +28 closed (+5W), **−$17.41**. Published heartbeat (2026-11-23T10:00:37Z) shows the BTC engine **stale** (last `live_status.json` write ≈ 439 min old, spread gate last `ok`, 7 reconnects, 1 open position in the machine-local record vs `position: null` in the paper state) — needs a check on `scalping` (`python3 btc/server_check.py`) before the phase-1 freeze. This is the failed-shape observation feed, not successor evidence.
 - Paper book 2026-11-11 02:11:04 UTC: balance **`$244.42`** (started $300 on 2026-10-07), **213 closed, 42 wins / 171 losses**, PF **0.763** (gross $179.08 won / $234.66 lost), exits 142 SL · 42 TP · 29 BE, one open SELL (BE armed). Snapshots: 2026-10-31 `$255.12` / 158 / 31W-127L; 2026-10-28 `$276.91` / 141 / 29W-112L; 2026-10-23 `$287.59` / 106 / 22W-84L; 2026-10-19 `$295.90` / 85 / 19W-66L. That is −18.5% over 35 days; the 55 trades since the pre-registration cost a further −$10.70 (PF 0.82). Phase 1 and 1c remain FAIL; nothing here changes that.
 - This is a **loss-making paper book**, which is the expected result of running a shape that failed its gate. Do not read 106 trades as evidence.
 - **2026-11-11 published snapshot (gold):** balance **`$228.68`**, **103 closed** in the current (post-2026-10-04-reset) book, 24 state wins / 79 non-wins (13 of them zero-P&L BE exits), PF **0.868** (gross $469.94 won / $541.26 lost) over those 103 exits, 1 weekend exit, no open position, `paper_account.json` updated 2026-11-10 19:47:14 UTC. `tools/check_data.py`: **0 fail / 0 warn** on both books. Unchanged verdict: LIVE no-go, and the 2026-10-28 audit's conclusions (PF 0.855 then) still stand as a *dated* measurement, not as today's number.
@@ -85,6 +88,7 @@ run `python3 btc/server_check.py` on the box (see `btc/HANDOFF.md`).
 
 | Date | What |
 |---|---|
+| 2026-11-23 | **Reviewed both active execution phases from published data only; neither phase advanced and LIVE remains NO-GO.** Gold: phase 1 (`breakout-b-protocol`) stays `blocked` — the BREAKOUT-B v2 TRAIN reservation opened today (2026-11-23) but stays sealed; OOS is Jan 4 → Feb 1 (exclusive); collection happens on `scalping` only after 2027-02-01 (`RUNBOOK.md`), hashes pending, no sweep. BTC: phase 1 (`btc-hypothesis`) stays `active` and is still not executable from a checkout — the XM H1 pull and freeze manifest are pending on `scalping` (`python3 btc/freeze.py --status` prints `PENDING`); nothing was pulled, frozen or inspected. Books since the 2026-11-17 review: gold **$280.16** / 129 closed / 34W-95L, +7 exits, **+$63.03**, one open BUY, PF 0.972; BTC **$243.47** / 277 closed / 57W-220L, +28 exits, **−$17.41**, PF 0.843. Published heartbeat (2026-11-23T10:00:37Z): gold `ok` (0.2 min), **BTC `stale` (≈439 min)** — box check recommended before the freeze. `tools/check_data.py` 0 fail / 0 warn; smoke gate 22/22 (with the project venv; bare `python3` lacks pandas/rpyc/fastapi/httpx and reports the 3 import checks + 4 skips as failures, unchanged from a pristine checkout). Plans re-reviewed and re-versioned (`plans/gold.json` v2026-11-23, `plans/btc.json` v2026-11-23) — verdict text refreshed to published state; no phase status, `next`, gate or hard rule changed. Snapshot counts above. |
 | 2026-11-19 | Gold BREAKOUT-B v2 locks 54 cells, exit precedence and one TRAIN-only winner. Prospective TRAIN starts Nov 23; OOS is Jan 4 to Feb 1 (exclusive). Hashes pending; phase 1 has not passed. No sweep, runtime change or LIVE approval. See `docs/research_plan_breakout_2026-10-24.md` and `plans/gold.json`. |
 | 2026-11-17 | Reviewed both active execution phases from published data only. Gold protocol and genuinely unseen hashed data remain unresolved; BTC freeze is PENDING in this checkout and requires `scalping`. Neither phase advanced and LIVE remains NO-GO. Ledger integrity 0 fail / 0 warn; snapshot counts above. See `plans/gold.json`, `plans/btc.json`, `docs/btc_readiness_2026-11-11.md` and `RUNBOOK.md`. |
 | 2026-10-07 | Docs consolidated. Full handoffs moved to `docs/archive/`. No runtime path changed. |
