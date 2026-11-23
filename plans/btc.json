@@ -6,10 +6,10 @@
   "version": "2026-11-23",
   "reviewed": "2026-11-23",
   "verdict": "NO-GO",
-  "verdict_reason": "No validated strategy. Phase 1 (M5 RSI pullback) failed cold OOS at PF 0.75 and Phase 1c (H1 Donchian) failed at PF 0.96, so the running book is an observation feed: 277 closed / $243.47 (PF 0.843) at 2026-11-23 02:41:54 UTC, against $300 on 2026-10-07. Those trades are not evidence for any successor. The 2026-10-31 screen of three further families (36 proxy runs, proxy only) found one candidate with a gross edge in every era; it is pre-registered as BTC-ORB-EU-H1. Its reserved window was frozen on 2026-11-23 (sha256 e1bc65a2…0f57f6, cutoff < 2024-06-25 22:00:00, results_inspected=false); no XM result has been read yet.",
+  "verdict_reason": "No validated strategy. Phase 1 (M5 RSI pullback) failed cold OOS at PF 0.75, Phase 1c (H1 Donchian) failed at PF 0.96, and Phase 2 (H1 European ORB) failed on TRAIN (all 6 cells grossR < costR, net negative, PF 0.69-0.94 on real XM spreads; docs/btc_orb_result_2026-11-23.md). Cold OOS was preserved and not inspected. The running book is an observation feed: 277 closed / $243.47 (PF 0.843). LIVE remains NO-GO.",
   "mode_expected": "FORWARD_TEST",
-  "next": "btc-hypothesis-test",
-  "summary": "The pre-2024-06-25 XM window is frozen (2026-11-23, sha256 e1bc65a2…0f57f6, results_inspected=false). Everything downstream — TRAIN-only selection first, then exactly one look at the cold OOS — waits on phase 2. Every parameter in btc/config.py is still a gold-derived placeholder.",
+  "next": "btc-recon",
+  "summary": "Phase 2 (btc-hypothesis-test) closed as FAIL on 2026-11-23: all 6 pre-registered ORB cells failed TRAIN eligibility (gross edge wiped out by XM spreads). Cold OOS uninspected. Next active focus is btc-recon.",
   "pre_registration": {
     "id": "BTC-ORB-EU-H1",
     "doc": "docs/btc_hypothesis_orb_h1_2026-10-31.md",
@@ -107,9 +107,9 @@
     {
       "id": "btc-hypothesis-test",
       "order": 2,
-      "status": "active",
+      "status": "done",
       "title": "Train-select once, freeze, cold OOS",
-      "window": "1-2 weeks after the freeze (frozen 2026-11-23); TRAIN-only screen first, one cold-OOS read after the winner is frozen",
+      "window": "CLOSED 2026-11-23: evaluated on TRAIN (13,119 bars), all 6 cells failed (grossR < costR, PF 0.69-0.94). Cold OOS preserved.",
       "goal": "Accept or reject the new shape on its own reserved window.",
       "steps": [
         "Screen on TRAIN only with btc/edge_screen.py --family orb, select by the pre-registered statistic (mean net R, TRAIN n >= 80, grossR > costR), freeze the winner.",
@@ -128,9 +128,10 @@
       "sources": [
         "docs/btc_phase1c_result_2026-10-07.md",
         "btc/HANDOFF.md",
-        "docs/btc_hypothesis_orb_h1_2026-10-31.md"
+        "docs/btc_hypothesis_orb_h1_2026-10-31.md",
+        "docs/btc_orb_result_2026-11-23.md"
       ],
-      "evidence": "The dated report and the STATUS decision row."
+      "evidence": "CLOSED (FAIL) 2026-11-23: docs/btc_orb_result_2026-11-23.md. All 6 cells failed TRAIN eligibility (gross edge insufficient to cover XM spread; net -$35 to -$267, PF 0.69-0.94). No winner selected; cold OOS was not read (results_inspected remains false). Hypothesis D rejected."
     },
     {
       "id": "btc-parameters",
