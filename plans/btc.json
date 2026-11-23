@@ -6,10 +6,10 @@
   "version": "2026-11-23",
   "reviewed": "2026-11-23",
   "verdict": "NO-GO",
-  "verdict_reason": "No validated strategy. Phase 1 (M5 RSI pullback) failed cold OOS at PF 0.75 and Phase 1c (H1 Donchian) failed at PF 0.96, so the running book is an observation feed: 277 closed / $243.47 (PF 0.843) at 2026-11-23 02:41:54 UTC, against $300 on 2026-10-07. Those trades are not evidence for any successor. The 2026-10-31 screen of three further families (36 proxy runs, proxy only) found one candidate with a gross edge in every era; it is pre-registered as BTC-ORB-EU-H1, has no XM result, and its reserved window is still unfrozen (python3 btc/freeze.py --status).",
+  "verdict_reason": "No validated strategy. Phase 1 (M5 RSI pullback) failed cold OOS at PF 0.75 and Phase 1c (H1 Donchian) failed at PF 0.96, so the running book is an observation feed: 277 closed / $243.47 (PF 0.843) at 2026-11-23 02:41:54 UTC, against $300 on 2026-10-07. Those trades are not evidence for any successor. The 2026-10-31 screen of three further families (36 proxy runs, proxy only) found one candidate with a gross edge in every era; it is pre-registered as BTC-ORB-EU-H1. Its reserved window was frozen on 2026-11-23 (sha256 e1bc65a2…0f57f6, cutoff < 2024-06-25 22:00:00, results_inspected=false); no XM result has been read yet.",
   "mode_expected": "FORWARD_TEST",
-  "next": "btc-hypothesis",
-  "summary": "Everything downstream waits on the BTC-ORB-EU-H1 pre-registration being frozen: the pre-2024-06-25 XM window is reserved, the freeze manifest is still pending on scalping, and no result has been read. Every parameter in btc/config.py is still a gold-derived placeholder.",
+  "next": "btc-hypothesis-test",
+  "summary": "The pre-2024-06-25 XM window is frozen (2026-11-23, sha256 e1bc65a2…0f57f6, results_inspected=false). Everything downstream — TRAIN-only selection first, then exactly one look at the cold OOS — waits on phase 2. Every parameter in btc/config.py is still a gold-derived placeholder.",
   "pre_registration": {
     "id": "BTC-ORB-EU-H1",
     "doc": "docs/btc_hypothesis_orb_h1_2026-10-31.md",
@@ -37,8 +37,8 @@
       "manifest": "btc/manifests/btc_orb_eu_h1_2026-10-31.json",
       "csv": "data/BTCUSD_H1_pre2024.csv",
       "phase": "btc-hypothesis",
-      "state": "pending",
-      "raw_sha256": null,
+      "state": "frozen",
+      "raw_sha256": "e1bc65a2f680d69dc1a2576b04dce01eeb7ce0b476afd2fa777f1ef34b0f57f6",
       "status_command": "python3 btc/freeze.py --status"
     },
     "results_inspected": false,
@@ -73,16 +73,16 @@
     {
       "id": "btc-hypothesis",
       "order": 1,
-      "status": "active",
+      "status": "done",
       "title": "Pre-register a new BTC hypothesis on untouched bars",
-      "window": "Blocked in this checkout: broker-side pull and freeze still required; no sweep.",
+      "window": "DONE 2026-11-23: manifest committed on scalping (85037a1) and pushed to origin/main (d4daf9d); no sweep has run.",
       "goal": "Freeze the pre-registered BTC-ORB-EU-H1 protocol on the only XM era this repo has never read, without inspecting a single result.",
       "steps": [
         "DONE 2026-10-31: screened three new families on proxy bars first (btc/session_screen.py, 3 families x 6 cells x 2 fill modes) and pre-registered the one that clears gross > cost in every era - docs/btc_hypothesis_orb_h1_2026-10-31.md.",
-        "Pull 44,000 XM H1 bars (btc/recon.py) and freeze them with btc/freeze.py: cutoff 2024-06-25 22:00, 60/40 split, 200-bar embargo. Commit the manifest BEFORE any sweep.",
-        "Reconcile the record: python3 btc/freeze.py --status must print FROZEN with the same sha256 the manifest and the plan carry - run it on scalping right after the freeze, and again before any sweep.",
-        "Confirm the gate in the doc is unchanged: net > 0, PF >= 1.2, n >= 60 cold OOS, gross > cost, plus the half-spread slippage stress - and one look at the OOS only.",
-        "Record the frozen sha256 in STATUS and in pre_registration.freeze (state=frozen, raw_sha256, phase=btc-hypothesis), then mark this phase done and move `next` to btc-hypothesis-test."
+        "DONE 2026-11-23: pulled 44,000 XM H1 bars on scalping (btc/recon.py) and froze them with btc/freeze.py: cutoff 2024-06-25 22:00, 60/40 split, 200-bar embargo. Manifest committed BEFORE any sweep (85037a1): raw sha256 e1bc65a2f680d69dc1a2576b04dce01eeb7ce0b476afd2fa777f1ef34b0f57f6, train 13,119 bars 2021-12-09 10:00 .. 2023-06-27 10:00, cold OOS 8,547 bars 2023-07-05 19:00 .. 2024-06-25 21:00, integrity 0 dups / 0 out-of-order / 17 gaps / no missing UTC hours, results_inspected=false.",
+        "DONE 2026-11-23: reconciled the record - plans/btc.json pre_registration.freeze now carries state=frozen + the sha256; python3 btc/freeze.py --status prints FROZEN.",
+        "DONE 2026-11-23: gate confirmed unchanged - docs/btc_hypothesis_orb_h1_2026-10-31.md §6 still reads net > 0, PF >= 1.2, n >= 60 on cold OOS, gross R > cost R, plus the half-spread slippage stress; the doc was last touched at 432ada0 (pre-registration), §3 protocol and §6 gate are verbatim.",
+        "DONE 2026-11-23: frozen sha256 recorded in STATUS.md and in pre_registration.freeze (state=frozen, raw_sha256, phase=btc-hypothesis); this phase marked done and `next` moved to btc-hypothesis-test."
       ],
       "exit_gate": "A committed pre-registration with fresh hashes and boundaries, and no result inspected yet.",
       "blocked_by": [],
@@ -102,14 +102,14 @@
         "btc/freeze.py",
         "docs/btc_readiness_2026-11-11.md"
       ],
-      "evidence": "The committed pre-registration plus btc/manifests/btc_orb_eu_h1_2026-10-31.json with state=frozen and results_inspected=false, `btc/freeze.py --status` printing FROZEN, the STATUS row, and pre_registration.freeze updated to state=frozen with the sha256."
+      "evidence": "SATISFIED 2026-11-23: committed pre-registration (docs/btc_hypothesis_orb_h1_2026-10-31.md, freeze recorded in §5.3) plus btc/manifests/btc_orb_eu_h1_2026-10-31.json with state=frozen and results_inspected=false; `btc/freeze.py --status` prints FROZEN; STATUS.md changelog row; pre_registration.freeze updated to state=frozen with raw_sha256 e1bc65a2f680d69dc1a2576b04dce01eeb7ce0b476afd2fa777f1ef34b0f57f6. The cold OOS is reserved; one look only, in phase 2."
     },
     {
       "id": "btc-hypothesis-test",
       "order": 2,
-      "status": "blocked",
+      "status": "active",
       "title": "Train-select once, freeze, cold OOS",
-      "window": "1-2 weeks after the pre-registration",
+      "window": "1-2 weeks after the freeze (frozen 2026-11-23); TRAIN-only screen first, one cold-OOS read after the winner is frozen",
       "goal": "Accept or reject the new shape on its own reserved window.",
       "steps": [
         "Screen on TRAIN only with btc/edge_screen.py --family orb, select by the pre-registered statistic (mean net R, TRAIN n >= 80, grossR > costR), freeze the winner.",

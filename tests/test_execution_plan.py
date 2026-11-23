@@ -190,7 +190,13 @@ class RunnerTests(unittest.TestCase):
         plan = ep.load("btc", self.root)
         state = ep.paper_state(plan, self.root)
         text = ep.render_brief(plan, state, "FORWARD_TEST")
-        self.assertIn("NEXT PHASE  1. Pre-register a new BTC hypothesis", text)
+        # The brief must name whatever phase the committed plan currently
+        # points 'next' at. This used to pin "NEXT PHASE  1" and went red on
+        # 2026-11-23 when phase 1 closed — the same stale-pin class of bug as
+        # the 2026-10-31 clock-dependent staleness fixture (coverage kept:
+        # the assertion still fails if the brief prints the wrong phase).
+        nxt = ep.phase_by_id(plan, plan["next"])
+        self.assertIn(f"NEXT PHASE  {nxt['order']}. {nxt['title']}", text)
         self.assertIn("exit gate", text)
         self.assertIn("HARD RULES", text)
         self.assertIn("Never change TRADING_MODE", text)
