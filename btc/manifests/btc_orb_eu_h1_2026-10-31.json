@@ -1,0 +1,75 @@
+{
+  "tool": "btc/freeze.py",
+  "tool_version": "1.1",
+  "created_at": "2026-11-23T10:47:11Z",
+  "hypothesis": "BTC-ORB-EU-H1",
+  "pre_registration": "docs/btc_hypothesis_orb_h1_2026-10-31.md",
+  "source_csv": "/root/scalper/data/BTCUSD_H1_pre2024.csv",
+  "source_bytes": 2911398,
+  "raw_sha256": "e1bc65a2f680d69dc1a2576b04dce01eeb7ce0b476afd2fa777f1ef34b0f57f6",
+  "raw_bars": 44000,
+  "raw_first_bar": "2021-10-12 18:00:00",
+  "raw_last_bar": "2026-11-23 12:00:00",
+  "timeframe": "H1",
+  "cutoff_exclusive": "2024-06-25 22:00:00",
+  "inspected_era_start": "2024-06-25 22:00:00",
+  "inspected_sha256_refused": [
+    "f73054611e9b27a589b55c63f4a9a4f734ac9c423c1f528d1b6c344bc023ab21"
+  ],
+  "protocol": {
+    "warmup_bars": 1000,
+    "train_frac": 0.6,
+    "embargo_bars": 200,
+    "train": "earliest train_frac of the pre-cutoff bars, starting after the warm-up",
+    "oos": "everything after the embargo; read exactly once"
+  },
+  "segments": {
+    "train": {
+      "first_bar": "2021-12-09 10:00:00",
+      "last_bar": "2023-06-27 10:00:00",
+      "bars": 13119,
+      "days": 565.0,
+      "row_range": [
+        999,
+        14117
+      ]
+    },
+    "embargo": {
+      "first_bar": "2023-06-27 11:00:00",
+      "last_bar": "2023-07-05 18:00:00",
+      "bars": 200,
+      "days": 8.29,
+      "row_range": [
+        14118,
+        14317
+      ]
+    },
+    "cold_oos": {
+      "first_bar": "2023-07-05 19:00:00",
+      "last_bar": "2024-06-25 21:00:00",
+      "bars": 8547,
+      "days": 356.08,
+      "row_range": [
+        14318,
+        22864
+      ]
+    }
+  },
+  "integrity": {
+    "duplicate_timestamps": 0,
+    "non_monotonic": 0,
+    "gaps_over_1.5x_tf": 17,
+    "largest_gaps_minutes": [
+      3240.0,
+      3240.0,
+      3000.0,
+      2940.0,
+      2940.0
+    ],
+    "utc_hours_present": 24,
+    "utc_hours_missing": []
+  },
+  "state": "frozen",
+  "results_inspected": false,
+  "problems": []
+}
