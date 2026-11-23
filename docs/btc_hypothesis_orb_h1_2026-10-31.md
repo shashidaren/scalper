@@ -1,14 +1,13 @@
 # BTC hypothesis D — pre-registration: European opening-range breakout on H1
 
-**Hypothesis ID:** `BTC-ORB-EU-H1` · **Date locked:** 2026-10-31 · **Status:** PRE-REGISTERED, DATA NOT YET PULLED
+**Hypothesis ID:** `BTC-ORB-EU-H1` · **Date locked:** 2026-10-31 · **Status:** PRE-REGISTERED — window FROZEN 2026-11-23 on `scalping` (cold OOS unread; one read in phase 2)
 
 **Nothing trades differently because of this document.** `TRADING_MODE` stays
 `FORWARD_TEST`, `BTC_STRATEGY` stays `scalp`, `btc/config.py` is untouched, and
 no service unit is changed. This is a research protocol: it fixes the shape, the
 grid, the split and the gate *before* one bar of the deciding data is read. The
-untouched XM window is reserved and the hashes are still PENDING (§5.3) because
-this checkout cannot reach the MT5 bridge — one command on `scalping` fills them
-(`btc/freeze.py`, §5.2).
+untouched XM window was pulled and frozen on `scalping` on 2026-11-23 (§5.3);
+the cold OOS has not been read and is reserved for one look (§6).
 
 ---
 
@@ -282,16 +281,19 @@ fails. Commit the manifest (`data/*.csv` stays off git, the manifest does not).
 
 | field | value |
 |---|---|
-| raw sha256 of `data/BTCUSD_H1_pre2024.csv` | **PENDING — `btc/freeze.py` on `scalping`** |
-| raw bars / span | PENDING (expected ≈44,000 bars, ≈2021-10 → 2026-10) |
-| cutoff enforced | `< 2024-06-25 22:00:00` |
-| TRAIN first/last bar + bars | PENDING (expected ≈13,400 bars, ≈560 days) |
-| embargo | 200 bars after TRAIN, excluded from both segments |
-| cold-OOS first/last bar + bars | PENDING (expected ≈8,800 bars, ≈365 days) |
-| integrity | duplicates, out-of-order, gaps > 1.5 × H1, missing UTC hours |
+| raw sha256 of `data/BTCUSD_H1_pre2024.csv` | `e1bc65a2f680d69dc1a2576b04dce01eeb7ce0b476afd2fa777f1ef34b0f57f6` (manifest committed on `scalping` as `85037a1`, pushed to `origin/main` in `d4daf9d`; the sha covers the whole 44,000-bar pull — only pre-cutoff bars are used) |
+| raw bars / span | 44,000 bars · 2021-10-12 18:00:00 → 2026-11-23 12:00:00 |
+| cutoff enforced | `< 2024-06-25 22:00:00` (equals the inspected-era start; refused if later) |
+| TRAIN first/last bar + bars | 2021-12-09 10:00:00 → 2023-06-27 10:00:00 · **13,119 bars** (565 d) · rows 999–14117 |
+| embargo | 200 bars after TRAIN (2023-06-27 11:00:00 → 2023-07-05 18:00:00), excluded from both |
+| cold-OOS first/last bar + bars | 2023-07-05 19:00:00 → 2024-06-25 21:00:00 · **8,547 bars** (356 d) · rows 14318–22864 |
+| integrity | 0 duplicates · 0 out-of-order · 17 gaps > 1.5× H1 (largest 3,240 min) · 0 missing UTC hours |
 
-**Phase 1 is not done until this manifest is committed** (`state: "frozen"`,
-`results_inspected: false`) with no sweep run against it.
+**Freeze recorded 2026-11-23** (`state: "frozen"`, `results_inspected: false`,
+problems `[]`): manifest committed on `scalping` (`85037a1`), pushed to
+`origin/main` (`d4daf9d`); `plans/btc.json` records `state: "frozen"` with the
+sha256 and `python3 btc/freeze.py --status` prints `FROZEN`. No sweep has been
+run. The gate (§6) is unchanged.
 
 ### 5.4 Splits and embargo
 
@@ -426,3 +428,4 @@ broken screen or freeze fails the gate rather than a research session.
 | date | event |
 |---|---|
 | 2026-10-31 | `BTC-ORB-EU-H1` pre-registered. Screen (3 families × 6 cells × 2 fills) rejects `momentum` and close-entry `orb`, keeps stop-entry `orb` and `pdr`; `orb` chosen. Grid 6 cells, gate fixed, untouched pre-2024-06-25 window reserved, freeze manifest **pending** on `scalping`. No config, mode, unit or strategy parameter changed. |
+| 2026-11-23 | Freeze executed on `scalping` and committed (`85037a1`, manifest `btc/manifests/btc_orb_eu_h1_2026-10-31.json`, sha256 `e1bc65a2…0f57f6`, 44,000 raw bars 2021-10-12 → 2026-11-23, cutoff `< 2024-06-25 22:00:00`, TRAIN 13,119 / embargo 200 / cold OOS 8,547, integrity clean, `results_inspected: false`). No sweep run; no config, mode, unit or strategy parameter changed. Protocol §3 and gate §6 unchanged. |
